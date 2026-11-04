@@ -1,0 +1,10 @@
+{
+  "template_id": "annual_financial_review",
+  "template_version": "1.0.0",
+  "entity_id": "00000000-0000-4000-8000-000000000001",
+  "report_year": 2025,
+  "research_as_of": "2026-04-30T23:59:59+08:00",
+  "as_of_mode": "public_as_of",
+  "purpose": "trial_research",
+  "locale": "zh-CN"
+}

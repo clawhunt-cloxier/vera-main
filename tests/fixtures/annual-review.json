@@ -1,0 +1,76 @@
+{
+  "fixture_id": "annual-review-demo-v1",
+  "synthetic": true,
+  "production_eligible": false,
+  "values_cny": {
+    "revenue": [
+      "900000000",
+      "1200000000"
+    ],
+    "cost": [
+      "648000000",
+      "828000000"
+    ],
+    "net_profit": [
+      "100000000",
+      "120000000"
+    ],
+    "parent_profit": [
+      "90000000",
+      "108000000"
+    ],
+    "operating_cash": [
+      "70000000",
+      "96000000"
+    ],
+    "assets": [
+      "1200000000",
+      "1500000000"
+    ],
+    "liabilities": [
+      "540000000",
+      "600000000"
+    ]
+  },
+  "expected": {
+    "revenue_yoy_percent": "33.33",
+    "gross_margin_percent": [
+      "28.00",
+      "31.00"
+    ],
+    "gross_margin_change_pp": "3.00",
+    "cash_profit_gap": [
+      "-30000000",
+      "-24000000"
+    ],
+    "liability_asset_percent": [
+      "45.00",
+      "40.00"
+    ]
+  },
+  "variants": [
+    {
+      "id": "complete",
+      "missing": [],
+      "expected_status": "COMPLETED",
+      "result_kind": "full"
+    },
+    {
+      "id": "optional_missing",
+      "missing": [
+        "O01"
+      ],
+      "expected_status": "COMPLETED",
+      "result_kind": "limited"
+    },
+    {
+      "id": "cash_missing",
+      "missing": [
+        "R04"
+      ],
+      "recovery_exhausted": true,
+      "expected_status": "ABSTAINED",
+      "result_kind": null
+    }
+  ]
+}

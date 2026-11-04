@@ -1,0 +1,53 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": "p0-1"
+    },
+    "task_deadline_seconds": {
+      "const": 600
+    },
+    "max_model_attempts": {
+      "const": 8
+    },
+    "input_token_limit": {
+      "const": 60000
+    },
+    "output_token_limit": {
+      "const": 12000
+    },
+    "task_cost_limit_usd": {
+      "const": "0.25"
+    },
+    "platform_model_concurrency": {
+      "const": 4
+    },
+    "platform_tasks": {
+      "const": 10
+    },
+    "user_active_tasks": {
+      "const": 1
+    },
+    "user_queued_tasks": {
+      "const": 2
+    },
+    "user_daily_tasks": {
+      "const": 5
+    }
+  },
+  "required": [
+    "version",
+    "task_deadline_seconds",
+    "max_model_attempts",
+    "input_token_limit",
+    "output_token_limit",
+    "task_cost_limit_usd",
+    "platform_model_concurrency",
+    "platform_tasks",
+    "user_active_tasks",
+    "user_queued_tasks",
+    "user_daily_tasks"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

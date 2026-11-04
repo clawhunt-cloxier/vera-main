@@ -1,0 +1,13 @@
+{
+  "version": "p0-1",
+  "task_deadline_seconds": 600,
+  "max_model_attempts": 8,
+  "input_token_limit": 60000,
+  "output_token_limit": 12000,
+  "task_cost_limit_usd": "0.25",
+  "platform_model_concurrency": 4,
+  "platform_tasks": 10,
+  "user_active_tasks": 1,
+  "user_queued_tasks": 2,
+  "user_daily_tasks": 5
+}
