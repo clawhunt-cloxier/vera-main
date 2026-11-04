@@ -16,7 +16,7 @@ for name in ('create-task','policy'):
     invalid=dict(value);invalid['tenant_id']='client-controlled'
     assert list(validator.iter_errors(invalid)), 'unknown fields must be rejected'
     if name=='create-task':
-        for field,bad in [('purpose','internal_research'),('report_year',1999),('research_as_of','not-a-date'),('entity_id','not-a-uuid')]:
+        for field,bad in [('purpose','internal_research'),('research_question',''),('research_as_of','not-a-date'),('entity_id','not-a-uuid')]:
             invalid=dict(value);invalid[field]=bad
             assert list(validator.iter_errors(invalid)), field
 assert api['components']['schemas']['CreateTask']=={k:v for k,v in json.loads((root/'contracts/schemas/create-task.schema.json').read_text()).items() if k!='$schema'}

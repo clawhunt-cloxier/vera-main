@@ -29,3 +29,5 @@
 - [Claude Code 项目记忆](https://code.claude.com/docs/en/memory)：CLAUDE.md 导入，实际客户端确认加载；本仓库不依赖私有会话记忆。
 - [GitHub Spec Kit](https://github.com/github/spec-kit)：借鉴规格、计划、任务可追溯；不安装另一套自动审批流程。
 - [Go 发布策略](https://go.dev/doc/devel/release)、[Node 发布周期](https://nodejs.org/en/about/previous-releases)：工具链冻结和维护期复核。
+
+当前产品范围与通用报告说明见 [研究范围](RESEARCH_SCOPE.md)。

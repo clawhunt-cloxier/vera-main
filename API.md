@@ -20,7 +20,7 @@
 | GET | /auth/login、/auth/callback | 登录重定向与回调；state/nonce/PKCE、防开放重定向 |
 | POST | /auth/logout | 销毁本地 session，CSRF |
 | GET | /api/v1/me | 用户、workspace、CSRF token、配额摘要 |
-| GET | /api/v1/entities | q 搜索白名单主体；按名称/代码返回稳定 ID |
+| GET | /api/v1/entities | q 搜索数据源覆盖主体；支持 kind 筛选 stock/industry/other，按名称/代码返回稳定 ID、类别及能力状态 |
 | POST/GET | /api/v1/research-tasks | 幂等创建202 / 分页列表 |
 | GET | /api/v1/research-tasks/{id} | 阶段、revision、reason、可选 report_ref；无未验证正文 |
 | POST | /api/v1/research-tasks/{id}/cancel | 校验 expected_revision；202取消处理中/200已取消/409已完成 |

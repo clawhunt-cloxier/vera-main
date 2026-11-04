@@ -9,8 +9,8 @@
 | users / workspaces / memberships | issuer+subject唯一；首版每用户私人workspace；role来自服务端 | identity |
 | sessions | hash(session_id)、actor、workspace、expires_at、csrf_hash、revoked_at | identity |
 | source_products / licenses | source/product、原始发布方、用途、有效期、配置版本、secret引用 | sources |
-| entities / entity_aliases | entity_id；市场+代码+有效期；行业白名单版本 | governance |
-| research_tasks | workspace/id、template/version、period/as_of、status、revision、epoch、deadline、预算、report_ref | research |
+| entities / entity_aliases | entity_id；市场+代码+有效期；kind(stock/industry/other)、asset_class、行业分类体系/版本、数据覆盖能力 | governance |
+| research_tasks | workspace/id、template/version、entity_id、research_question、time_range/as_of、status、revision、epoch、deadline、预算、report_ref | research |
 | task_events / outbox | event_id唯一；task+sequence唯一；expected_revision；租约、attempt、not_before | research |
 | raw_objects / evidence_versions | source、不可变对象键、sha256、locator、origin_group、许可/治理版本 | governance |
 | task_datasets / dataset_items | workspace/task/dataset_version唯一；manifest_hash；每条选择理由 | governance |
