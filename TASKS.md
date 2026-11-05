@@ -30,3 +30,7 @@
 T000/T001：2026-11-04 20:26 UTC 完成，本地检查证据及范围限制见 [初始化交接](docs/handoffs/2026-11-05-bootstrap-codex.md)。远端 CI 运行状态以 GitHub Actions 为准，不与本地检查混记。
 
 范围修订（REVIEW）：Codex / agent/codex/p0-research-scope，根规范、契约与文案；见 [范围交接](docs/handoffs/2026-11-05-research-scope-codex.md)。T002–T009 按 ADR-0002 执行，年度点评不是唯一研究入口。
+
+## 分支维护
+
+日常领取与集成真值在 dev，任务 PR 目标 dev。分支规范初始化：Codex / agent/codex/branch-policy；范围为协作规范与 CI，详见 docs/BRANCHING.md。现有范围调整分支待以 dev 为目标审查集成。

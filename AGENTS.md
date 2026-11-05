@@ -18,7 +18,7 @@
 
 ## 协作与变更
 
-- 每个 Agent 使用独立分支与 worktree，禁止同时写同一工作树；分支 `agent/<actor>/<task-id>-<slug>`。
+- 日常从 origin/dev 建任务分支，PR 目标 dev；每个 Agent 使用独立分支与 worktree，禁止同时写同一工作树；分支 `agent/<actor>/<task-id>-<slug>`。
 - 公共契约、迁移、根规范由同一时刻一个任务修改；先在任务记录声明。异步角色无需等待用户对已授权常规工作逐步确认。
 - 不 force push、不重置他人提交、不覆盖未提交改动。PR 是集成单元；本次空仓库初始化已获直接推送授权，后续按 CONTRIBUTING.md。
 - 业务变更更新规范、契约和相关验收，改接口不只改实现。重大偏离新增 ADR。
@@ -33,3 +33,5 @@
 - 持续任务在上下文切换前记录 commit、已做/未做、下一步、失败与外部依赖；不把隐藏会话记忆作为唯一状态。
 
 细则：[CONTRIBUTING.md](CONTRIBUTING.md)、[TESTING.md](TESTING.md)、[docs/COLLABORATION.md](docs/COLLABORATION.md)。
+
+分支和发布规则：[docs/BRANCHING.md](docs/BRANCHING.md)。main 不直接接受普通任务 PR；共享账号不能伪造独立审批。
