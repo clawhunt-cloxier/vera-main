@@ -33,3 +33,7 @@ SPEC V01–V09、TESTING结果、镜像摘要/依赖锁、迁移兼容、worker�
 T009 增加版本标签发布：以通过 CI 的不可变 commit 构建 API/Worker/Web 镜像，推送 GHCR，记录镜像摘要、SBOM、迁移与工作流版本。发布环境使用独立凭证和部署锁；推广同一摘要，不在生产重新构建。依次执行备份检查、兼容迁移、Worker、API/Web、readiness 与冒烟；失败停止推广并回滚兼容应用版本。数据库删除列与旧 Worker 退役另行分阶段执行。使用 GitHub 环境受控发布，具体操作者权限在部署任务中配置；这不是研究业务审批。
 
 后续多实例部署先扩展无状态 API 与 Worker，并把限额、租约和公平调度保留在共享数据库/Temporal。API 不依赖本机 session；对象存储不依赖容器磁盘。达到实测容量瓶颈再迁移托管数据库/Temporal、缓存或 Kubernetes，沿用相同逻辑契约，避免首版同时承担基础平台建设。
+
+## 发布分支
+
+遵循 [分支规范](BRANCHING.md)：任务先合入 dev，候选版本通过回归后经发布 PR 合入 main，使用普通 merge commit。上线绑定已验证的 commit 与镜像摘要；main 合并不自动部署。修复和发布记录同步回 dev。

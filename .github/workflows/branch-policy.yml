@@ -1,0 +1,33 @@
+name: Branch policy
+on:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  branch-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Validate integration route
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$BASE" == main ]]; then
+            [[ "$HEAD_REPO" == "$BASE_REPO" ]] || { echo 'Release PR must come from this repository'; exit 1; }
+            [[ "$HEAD" == dev || "$HEAD" == hotfix/?* ]] || { echo 'main accepts dev or hotfix/* only'; exit 1; }
+          elif [[ "$BASE" == dev ]]; then
+            case "$HEAD" in
+              agent/?*|feat/?*|fix/?*|docs/?*|hotfix/?*) ;;
+              main) [[ "$HEAD_REPO" == "$BASE_REPO" ]] ;;
+              *) echo 'dev accepts task branches or main synchronization'; exit 1 ;;
+            esac
+          else
+            exit 1
+          fi

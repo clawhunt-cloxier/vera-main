@@ -32,3 +32,5 @@ Vera 是面向一线基金经理与散户投资者的金融研究 Agent 试用�
 | [docs/research/README.md](docs/research/README.md) | 完整历史研究、论文、模型实验与后续扩展设计 |
 
 首版优先完成框架与基本体验；合规适用性核查放在开发后期。在线研究始终自动执行，不设置人员审核状态。未采购的数据许可、模型密钥与域名不能由 Agent 假定已经具备，见 [上线依赖](docs/RELEASE.md)。
+
+开发从 origin/dev 开始，main 为稳定发布线，见 [分支规范](docs/BRANCHING.md)。
