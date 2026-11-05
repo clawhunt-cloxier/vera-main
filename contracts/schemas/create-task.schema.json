@@ -3,7 +3,7 @@
   "additionalProperties": false,
   "properties": {
     "template_id": {
-      "const": "annual_financial_review"
+      "const": "general_research"
     },
     "template_version": {
       "const": "1.0.0"
@@ -11,11 +11,6 @@
     "entity_id": {
       "type": "string",
       "format": "uuid"
-    },
-    "report_year": {
-      "type": "integer",
-      "minimum": 2000,
-      "maximum": 2100
     },
     "research_as_of": {
       "type": "string",
@@ -29,17 +24,41 @@
     },
     "locale": {
       "const": "zh-CN"
+    },
+    "research_question": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "time_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date"
+        },
+        "end": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ]
     }
   },
   "required": [
     "template_id",
     "template_version",
     "entity_id",
-    "report_year",
     "research_as_of",
     "as_of_mode",
     "purpose",
-    "locale"
+    "locale",
+    "research_question",
+    "time_range"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

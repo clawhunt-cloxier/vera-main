@@ -7,12 +7,12 @@
 | T000 | 冻结首版规范与协作仓库 | 无 | DONE | Codex / main（授权初始化） | docs、contracts、任务与交接齐全；check-docs |
 | T001 | 可运行Web/API起点与CI | T000 | DONE | Codex / main（授权初始化） | healthz/readyz、React起始页、Go测试、前端构建、CI；不宣称业务完成 |
 | T002 | 数据库/对象存储/Temporal开发环境与基础模型 | T001 | TODO | 未领取 | goose/sqlc、Compose隔离、真实DB集成、RLS/唯一性；DATA_MODEL |
-| T003 | OIDC/会话/私人workspace与主体查询 | T002 | TODO | 未领取 | CSRF/state/nonce、跨账号隔离、Keycloak本地登录；V01 |
-| T004 | 来源接口/治理/冻结数据集/原文定位 | T002 | TODO | 未领取 | fixture先行，EXT-01支持真实接入；DG+MVP缺证/重述；无密钥部分可独立完成 |
+| T003 | OIDC/会话/私人workspace与多类研究对象查询 | T002 | TODO | 未领取 | CSRF/state/nonce、跨账号隔离、Keycloak本地登录；V01 |
+| T004 | 来源接口/治理/冻结数据集/原文定位 | T002 | TODO | 未领取 | fixture先行，EXT-01支持真实接入；DG+通用研究的缺证/修订；无密钥部分可独立完成 |
 | T005 | 公式、模型适配、单研究与独立验证 | T004 | TODO | 未领取 | Decimal、Claim/schema、依据不足/错引；EXT-02真实模型后接入；V03/V04 |
 | T006 | Temporal任务/Outbox/取消/费用/自动交付 | T003,T005 | TODO | 未领取 | 重放、故障窗口、幂等竞争、预算；V05/V06 |
 | T007 | 登录到报告证据与反馈的完整网站 | T003,T006 | TODO | 未领取 | 任务列表/轮询/取消/full/limited/终态、手机布局、Playwright；V07 |
-| T008 | 真实来源模型联调与独立质量回归 | T004,T005,T007 | TODO | 未领取 | EXT-01/02/04，30案例+对抗测试、成本/支持率；V02/V09 |
+| T008 | 真实来源模型联调与独立质量回归 | T004,T005,T007 | TODO | 未领取 | EXT-01/02/04，30个跨标的研究案例+对抗测试、成本/支持率；V02/V09 |
 | T009 | 试用部署、性能、备份恢复与后期上线核查 | T006,T007,T008 | TODO | 未领取 | EXT-03/05、部署锁/迁移/回滚/压测/恢复；V08 |
 
 ## 执行规则
@@ -28,6 +28,8 @@
 ## 本次交接
 
 T000/T001：2026-11-04 20:26 UTC 完成，本地检查证据及范围限制见 [初始化交接](docs/handoffs/2026-11-05-bootstrap-codex.md)。远端 CI 运行状态以 GitHub Actions 为准，不与本地检查混记。
+
+范围修订（REVIEW）：Codex / agent/codex/p0-research-scope，根规范、契约与文案；见 [范围交接](docs/handoffs/2026-11-05-research-scope-codex.md)。T002–T009 按 ADR-0002 执行，年度点评不是唯一研究入口。
 
 ## 分支维护
 

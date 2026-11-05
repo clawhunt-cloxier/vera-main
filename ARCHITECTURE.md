@@ -4,7 +4,7 @@
 
 Go 1.27.3、net/http + chi、pgx/sqlc/goose；PostgreSQL 18、S3 兼容对象存储、Temporal Go SDK。Web 使用 React + TypeScript + Vite + npm lockfile，Node 26.13.0。开发 OIDC 使用 Keycloak；生产使用配置化 OIDC issuer，禁止自建密码实现。Python 3.12 + pypdf 只处理需要的 PDF Activity，不拥有业务写权限。
 
-首版无 Redis、独立向量库、Kafka、通用 Agent 框架或服务间 gRPC 运行依赖。按模板优先结构化 SQL 与原文定位，PostgreSQL 全文检索补充候选；嵌入检索和重排后置。HTTP RPC 之外的短调用首版共进程 Go 接口，拆分时按研究 RPC 规格迁移。
+首版无 Redis、独立向量库、Kafka、通用 Agent 框架或服务间 gRPC 运行依赖。按用户问题与已冻结研究计划优先结构化 SQL 与原文定位，PostgreSQL 全文检索补充候选；嵌入检索和重排后置。HTTP RPC 之外的短调用首版共进程 Go 接口，拆分时按研究 RPC 规格迁移。
 
 部署进程：web 静态文件、Go API、Go Workflow/Activity Worker、Go Outbox；解析活动按需独立 Python worker。业务库与 Temporal 存储逻辑隔离。组件镜像和库的精确版本在 T001/T002/T009 实施时锁定至 lockfile/镜像摘要，禁止生产 latest。
 
@@ -75,3 +75,5 @@ flowchart LR
 | 用户取消 | 先持久化 CANCEL_REQUESTED 与 epoch，异步终止调度并置 CANCELLED；不等待模型返回才撤销交付资格 |
 
 独立验证调用可使用同型号模型，但必须独立提示词与调用，只读候选结论和冻结证据。它不是质量保证；数值、引用存在性、时间/口径和许可仍由确定性规则裁决。首版无需让多个模型重复撰写相同报告。
+
+研究对象、能力登记与通用模板见 [研究范围](docs/RESEARCH_SCOPE.md)。Planner 先根据对象类别和数据覆盖生成有界计划，再进入 PREPARING；行业聚合与财务指标适用性由确定性规则校验。
