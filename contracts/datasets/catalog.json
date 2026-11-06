@@ -1,0 +1,357 @@
+{
+  "version": "1",
+  "description": "Unified dataset field dictionary (DATA_SERVICE §3–4). Envelope fields (record_id, entity_id, published_at, available_at, provider_id, source_tier, ...) are common to every dataset and not repeated here. Monetary values are CNY yuan; ratios are decimal fractions (0.1234 = 12.34%).",
+  "units": {
+    "CNY": "人民币元",
+    "shares": "股",
+    "ratio": "比例，小数表示",
+    "times": "倍",
+    "count": "个数",
+    "index_point": "指数点",
+    "none": "无单位"
+  },
+  "datasets": [
+    {
+      "id": "ref.security",
+      "title": "证券主数据",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["entity_id"],
+      "mvp": true,
+      "fields": [
+        {"name": "security_code", "type": "string", "unit": "none", "required": true, "description": "交易所代码，如 600519.SH"},
+        {"name": "short_name", "type": "string", "unit": "none", "required": true, "description": "证券简称"},
+        {"name": "exchange", "type": "enum", "values": ["SH", "SZ", "BJ", "DEMO"], "unit": "none", "required": true, "description": "交易所；DEMO 仅用于 fixture 演示数据，production 拒绝"},
+        {"name": "board", "type": "enum", "values": ["main", "chinext", "star", "bse"], "unit": "none", "required": true, "description": "板块"},
+        {"name": "list_date", "type": "date", "unit": "none", "required": true, "description": "上市日期"},
+        {"name": "status", "type": "enum", "values": ["listed", "suspended", "st", "delisting", "delisted"], "unit": "none", "required": true, "description": "交易状态"},
+        {"name": "is_financial", "type": "boolean", "unit": "none", "required": true, "description": "是否金融类公司（银行、保险、证券、多元金融），决定财务章节适用性"},
+        {"name": "margin_eligible", "type": "boolean", "unit": "none", "required": true, "description": "当前是否为融资融券标的"},
+        {"name": "total_shares", "type": "decimal", "unit": "shares", "required": true, "description": "总股本"},
+        {"name": "float_shares", "type": "decimal", "unit": "shares", "required": true, "description": "流通股本"}
+      ]
+    },
+    {
+      "id": "ref.industry",
+      "title": "行业分类与成分",
+      "origin": "vendor_derived",
+      "default_tier": "L2",
+      "grain": ["entity_id", "taxonomy", "valid_from"],
+      "mvp": true,
+      "fields": [
+        {"name": "taxonomy", "type": "enum", "values": ["SW2021"], "unit": "none", "required": true, "description": "分类体系与版本"},
+        {"name": "level1_code", "type": "string", "unit": "none", "required": true, "description": "一级行业代码"},
+        {"name": "level1_name", "type": "string", "unit": "none", "required": true, "description": "一级行业名称"},
+        {"name": "level2_code", "type": "string", "unit": "none", "required": true, "description": "二级行业代码"},
+        {"name": "level2_name", "type": "string", "unit": "none", "required": true, "description": "二级行业名称"},
+        {"name": "valid_from", "type": "date", "unit": "none", "required": true, "description": "分类生效日"},
+        {"name": "valid_to", "type": "date", "unit": "none", "required": false, "description": "分类失效日，空表示当前有效"}
+      ]
+    },
+    {
+      "id": "ref.trading_calendar",
+      "title": "交易日历",
+      "origin": "exchange",
+      "default_tier": "L1",
+      "grain": ["trade_date"],
+      "mvp": true,
+      "fields": [
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "日期"},
+        {"name": "is_open", "type": "boolean", "unit": "none", "required": true, "description": "是否交易日"}
+      ]
+    },
+    {
+      "id": "mkt.daily_bar",
+      "title": "个股日线",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["entity_id", "trade_date"],
+      "mvp": true,
+      "fields": [
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "交易日"},
+        {"name": "open", "type": "decimal", "unit": "CNY", "required": true, "description": "开盘价（不复权）"},
+        {"name": "high", "type": "decimal", "unit": "CNY", "required": true, "description": "最高价（不复权）"},
+        {"name": "low", "type": "decimal", "unit": "CNY", "required": true, "description": "最低价（不复权）"},
+        {"name": "close", "type": "decimal", "unit": "CNY", "required": true, "description": "收盘价（不复权）"},
+        {"name": "pre_close", "type": "decimal", "unit": "CNY", "required": true, "description": "前收盘价（除权调整后）"},
+        {"name": "volume", "type": "decimal", "unit": "shares", "required": true, "description": "成交量，股；厂商以手返回时在映射中换算"},
+        {"name": "amount", "type": "decimal", "unit": "CNY", "required": true, "description": "成交额"},
+        {"name": "turnover_rate", "type": "decimal", "unit": "ratio", "required": false, "description": "换手率（基于流通股本）"},
+        {"name": "adj_factor", "type": "decimal", "unit": "none", "required": true, "description": "后复权因子，复权价 = 价格 × 因子"},
+        {"name": "suspended", "type": "boolean", "unit": "none", "required": true, "description": "当日是否停牌；停牌日价格沿用前收、成交为 0"}
+      ]
+    },
+    {
+      "id": "mkt.index_bar",
+      "title": "指数与申万行业指数日线",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["index_code", "trade_date"],
+      "mvp": true,
+      "fields": [
+        {"name": "index_code", "type": "string", "unit": "none", "required": true, "description": "指数代码，如 000300.SH、801010.SI"},
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "交易日"},
+        {"name": "close", "type": "decimal", "unit": "index_point", "required": true, "description": "收盘点位"},
+        {"name": "amount", "type": "decimal", "unit": "CNY", "required": false, "description": "成交额"}
+      ]
+    },
+    {
+      "id": "mkt.valuation_daily",
+      "title": "每日估值",
+      "origin": "vendor_derived",
+      "default_tier": "L2",
+      "grain": ["entity_id", "trade_date"],
+      "mvp": true,
+      "fields": [
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "交易日"},
+        {"name": "total_mv", "type": "decimal", "unit": "CNY", "required": true, "description": "总市值"},
+        {"name": "float_mv", "type": "decimal", "unit": "CNY", "required": true, "description": "流通市值"},
+        {"name": "pe_ttm", "type": "decimal", "unit": "times", "required": false, "description": "市盈率 TTM；亏损时为负值，不置空"},
+        {"name": "pb_mrq", "type": "decimal", "unit": "times", "required": false, "description": "市净率"},
+        {"name": "ps_ttm", "type": "decimal", "unit": "times", "required": false, "description": "市销率 TTM"},
+        {"name": "dividend_yield_ttm", "type": "decimal", "unit": "ratio", "required": false, "description": "股息率 TTM"}
+      ]
+    },
+    {
+      "id": "fin.statement",
+      "title": "财务报表科目（长表）",
+      "origin": "company_filing",
+      "default_tier": "L2",
+      "grain": ["entity_id", "report_period", "report_type", "scope", "item_code", "revision"],
+      "mvp": true,
+      "fields": [
+        {"name": "report_period", "type": "date", "unit": "none", "required": true, "description": "报告期末日，如 2025-12-31"},
+        {"name": "report_type", "type": "enum", "values": ["Q1", "H1", "Q3", "FY"], "unit": "none", "required": true, "description": "报告类型；利润表与现金流量表为年初至报告期末累计值"},
+        {"name": "scope", "type": "enum", "values": ["consolidated", "parent"], "unit": "none", "required": true, "description": "合并或母公司"},
+        {"name": "item_code", "type": "enum_ref", "ref": "statement_items", "unit": "none", "required": true, "description": "科目代码，见 statement_items"},
+        {"name": "value", "type": "decimal", "unit": "CNY", "required": false, "description": "科目金额；未披露为空并附原因"},
+        {"name": "revision", "type": "integer", "unit": "count", "required": true, "description": "更正版本序号，原始披露为 0"},
+        {"name": "filing_id", "type": "string", "unit": "none", "required": true, "description": "对应公告的 doc.announcement 记录 ID"}
+      ]
+    },
+    {
+      "id": "fin.segment",
+      "title": "分部收入",
+      "origin": "company_filing",
+      "default_tier": "L2",
+      "grain": ["entity_id", "report_period", "dimension", "segment_name"],
+      "mvp": true,
+      "fields": [
+        {"name": "report_period", "type": "date", "unit": "none", "required": true, "description": "报告期末日"},
+        {"name": "dimension", "type": "enum", "values": ["product", "industry", "region"], "unit": "none", "required": true, "description": "分部维度"},
+        {"name": "segment_name", "type": "string", "unit": "none", "required": true, "description": "分部名称（披露原文）"},
+        {"name": "revenue", "type": "decimal", "unit": "CNY", "required": true, "description": "分部收入"},
+        {"name": "cost", "type": "decimal", "unit": "CNY", "required": false, "description": "分部成本"},
+        {"name": "gross_margin", "type": "decimal", "unit": "ratio", "required": false, "description": "披露的分部毛利率"}
+      ]
+    },
+    {
+      "id": "doc.announcement",
+      "title": "公告",
+      "origin": "company_filing",
+      "default_tier": "L1",
+      "grain": ["entity_id", "announcement_id"],
+      "mvp": true,
+      "fields": [
+        {"name": "announcement_id", "type": "string", "unit": "none", "required": true, "description": "披露平台公告编号"},
+        {"name": "title", "type": "text", "unit": "none", "required": true, "description": "公告标题"},
+        {"name": "category", "type": "enum", "values": ["periodic_report", "forecast", "express", "shareholding_change", "buyback", "dividend", "unlock", "major_event", "regulatory", "ir_record", "other"], "unit": "none", "required": true, "description": "公告类别"},
+        {"name": "announced_at", "type": "datetime", "unit": "none", "required": true, "description": "公告时间"},
+        {"name": "body_ref", "type": "string", "unit": "none", "required": false, "description": "正文对象引用（文本或 PDF）"},
+        {"name": "body_sha256", "type": "string", "unit": "none", "required": false, "description": "正文哈希"}
+      ]
+    },
+    {
+      "id": "doc.periodic_text",
+      "title": "定期报告正文段落",
+      "origin": "company_filing",
+      "default_tier": "L1",
+      "grain": ["entity_id", "report_period", "paragraph_id"],
+      "mvp": true,
+      "fields": [
+        {"name": "report_period", "type": "date", "unit": "none", "required": true, "description": "报告期末日"},
+        {"name": "announcement_id", "type": "string", "unit": "none", "required": true, "description": "来源公告"},
+        {"name": "section", "type": "enum", "values": ["business_overview", "mdna", "risk_factors", "core_competence", "outlook_plan", "other"], "unit": "none", "required": true, "description": "所属章节（按定期报告格式准则的章节名映射）"},
+        {"name": "paragraph_id", "type": "string", "unit": "none", "required": true, "description": "段落序号，如 3.2.004"},
+        {"name": "heading_path", "type": "text", "unit": "none", "required": true, "description": "标题路径，如 第三节 管理层讨论与分析 > 二、主营业务"},
+        {"name": "text", "type": "text", "unit": "none", "required": true, "description": "段落原文"},
+        {"name": "page", "type": "integer", "unit": "count", "required": false, "description": "PDF 页码"}
+      ]
+    },
+    {
+      "id": "flow.margin",
+      "title": "融资融券",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["entity_id", "trade_date"],
+      "mvp": true,
+      "fields": [
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "交易日"},
+        {"name": "financing_balance", "type": "decimal", "unit": "CNY", "required": true, "description": "融资余额"},
+        {"name": "financing_buy", "type": "decimal", "unit": "CNY", "required": true, "description": "融资买入额"},
+        {"name": "financing_repay", "type": "decimal", "unit": "CNY", "required": false, "description": "融资偿还额"},
+        {"name": "short_balance_shares", "type": "decimal", "unit": "shares", "required": false, "description": "融券余量"},
+        {"name": "short_balance", "type": "decimal", "unit": "CNY", "required": false, "description": "融券余额"}
+      ]
+    },
+    {
+      "id": "flow.dragon_tiger",
+      "title": "龙虎榜",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["entity_id", "trade_date", "reason_code", "side", "rank"],
+      "mvp": true,
+      "fields": [
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "交易日"},
+        {"name": "reason_code", "type": "string", "unit": "none", "required": true, "description": "上榜原因代码"},
+        {"name": "reason_text", "type": "text", "unit": "none", "required": true, "description": "上榜原因原文"},
+        {"name": "side", "type": "enum", "values": ["buy", "sell"], "unit": "none", "required": true, "description": "买入或卖出前五"},
+        {"name": "rank", "type": "integer", "unit": "count", "required": true, "description": "名次 1–5"},
+        {"name": "seat_name", "type": "text", "unit": "none", "required": true, "description": "席位名称（披露原文）"},
+        {"name": "seat_type", "type": "enum", "values": ["institution", "connect", "branch", "other"], "unit": "none", "required": true, "description": "席位类型：机构专用、陆股通专用、营业部；只按披露名称判定"},
+        {"name": "buy_amount", "type": "decimal", "unit": "CNY", "required": true, "description": "买入金额"},
+        {"name": "sell_amount", "type": "decimal", "unit": "CNY", "required": true, "description": "卖出金额"}
+      ]
+    },
+    {
+      "id": "flow.block_trade",
+      "title": "大宗交易",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["entity_id", "trade_date", "seq"],
+      "mvp": true,
+      "fields": [
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "交易日"},
+        {"name": "seq", "type": "integer", "unit": "count", "required": true, "description": "当日序号"},
+        {"name": "price", "type": "decimal", "unit": "CNY", "required": true, "description": "成交价"},
+        {"name": "volume", "type": "decimal", "unit": "shares", "required": true, "description": "成交量"},
+        {"name": "amount", "type": "decimal", "unit": "CNY", "required": true, "description": "成交额"},
+        {"name": "buyer_seat", "type": "text", "unit": "none", "required": false, "description": "买方营业部"},
+        {"name": "seller_seat", "type": "text", "unit": "none", "required": false, "description": "卖方营业部"}
+      ]
+    },
+    {
+      "id": "flow.connect_holding",
+      "title": "陆股通持股（季度）",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["entity_id", "period_end"],
+      "mvp": true,
+      "fields": [
+        {"name": "period_end", "type": "date", "unit": "none", "required": true, "description": "季度末日；2024-08-19 后只有季度数据"},
+        {"name": "holding_shares", "type": "decimal", "unit": "shares", "required": true, "description": "持股数"},
+        {"name": "holding_ratio", "type": "decimal", "unit": "ratio", "required": false, "description": "占 A 股总股本比例"}
+      ]
+    },
+    {
+      "id": "flow.connect_turnover",
+      "title": "陆股通成交（每日）",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["trade_date", "channel"],
+      "mvp": false,
+      "fields": [
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "交易日"},
+        {"name": "channel", "type": "enum", "values": ["sh_connect", "sz_connect"], "unit": "none", "required": true, "description": "沪股通或深股通"},
+        {"name": "turnover", "type": "decimal", "unit": "CNY", "required": true, "description": "成交总额（买入 + 卖出），无方向"}
+      ]
+    },
+    {
+      "id": "flow.order_size",
+      "title": "分档资金流（厂商口径）",
+      "origin": "vendor_derived",
+      "default_tier": "L4",
+      "grain": ["entity_id", "trade_date", "method_id"],
+      "mvp": true,
+      "fields": [
+        {"name": "trade_date", "type": "date", "unit": "none", "required": true, "description": "交易日"},
+        {"name": "method_id", "type": "string", "unit": "none", "required": true, "description": "厂商口径标识，对应 provider_datasets.basis 中的分档阈值说明"},
+        {"name": "xl_net", "type": "decimal", "unit": "CNY", "required": false, "description": "超大单净额"},
+        {"name": "l_net", "type": "decimal", "unit": "CNY", "required": false, "description": "大单净额"},
+        {"name": "m_net", "type": "decimal", "unit": "CNY", "required": false, "description": "中单净额"},
+        {"name": "s_net", "type": "decimal", "unit": "CNY", "required": false, "description": "小单净额"}
+      ]
+    },
+    {
+      "id": "corp.holder",
+      "title": "股东户数与前十大股东",
+      "origin": "company_filing",
+      "default_tier": "L2",
+      "grain": ["entity_id", "period_end", "holder_kind", "rank"],
+      "mvp": true,
+      "fields": [
+        {"name": "period_end", "type": "date", "unit": "none", "required": true, "description": "截止日"},
+        {"name": "holder_kind", "type": "enum", "values": ["count", "top10", "top10_float"], "unit": "none", "required": true, "description": "count 行只填 holder_count"},
+        {"name": "rank", "type": "integer", "unit": "count", "required": true, "description": "名次；count 行为 0"},
+        {"name": "holder_count", "type": "integer", "unit": "count", "required": false, "description": "股东户数"},
+        {"name": "holder_name", "type": "text", "unit": "none", "required": false, "description": "股东名称"},
+        {"name": "shares", "type": "decimal", "unit": "shares", "required": false, "description": "持股数"},
+        {"name": "ratio", "type": "decimal", "unit": "ratio", "required": false, "description": "持股比例"}
+      ]
+    },
+    {
+      "id": "corp.insider_trade",
+      "title": "股东与董监高增减持",
+      "origin": "company_filing",
+      "default_tier": "L2",
+      "grain": ["entity_id", "announcement_id", "seq"],
+      "mvp": true,
+      "fields": [
+        {"name": "announcement_id", "type": "string", "unit": "none", "required": true, "description": "来源公告"},
+        {"name": "seq", "type": "integer", "unit": "count", "required": true, "description": "公告内序号"},
+        {"name": "holder_name", "type": "text", "unit": "none", "required": true, "description": "股东或董监高姓名/名称"},
+        {"name": "holder_role", "type": "enum", "values": ["controlling", "major", "director_officer", "other"], "unit": "none", "required": true, "description": "身份"},
+        {"name": "direction", "type": "enum", "values": ["increase", "decrease", "plan_increase", "plan_decrease"], "unit": "none", "required": true, "description": "已实施或计划"},
+        {"name": "shares", "type": "decimal", "unit": "shares", "required": false, "description": "变动股数或计划上限"},
+        {"name": "start_date", "type": "date", "unit": "none", "required": false, "description": "区间起"},
+        {"name": "end_date", "type": "date", "unit": "none", "required": false, "description": "区间止"}
+      ]
+    },
+    {
+      "id": "fund.holding",
+      "title": "公募基金持仓汇总",
+      "origin": "vendor_derived",
+      "default_tier": "L2",
+      "grain": ["entity_id", "period_end"],
+      "mvp": true,
+      "fields": [
+        {"name": "period_end", "type": "date", "unit": "none", "required": true, "description": "报告期末"},
+        {"name": "fund_count", "type": "integer", "unit": "count", "required": true, "description": "持有基金数"},
+        {"name": "holding_shares", "type": "decimal", "unit": "shares", "required": true, "description": "合计持股数"},
+        {"name": "holding_ratio_float", "type": "decimal", "unit": "ratio", "required": false, "description": "占流通股比例"},
+        {"name": "disclosure_basis", "type": "enum", "values": ["top10_quarterly", "full_semiannual"], "unit": "none", "required": true, "description": "季报只含前十大重仓，半年报/年报为全部持仓"}
+      ]
+    }
+  ],
+  "statement_items": [
+    {"code": "IS.total_revenue", "label": "营业总收入", "statement": "income"},
+    {"code": "IS.revenue", "label": "营业收入", "statement": "income"},
+    {"code": "IS.operating_cost", "label": "营业成本", "statement": "income"},
+    {"code": "IS.selling_expense", "label": "销售费用", "statement": "income"},
+    {"code": "IS.admin_expense", "label": "管理费用", "statement": "income"},
+    {"code": "IS.rd_expense", "label": "研发费用", "statement": "income"},
+    {"code": "IS.finance_expense", "label": "财务费用", "statement": "income"},
+    {"code": "IS.operating_profit", "label": "营业利润", "statement": "income"},
+    {"code": "IS.total_profit", "label": "利润总额", "statement": "income"},
+    {"code": "IS.net_profit", "label": "净利润（合并）", "statement": "income"},
+    {"code": "IS.net_profit_parent", "label": "归属于母公司股东的净利润", "statement": "income"},
+    {"code": "IS.net_profit_parent_deducted", "label": "扣除非经常性损益后归属于母公司股东的净利润", "statement": "income"},
+    {"code": "BS.total_assets", "label": "资产总计", "statement": "balance"},
+    {"code": "BS.total_liabilities", "label": "负债合计", "statement": "balance"},
+    {"code": "BS.equity_parent", "label": "归属于母公司股东权益合计", "statement": "balance"},
+    {"code": "BS.cash", "label": "货币资金", "statement": "balance"},
+    {"code": "BS.accounts_receivable", "label": "应收账款", "statement": "balance"},
+    {"code": "BS.notes_receivable", "label": "应收票据", "statement": "balance"},
+    {"code": "BS.inventory", "label": "存货", "statement": "balance"},
+    {"code": "BS.goodwill", "label": "商誉", "statement": "balance"},
+    {"code": "BS.short_term_borrowing", "label": "短期借款", "statement": "balance"},
+    {"code": "BS.long_term_borrowing", "label": "长期借款", "statement": "balance"},
+    {"code": "BS.bonds_payable", "label": "应付债券", "statement": "balance"},
+    {"code": "BS.current_portion_noncurrent_liab", "label": "一年内到期的非流动负债", "statement": "balance"},
+    {"code": "CF.operating_net", "label": "经营活动产生的现金流量净额", "statement": "cashflow"},
+    {"code": "CF.investing_net", "label": "投资活动产生的现金流量净额", "statement": "cashflow"},
+    {"code": "CF.financing_net", "label": "筹资活动产生的现金流量净额", "statement": "cashflow"},
+    {"code": "CF.capex", "label": "购建固定资产、无形资产和其他长期资产支付的现金", "statement": "cashflow"},
+    {"code": "CF.dividends_paid", "label": "分配股利、利润或偿付利息支付的现金", "statement": "cashflow"}
+  ]
+}

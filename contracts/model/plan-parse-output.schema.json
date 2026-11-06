@@ -1,0 +1,78 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "intent": {
+      "enum": [
+        "research",
+        "unsupported",
+        "unclear"
+      ]
+    },
+    "skill_id": {
+      "enum": [
+        "deep_research",
+        "stock_analysis",
+        "capital_flow",
+        "none"
+      ]
+    },
+    "subject_mentions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "verbatim span from user text; resolved by the entity catalog"
+      }
+    },
+    "subject_kind": {
+      "enum": [
+        "stock",
+        "industry",
+        "market",
+        "unknown"
+      ]
+    },
+    "deep_research_mode": {
+      "enum": [
+        "company",
+        "industry",
+        "company_industry",
+        "none"
+      ]
+    },
+    "window_days": {
+      "enum": [
+        0,
+        5,
+        20,
+        60,
+        120,
+        250
+      ]
+    },
+    "focus": {
+      "type": "string",
+      "description": "user focus for deep_research, verbatim or empty"
+    },
+    "unsupported_reason": {
+      "enum": [
+        "none",
+        "advice_request",
+        "prediction_request",
+        "multi_subject",
+        "out_of_market",
+        "out_of_scope"
+      ]
+    }
+  },
+  "required": [
+    "intent",
+    "skill_id",
+    "subject_mentions",
+    "subject_kind",
+    "deep_research_mode",
+    "window_days",
+    "focus",
+    "unsupported_reason"
+  ]
+}

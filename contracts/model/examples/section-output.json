@@ -1,0 +1,49 @@
+{
+  "section_id": "S3",
+  "claims": [
+    {
+      "kind": "computed",
+      "text": "2025 年营业收入 12.00 亿元，同比增长 33.33%。",
+      "refs": [
+        "F12",
+        "F15"
+      ],
+      "numbers": [
+        {
+          "text": "12.00",
+          "fact": "F12"
+        },
+        {
+          "text": "33.33",
+          "fact": "F15"
+        }
+      ],
+      "scenario": {
+        "trigger": "",
+        "watch": [],
+        "invalidation": ""
+      }
+    },
+    {
+      "kind": "scenario",
+      "text": "若下一报告期毛利率回落至上年水平，利润增速可能放缓。",
+      "refs": [
+        "F18"
+      ],
+      "numbers": [],
+      "scenario": {
+        "trigger": "下一报告期毛利率低于上年",
+        "watch": [
+          "F18"
+        ],
+        "invalidation": "毛利率维持或继续上升"
+      }
+    }
+  ],
+  "omitted": [
+    {
+      "topic": "分产品毛利率",
+      "reason": "insufficient_facts"
+    }
+  ]
+}
