@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-
 // Record writes an audit event inside tx.
 func Record(ctx context.Context, tx pgx.Tx, ws *uuid.UUID, actor, action, resource, result string, detail map[string]any) error {
 	if detail == nil {

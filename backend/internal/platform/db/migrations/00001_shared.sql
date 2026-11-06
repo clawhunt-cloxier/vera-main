@@ -56,6 +56,7 @@ CREATE TABLE records (
     dataset_id text NOT NULL,
     entity_id uuid REFERENCES entities(id),
     record_key text NOT NULL,
+    logical_key text NOT NULL,
     record_version int NOT NULL DEFAULT 1,
     period date,
     published_at timestamptz,
@@ -70,7 +71,8 @@ CREATE TABLE records (
     ingested_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (dataset_id, record_key, record_version)
 );
-CREATE INDEX records_lookup ON records (dataset_id, entity_id, period) WHERE is_latest;
+CREATE INDEX records_lookup ON records (dataset_id, entity_id, period);
+CREATE INDEX records_logical ON records (dataset_id, logical_key, available_at DESC);
 
 CREATE TABLE snapshots (
     hash text PRIMARY KEY,

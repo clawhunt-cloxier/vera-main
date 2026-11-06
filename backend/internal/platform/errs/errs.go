@@ -25,7 +25,9 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.cause }
 
-func New(status int, code, msg string) *Error { return &Error{Status: status, Code: code, Message: msg} }
+func New(status int, code, msg string) *Error {
+	return &Error{Status: status, Code: code, Message: msg}
+}
 
 func (e *Error) With(k string, v any) *Error {
 	c := *e
@@ -39,12 +41,12 @@ func (e *Error) With(k string, v any) *Error {
 
 func (e *Error) Wrap(err error) *Error { c := *e; c.cause = err; return &c }
 
-func BadRequest(code, msg string) *Error   { return New(http.StatusBadRequest, code, msg) }
-func NotFound() *Error                     { return New(http.StatusNotFound, "NOT_FOUND", "资源不存在") }
-func Conflict(code, msg string) *Error     { return New(http.StatusConflict, code, msg) }
+func BadRequest(code, msg string) *Error    { return New(http.StatusBadRequest, code, msg) }
+func NotFound() *Error                      { return New(http.StatusNotFound, "NOT_FOUND", "资源不存在") }
+func Conflict(code, msg string) *Error      { return New(http.StatusConflict, code, msg) }
 func Unprocessable(code, msg string) *Error { return New(http.StatusUnprocessableEntity, code, msg) }
-func Unauthorized() *Error                 { return New(http.StatusUnauthorized, "UNAUTHENTICATED", "请先登录") }
-func Forbidden(code, msg string) *Error    { return New(http.StatusForbidden, code, msg) }
+func Unauthorized() *Error                  { return New(http.StatusUnauthorized, "UNAUTHENTICATED", "请先登录") }
+func Forbidden(code, msg string) *Error     { return New(http.StatusForbidden, code, msg) }
 func TooMany(code, msg string) *Error {
 	e := New(http.StatusTooManyRequests, code, msg)
 	e.Retryable = true
