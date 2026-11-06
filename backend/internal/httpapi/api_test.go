@@ -112,7 +112,7 @@ func setup(t *testing.T) *env {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	idp, _ := devoidc.New(srv.URL+"/dev-oidc", "vera-web", "dev-secret", srv.URL+"/auth/callback")
-	id := identity.New(pool, identity.Options{Issuer: idp.Issuer, ClientID: "vera-web", ClientSecret: "dev-secret", PublicURL: srv.URL})
+	id := identity.New(pool, identity.Options{Registration: true, Issuer: idp.Issuer, ClientID: "vera-web", ClientSecret: "dev-secret", PublicURL: srv.URL})
 	s := &Server{Pool: pool, ID: id, Store: st, Engine: eng, Watch: &watchlist.Service{Pool: pool, Store: st, Now: p.Now}, Synthetic: true,
 		Mounts: map[string]http.Handler{"/dev-oidc/": http.StripPrefix("/dev-oidc", idp.Handler())}}
 	mux.Handle("/", s.Handler())

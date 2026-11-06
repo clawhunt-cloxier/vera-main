@@ -46,6 +46,7 @@ func demo(ctx context.Context) error {
 	setDefault("VERA_ENV", "development")
 	setDefault("DATABASE_URL", fmt.Sprintf("postgres://vera:vera-demo@127.0.0.1:%d/vera?sslmode=disable", port))
 	setDefault("VERA_DEV_OIDC", "true")
+	setDefault("VERA_REGISTRATION_ENABLED", "true") // demo opens workspaces with invites
 	setDefault("VERA_COOKIE_SECURE", "false")
 	setDefault("VERA_API_ADDR", "127.0.0.1:8080")
 	setDefault("VERA_PUBLIC_URL", "http://"+os.Getenv("VERA_API_ADDR"))

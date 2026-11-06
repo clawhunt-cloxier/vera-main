@@ -115,7 +115,7 @@ func (a *App) build() error {
 	}
 	gw := model.NewGateway(a.Pool, profiles, adapters, prices, schemas, a.Policy, limit)
 	a.Engine = &harness.Engine{Pool: a.Pool, Store: a.Store, Gateway: gw, Policy: a.Policy, Skills: harness.Skills(), Now: a.Provider.Now,
-		Synthetic: c.Synthetic(), Basis: a.Provider.Basis(), Prompts: harness.PromptVersion}
+		Synthetic: c.Synthetic(), Basis: a.Provider.Basis(), Prompts: harness.PromptVersion, RealResearch: c.RealResearch}
 	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Provider.Now}
 	return nil
 }
@@ -135,7 +135,7 @@ func (a *App) HTTP() (http.Handler, error) {
 	c := a.Cfg
 	mounts := map[string]http.Handler{}
 	opt := identity.Options{Issuer: c.OIDCIssuer, InternalIssuer: c.OIDCInternal, ClientID: c.OIDCClientID, ClientSecret: c.OIDCClientSecret,
-		PublicURL: c.PublicURL, CookieSecure: c.CookieSecure}
+		PublicURL: c.PublicURL, CookieSecure: c.CookieSecure, Registration: c.Registration}
 	if c.DevOIDC {
 		secret := c.OIDCClientSecret
 		if secret == "" {

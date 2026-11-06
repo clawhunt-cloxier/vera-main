@@ -38,6 +38,8 @@ type Engine struct {
 	Basis     map[string]string
 	River     *river.Client[pgx.Tx]
 	Prompts   string // prompt set version, frozen into reports
+	// RealResearch is VERA_REAL_RESEARCH_ENABLED: required before plans and tasks run on real data or real models.
+	RealResearch bool
 }
 
 const PromptVersion = "1.0.0"
@@ -91,6 +93,9 @@ func planHash(skill, version string, subject uuid.UUID, p Params, asOf time.Time
 
 // BuildPlan computes availability and persists the plan for the workspace.
 func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, subject dataservice.EntityRow, raw map[string]any) (*Plan, error) {
+	if !e.Synthetic && !e.RealResearch {
+		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
+	}
 	sk, ok := e.Skills[skillID]
 	if !ok {
 		return nil, errs.Unprocessable("UNKNOWN_SKILL", "不支持的研究技能")
@@ -261,6 +266,9 @@ func KillSwitch(ctx context.Context, q interface {
 
 // CreateTask confirms a plan: verifies hash/expiry, reserves quota and enqueues the run in one transaction.
 func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID, hash string, disabled []string) (uuid.UUID, error) {
+	if !e.Synthetic && !e.RealResearch {
+		return uuid.Nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
+	}
 	plan, err := e.LoadPlan(ctx, ws, planID)
 	if err != nil {
 		return uuid.Nil, err

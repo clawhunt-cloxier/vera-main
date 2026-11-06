@@ -128,7 +128,7 @@ func (c cov) all(e uuid.UUID, ds ...string) bool {
 }
 
 func listedTradingDays(ctx context.Context, e *Engine, subject dataservice.EntityRow, asOf time.Time) (int, error) {
-	recs, err := e.Store.Query(ctx, dataservice.Query{DatasetIDs: []string{"mkt.daily_bar"}, EntityIDs: []uuid.UUID{subject.ID}, AsOf: asOf})
+	recs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{"mkt.daily_bar"}, EntityIDs: []uuid.UUID{subject.ID}, AsOf: asOf})
 	return len(recs), err
 }
 
@@ -149,7 +149,7 @@ func adjustWindow(listed int, p *Params, options []int, notes *[]string) {
 // selectPeers picks up to 8 industry peers closest in total market value (rule-based, never model-chosen).
 func selectPeers(ctx context.Context, e *Engine, subject dataservice.EntityRow, members []uuid.UUID, asOf time.Time) ([]uuid.UUID, error) {
 	from := asOf.AddDate(0, 0, -14)
-	recs, err := e.Store.Query(ctx, dataservice.Query{DatasetIDs: []string{"mkt.valuation_daily"}, EntityIDs: members, From: &from, AsOf: asOf})
+	recs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{"mkt.valuation_daily"}, EntityIDs: members, From: &from, AsOf: asOf})
 	if err != nil {
 		return nil, err
 	}

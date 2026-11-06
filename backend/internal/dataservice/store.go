@@ -161,6 +161,7 @@ type Query struct {
 	EntityIDs  []uuid.UUID // empty = no entity filter
 	From, To   *time.Time  // period range, inclusive
 	AsOf       time.Time
+	ModelUse   bool // records will reach a model: only providers licensed for model processing
 }
 
 const recordCols = `r.id, r.dataset_id, r.entity_id, r.record_key, r.record_version, r.period, r.published_at,
@@ -178,12 +179,13 @@ func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
 		FROM records r JOIN providers p ON p.id = r.provider_id AND p.enabled
 		WHERE r.dataset_id = ANY($1) AND r.available_at <= $2
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
+		AND (NOT $6::bool OR p.allow_model_processing)
 		ORDER BY r.dataset_id, r.logical_key, r.record_version DESC`
 	var ents []uuid.UUID
 	if len(q.EntityIDs) > 0 {
 		ents = q.EntityIDs
 	}
-	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To)
+	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +212,7 @@ func sortRecords(out []StoredRecord) {
 // Coverage reports which datasets have at least one record per entity as of asOf (capability check for plans).
 func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Time) (map[uuid.UUID]map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT r.entity_id, r.dataset_id FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.entity_id = ANY($1) AND r.available_at <= $2`, entities, asOf)
+		WHERE r.entity_id = ANY($1) AND r.available_at <= $2 AND p.allow_model_processing`, entities, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +236,7 @@ func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Ti
 func (s *Store) HasGlobal(ctx context.Context, dataset string, asOf time.Time) (bool, error) {
 	var ok bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND r.available_at <= $2)`, dataset, asOf).Scan(&ok)
+		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND r.available_at <= $2 AND p.allow_model_processing)`, dataset, asOf).Scan(&ok)
 	return ok, err
 }
 

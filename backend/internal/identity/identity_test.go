@@ -28,7 +28,7 @@ func TestLoginOnboardCSRFLogout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := identity.New(pool, identity.Options{Issuer: idp.Issuer, ClientID: "vera-web", ClientSecret: "dev-secret", PublicURL: srv.URL})
+	svc := identity.New(pool, identity.Options{Registration: true, Issuer: idp.Issuer, ClientID: "vera-web", ClientSecret: "dev-secret", PublicURL: srv.URL})
 	mux.Handle("/dev-oidc/", http.StripPrefix("/dev-oidc", idp.Handler()))
 	mux.HandleFunc("GET /auth/login", svc.Login)
 	mux.HandleFunc("GET /auth/callback", svc.Callback)

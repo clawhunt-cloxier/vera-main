@@ -43,6 +43,7 @@ type Options struct {
 	ClientSecret   string
 	PublicURL      string // browser-facing origin of the web app
 	CookieSecure   bool
+	Registration   bool // VERA_REGISTRATION_ENABLED: new workspaces may be opened with an invite
 	HTTPClient     *http.Client
 }
 
@@ -343,6 +344,9 @@ var Personas = []string{"fund_manager", "analyst", "individual", "unspecified"}
 func (s *Service) Onboard(ctx context.Context, p *Principal, code, persona string) (uuid.UUID, error) {
 	if p.WorkspaceID != nil {
 		return *p.WorkspaceID, nil
+	}
+	if !s.opt.Registration {
+		return uuid.Nil, errs.Unavailable("REGISTRATION_CLOSED", "注册暂未开放")
 	}
 	valid := false
 	for _, x := range Personas {

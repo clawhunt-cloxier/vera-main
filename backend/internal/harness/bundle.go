@@ -109,7 +109,7 @@ type Loader struct {
 
 // Members returns stocks classified into an industry (level-2 code) as of asOf, using point-in-time ref.industry.
 func (l Loader) Members(ctx context.Context, industryCode string, asOf time.Time) ([]uuid.UUID, error) {
-	recs, err := l.Store.Query(ctx, dataservice.Query{DatasetIDs: []string{"ref.industry"}, AsOf: asOf})
+	recs, err := l.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{"ref.industry"}, AsOf: asOf})
 	if err != nil {
 		return nil, err
 	}
@@ -150,14 +150,14 @@ func (l Loader) Load(ctx context.Context, asOf time.Time, groups map[uuid.UUID][
 	var out []dataservice.StoredRecord
 	for k, ents := range byDatasets {
 		dss := splitComma(k)
-		recs, err := l.Store.Query(ctx, dataservice.Query{DatasetIDs: dss, EntityIDs: ents, AsOf: asOf})
+		recs, err := l.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: dss, EntityIDs: ents, AsOf: asOf})
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, recs...)
 	}
 	if len(global) > 0 {
-		recs, err := l.Store.Query(ctx, dataservice.Query{DatasetIDs: global, AsOf: asOf})
+		recs, err := l.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: global, AsOf: asOf})
 		if err != nil {
 			return nil, err
 		}
