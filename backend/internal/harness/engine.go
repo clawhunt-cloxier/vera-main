@@ -224,6 +224,12 @@ type Quota struct {
 
 func (e *Engine) quota(ctx context.Context, tx pgx.Tx) (Quota, error) {
 	q := e.Policy.Quota
+	// Per-workspace override set by `vera admin quota set` (only the user_* limits).
+	var override []byte
+	_ = tx.QueryRow(ctx, `SELECT quota_override FROM workspaces WHERE id = current_setting('app.workspace_id', true)::uuid`).Scan(&override)
+	if len(override) > 0 {
+		_ = json.Unmarshal(override, &q)
+	}
 	var activeN, queued, daily, deep int
 	err := tx.QueryRow(ctx, `SELECT
 		count(*) FILTER (WHERE status = ANY($1)), count(*) FILTER (WHERE status='QUEUED'),

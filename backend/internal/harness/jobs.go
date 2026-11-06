@@ -89,14 +89,17 @@ func (w *cancelWorker) Work(ctx context.Context, j *river.Job[CancelArgs]) error
 }
 
 // NewRiver builds the River client. workers=true starts queue processing (vera-worker); the API uses insert-only.
-func (e *Engine) NewRiver(pool *pgxpool.Pool, work bool, concurrency int) (*river.Client[pgx.Tx], error) {
+func (e *Engine) NewRiver(pool *pgxpool.Pool, work bool, concurrency int, extra ...func(*river.Workers, *river.Config)) (*river.Client[pgx.Tx], error) {
 	ws := river.NewWorkers()
 	river.AddWorker(ws, &runWorker{e: e})
 	river.AddWorker(ws, &deadlineWorker{e: e})
 	river.AddWorker(ws, &cancelWorker{e: e})
 	cfg := &river.Config{Workers: ws, Logger: slog.Default()}
 	if work {
-		cfg.Queues = map[string]river.QueueConfig{"research": {MaxWorkers: max(1, concurrency)}}
+		cfg.Queues = map[string]river.QueueConfig{"research": {MaxWorkers: max(1, concurrency)}, river.QueueDefault: {MaxWorkers: 2}}
+	}
+	for _, f := range extra {
+		f(ws, cfg)
 	}
 	c, err := river.NewClient(riverpgxv5.New(pool), cfg)
 	if err != nil {

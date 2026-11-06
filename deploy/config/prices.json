@@ -1,0 +1,15 @@
+{
+  "version": "deepseek-2026-11-06",
+  "currency": "USD",
+  "note": "Per million tokens, from https://api-docs.deepseek.com/quick_start/pricing as read on 2026-11-06 (ADR-0003 D5). Re-check before pilot; set MODEL_PRICE_TABLE_VERSION to this version. Keys are model_id values sent to the API.",
+  "models": {
+    "deepseek-flash": {
+      "peak": {"cache_hit_input": "0.006", "cache_miss_input": "0.30", "output": "1.20"},
+      "off_peak": {"cache_hit_input": "0.003", "cache_miss_input": "0.15", "output": "0.60"}
+    }
+  },
+  "peak_windows_utc": [
+    {"weekdays": [1, 2, 3, 4, 5], "from": "01:00", "to": "04:00"},
+    {"weekdays": [1, 2, 3, 4, 5], "from": "06:00", "to": "10:00"}
+  ]
+}

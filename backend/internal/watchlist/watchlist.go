@@ -423,3 +423,8 @@ func (s *Service) RefreshAll(ctx context.Context) (int, error) {
 	}
 	return len(ps), nil
 }
+
+// SnapshotArgs is the periodic watchlist.snapshot River job.
+type SnapshotArgs struct{}
+
+func (SnapshotArgs) Kind() string { return "watchlist.snapshot" }

@@ -186,26 +186,36 @@ type finalClaim struct {
 	Claim   check.Claim `json:"claim"`
 }
 
-// fallbackSummary takes the first claim of each required section (HARNESS §8), then fills to 3.
+// fallbackSummary takes one claim per required section (HARNESS §8), preferring computed/inference/scenario claims
+// over plain catalogue facts and skipping repeated texts, then fills to 3.
 func fallbackSummary(claims []finalClaim, required []string) []summaryPoint {
+	rank := map[string]int{KComp: 0, KInf: 1, KScen: 2, KAttr: 3, KFact: 4}
 	var out []summaryPoint
-	used := map[string]bool{}
+	used, texts := map[string]bool{}, map[string]bool{}
+	take := func(c finalClaim) {
+		out = append(out, summaryPoint{Text: c.Claim.Text, ClaimRefs: []string{c.Ref}})
+		used[c.Ref], texts[c.Claim.Text] = true, true
+	}
 	for _, sid := range required {
-		for _, c := range claims {
-			if c.Section == sid && len(out) < 5 {
-				out = append(out, summaryPoint{Text: c.Claim.Text, ClaimRefs: []string{c.Ref}})
-				used[c.Ref] = true
-				break
+		var best *finalClaim
+		for i, c := range claims {
+			if c.Section != sid || texts[c.Claim.Text] {
+				continue
 			}
+			if best == nil || rank[c.Claim.Kind] < rank[best.Claim.Kind] {
+				best = &claims[i]
+			}
+		}
+		if best != nil && len(out) < 5 {
+			take(*best)
 		}
 	}
 	for _, c := range claims {
 		if len(out) >= 3 {
 			break
 		}
-		if !used[c.Ref] {
-			out = append(out, summaryPoint{Text: c.Claim.Text, ClaimRefs: []string{c.Ref}})
-			used[c.Ref] = true
+		if !used[c.Ref] && !texts[c.Claim.Text] {
+			take(c)
 		}
 	}
 	return out
