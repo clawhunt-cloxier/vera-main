@@ -8,11 +8,11 @@ import { ErrorBox, Loading } from '../components/ui';
 export function Onboarding() {
   const me = useMe();
   const [code, setCode] = useState('');
-  const [persona, setPersona] = useState<S<'OnboardingRequest'>['persona']>('individual');
+  const [persona, setPersona] = useState<S<'OnboardingInput'>['persona']>('individual');
   const nav = useNavigate();
   const mut = useMutation({
     mutationFn: async () => {
-      await post<S<'OnboardingResponse'>>('/api/v1/onboarding', { invite_code: code, persona });
+      await post<S<'Me'>>('/api/v1/onboarding', { invite_code: code, persona });
       nav({ to: '/app' });
     },
   });

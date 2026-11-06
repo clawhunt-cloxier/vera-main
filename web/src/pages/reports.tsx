@@ -48,16 +48,16 @@ export function ReportPage({ id }: { id: string }) {
   const [feedbackClaim, setFeedbackClaim] = useState('');
   const qc = useQueryClient();
   const fb = useMutation({
-    mutationFn: async (body: S<'CreateFeedbackRequest'>) => {
-      await post('/api/v1/feedback', body, { idem: newKey() });
+    mutationFn: async (body: { kind: 'useful' | 'confusing' | 'incorrect' | 'other'; comment: string; claim_ref: string }) => {
+      await post(`/api/v1/reports/${id}/versions/1/feedback`, body, { idem: newKey() });
       qc.invalidateQueries({ queryKey: ['report', id] });
     },
     onSuccess: () => setFeedbackClaim(''),
   });
   const loaders = {
-    series: useCallback(async (sid: string) => get<ChartSeries>(`/api/v1/reports/${id}/series/${sid}`), [id]),
-    evidence: useCallback(async (eid: string) => get<Evidence>(`/api/v1/reports/${id}/evidence/${eid}`), [id]),
-    calculation: useCallback(async (cid: string) => get<Calculation>(`/api/v1/reports/${id}/calculations/${cid}`), [id]),
+    series: useCallback(async (sid: string) => get<ChartSeries>(`/api/v1/reports/${id}/versions/1/series/${sid}`), [id]),
+    evidence: useCallback(async (eid: string) => get<Evidence>(`/api/v1/evidence/${eid}`), [id]),
+    calculation: useCallback(async (cid: string) => get<Calculation>(`/api/v1/calculations/${cid}`), [id]),
   };
   return (
     <main>
@@ -68,9 +68,9 @@ export function ReportPage({ id }: { id: string }) {
       {r.data && <ReportView report={r.data} loaders={loaders} onFeedback={setFeedbackClaim} />}
       {feedbackClaim && (
         <Dialog title="反馈结论" onClose={() => setFeedbackClaim('')}>
-          <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); fb.mutate({ entity: 'claim', entity_id: feedbackClaim, text: fd.get('text') as string, category: fd.get('category') as S<'CreateFeedbackRequest'>['category'] }); }}>
-            <label>类别<select name="category" required><option value="incorrect">不准确</option><option value="misleading">误导</option><option value="missing">信息缺失</option><option value="other">其他</option></select></label>
-            <label>说明<textarea name="text" rows={3} required /></label>
+          <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); fb.mutate({ kind: fd.get('kind') as 'useful' | 'confusing' | 'incorrect' | 'other', comment: String(fd.get('comment') ?? '').slice(0, 2000), claim_ref: feedbackClaim }); }}>
+            <label>类别<select name="kind" required><option value="incorrect">不准确</option><option value="confusing">表述不清</option><option value="useful">有帮助</option><option value="other">其他</option></select></label>
+            <label>说明<textarea name="comment" rows={3} maxLength={2000} required /></label>
             <button type="submit" disabled={fb.isPending}>{fb.isPending ? '提交中…' : '提交反馈'}</button>
             {fb.error && <ErrorBox error={fb.error} />}
             {fb.isSuccess && <p className="muted">已提交，感谢反馈。</p>}
