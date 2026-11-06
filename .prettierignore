@@ -1,0 +1,6 @@
+# Editor & build
+node_modules/
+dist/
+.venv/
+*.min.js
+*.min.css
