@@ -6,6 +6,7 @@
 - `make check-contracts`：OpenAPI 3.1 校验，计划、任务、策略 Schema 的示例与非法输入用例。
 - `make test-go`：健康与就绪接口的 Go 测试。
 - `make build-web`：TypeScript 检查与 Vite 生产构建。
+- `make test-automation`：用离线 API 替身验证“合并后自动清理任务分支”的保护条件；不请求 GitHub，也不删除真实分支。真实触发与权限需在合并后查看维护作业。
 - `make verify`：以上全部。CI 不使用真实密钥，不调用收费模型。
 
 Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch policy 只检查 PR 来源分支，不证明业务正确。

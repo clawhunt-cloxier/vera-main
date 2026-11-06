@@ -50,4 +50,5 @@ M1 本地演示：T011–T018、T019a、T022（M1 范围）、T024。M2 测试�
 - T000/T001：[初始化交接](docs/handoffs/2026-11-05-bootstrap-codex.md)。
 - 范围修订（ADR-0002）：[范围交接](docs/handoffs/2026-11-05-research-scope-codex.md)；已被 ADR-0003 部分取代。
 - 分支规范：[BRANCHING](docs/BRANCHING.md)，Codex / agent/codex/branch-policy。
+- CI 运行时修订：Codex / agent/codex/ci-action-runtime（PR #3 已合入 dev）；基础 Action 升级到 Node 24 运行时，dev 合并后自动清理任务分支，见 [交接](docs/handoffs/2026-11-06-ci-runtime-codex.md)。
 - T010：[产品与架构交接](docs/handoffs/2026-11-06-T010-claude.md)。

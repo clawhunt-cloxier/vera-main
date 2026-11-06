@@ -38,3 +38,5 @@
 细则：[CONTRIBUTING.md](CONTRIBUTING.md)、[TESTING.md](TESTING.md)、[docs/COLLABORATION.md](docs/COLLABORATION.md)。
 
 分支和发布规则：[docs/BRANCHING.md](docs/BRANCHING.md)。main 不直接接受普通任务 PR；共享账号不能伪造独立审批。
+
+PR 合入 dev 后符合命名规则的远端任务分支会自动清理；后续任务新建分支，不向已合并的旧任务分支追加提交。hotfix 的双线同步和本地 worktree 清理见 BRANCHING。自动化中的 SHA lease 仅用于删除已合并任务引用，不允许改写共享提交历史。
