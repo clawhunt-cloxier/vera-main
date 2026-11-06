@@ -52,7 +52,6 @@ export function ReportPage({ id }: { id: string }) {
       await post(`/api/v1/reports/${id}/versions/1/feedback`, body, { idem: newKey() });
       qc.invalidateQueries({ queryKey: ['report', id] });
     },
-    onSuccess: () => setFeedbackClaim(''),
   });
   const loaders = {
     series: useCallback(async (sid: string) => get<ChartSeries>(`/api/v1/reports/${id}/versions/1/series/${sid}`), [id]),
@@ -65,13 +64,13 @@ export function ReportPage({ id }: { id: string }) {
       <p><Link to="/app/reports">← 返回报告列表</Link></p>
       {r.isLoading && <Loading />}
       {r.error && <ErrorBox error={r.error} />}
-      {r.data && <ReportView report={r.data} loaders={loaders} onFeedback={setFeedbackClaim} />}
+      {r.data && <ReportView report={r.data} loaders={loaders} onFeedback={(ref) => { fb.reset(); setFeedbackClaim(ref); }} />}
       {feedbackClaim && (
-        <Dialog title="反馈结论" onClose={() => setFeedbackClaim('')}>
+        <Dialog title="反馈结论" onClose={() => { fb.reset(); setFeedbackClaim(''); }}>
           <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); fb.mutate({ kind: fd.get('kind') as 'useful' | 'confusing' | 'incorrect' | 'other', comment: String(fd.get('comment') ?? '').slice(0, 2000), claim_ref: feedbackClaim }); }}>
             <label>类别<select name="kind" required><option value="incorrect">不准确</option><option value="confusing">表述不清</option><option value="useful">有帮助</option><option value="other">其他</option></select></label>
             <label>说明<textarea name="comment" rows={3} maxLength={2000} required /></label>
-            <button type="submit" disabled={fb.isPending}>{fb.isPending ? '提交中…' : '提交反馈'}</button>
+            <button type="submit" disabled={fb.isPending || fb.isSuccess}>{fb.isPending ? '提交中…' : '提交反馈'}</button>
             {fb.error && <ErrorBox error={fb.error} />}
             {fb.isSuccess && <p className="muted">已提交，感谢反馈。</p>}
           </form>
