@@ -72,14 +72,14 @@ func workspace(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 }
 
 type fixtureCase struct {
-	ID         string `json:"id"`
-	Skill      string `json:"skill"`
-	Subject    string `json:"subject"`
-	Mode       string `json:"mode"`
-	ExpStatus  string `json:"expect_status"`
-	ExpKind    string `json:"expect_result_kind"`
-	ExpPlan    string `json:"expect_plan"`
-	Notes      string `json:"notes"`
+	ID        string `json:"id"`
+	Skill     string `json:"skill"`
+	Subject   string `json:"subject"`
+	Mode      string `json:"mode"`
+	ExpStatus string `json:"expect_status"`
+	ExpKind   string `json:"expect_result_kind"`
+	ExpPlan   string `json:"expect_plan"`
+	Notes     string `json:"notes"`
 }
 
 func TestFixtureCases(t *testing.T) {
