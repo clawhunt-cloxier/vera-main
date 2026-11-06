@@ -154,7 +154,7 @@ func (e *Engine) runSection(ctx context.Context, t *taskRow, sk *Skill, subject 
 	w, err := step(ctx, e, t, "write:"+s.ID, func() (writeOut, error) {
 		msgs := e.writerMessages(sk, subject, t, sheet, sk.Sections(t.Params), s)
 		raw, _, err := e.Gateway.Complete(ctx, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "write:" + s.ID, Profile: "writer",
-			Messages: msgs, MaxOutput: 2000, Schema: "section-output", Budget: budget,
+			Messages: msgs, MaxOutput: 8000, Schema: "section-output", Budget: budget,
 			Simulate: func() (any, error) { return simulateSection(sheet, s, subject), nil }})
 		var fe *model.FormatError
 		if errors.As(err, &fe) {
@@ -183,7 +183,7 @@ func (e *Engine) runSection(ctx context.Context, t *taskRow, sk *Skill, subject 
 	v, err := step(ctx, e, t, "verify:"+s.ID, func() (writeOut, error) {
 		msgs := verifierMessages(sheet, s, w.Claims)
 		raw, _, err := e.Gateway.Complete(ctx, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "verify:" + s.ID, Profile: "verifier",
-			Messages: msgs, MaxOutput: 1500, Schema: "verify-output", Budget: budget,
+			Messages: msgs, MaxOutput: 4000, Schema: "verify-output", Budget: budget,
 			Simulate: func() (any, error) { return simulateVerify(s, w.Claims), nil }})
 		var fe *model.FormatError
 		if errors.As(err, &fe) || errors.Is(err, model.ErrBudget) {

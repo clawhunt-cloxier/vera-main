@@ -52,7 +52,7 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
 export function SyntheticBanner() {
   return (
     <div className="banner" role="note">
-      演示环境：数据为虚构的演示数据，模型为模拟生成，报告不对应任何真实公司或市场，仅用于演示功能。
+      演示环境：数据或模型输出为模拟内容，报告不对应任何真实公司或市场，仅用于演示功能。
     </div>
   );
 }

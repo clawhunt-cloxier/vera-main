@@ -158,7 +158,7 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 			msg += fmt.Sprintf("%s（%s）：%s\n", c.Ref, c.Claim.Kind, c.Claim.Text)
 		}
 		raw, _, err := e.Gateway.Complete(ctx, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "summary", Profile: "writer",
-			Messages: []model.Message{{Role: "system", Content: summaryRules}, {Role: "user", Content: "已核验结论：\n" + msg}}, MaxOutput: 1200,
+			Messages: []model.Message{{Role: "system", Content: summaryRules}, {Role: "user", Content: "已核验结论：\n" + msg}}, MaxOutput: 4000,
 			Schema: "summary-output", Budget: t.Budget, Simulate: func() (any, error) { return simulateSummary(final, required), nil }})
 		var pts []summaryPoint
 		if err == nil {

@@ -259,6 +259,24 @@ func admin(ctx context.Context, a *app.App, args []string) error {
 		}
 		fmt.Println("kill-switch:", sub(1))
 		return record(ctx, a, "kill_switch."+sub(1), "platform", nil)
+	case "task list":
+		rows, err := a.Pool.Query(ctx, `SELECT id::text, skill_id, status, coalesce(reason_code,'-'), epoch, created_at FROM research_tasks ORDER BY created_at DESC LIMIT 20`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		w := tw()
+		fmt.Fprintln(w, "任务\t技能\t状态\t原因\tepoch\t创建时间")
+		for rows.Next() {
+			var id, sk, st, rc string
+			var ep int64
+			var at time.Time
+			if err := rows.Scan(&id, &sk, &st, &rc, &ep, &at); err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", id, sk, st, rc, ep, at.Local().Format("15:04:05"))
+		}
+		return w.Flush()
 	case "task inspect":
 		return inspect(ctx, a, sub(2))
 	default:

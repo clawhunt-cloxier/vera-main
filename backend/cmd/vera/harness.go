@@ -101,6 +101,11 @@ func harnessCmd(ctx context.Context, a *app.App, args []string) error {
 		fmt.Print(harnessUsage)
 		return nil
 	}
+	// CreateTask enqueues River jobs in its transaction, so the engine needs an insert-only client.
+	// Runs below execute synchronously via Engine.Run; no worker is started here.
+	if _, err := a.Engine.NewRiver(a.Pool, false, 0); err != nil {
+		return err
+	}
 	ws, err := evalWorkspace(ctx, a)
 	if err != nil {
 		return err

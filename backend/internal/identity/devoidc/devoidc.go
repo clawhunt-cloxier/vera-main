@@ -90,7 +90,7 @@ var form = template.Must(template.New("f").Parse(`<!doctype html><html lang="zh-
 <style>body{font:15px system-ui;max-width:360px;margin:12vh auto;padding:0 16px}input,button{font:inherit;padding:8px;width:100%;box-sizing:border-box;margin-top:8px}
 p{color:#a33}</style>
 <h1>Vera 开发登录</h1><p>仅限本地开发与自动化测试，无密码校验。</p>
-<form method="post"><label for="u">用户名</label><input id="u" name="username" required pattern="[a-z0-9._-]{1,40}" autofocus>
+<form method="post"><label for="u">用户名</label><input id="u" name="username" required pattern="[a-z0-9._\-]{1,40}" autofocus>
 {{range $k, $v := .}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}<button type="submit">登录</button></form></html>`))
 
 var userPat = regexp.MustCompile(`^[a-z0-9._-]{1,40}$`)
