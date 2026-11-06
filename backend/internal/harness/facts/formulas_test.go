@@ -7,7 +7,9 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-func n(v string) Input { return Input{EvidenceID: uuid.New(), Value: decimal.RequireFromString(v), Unit: "CNY"} }
+func n(v string) Input {
+	return Input{EvidenceID: uuid.New(), Value: decimal.RequireFromString(v), Unit: "CNY"}
+}
 
 func pts(vals ...string) []Point {
 	var out []Point

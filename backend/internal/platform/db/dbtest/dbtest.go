@@ -23,7 +23,22 @@ var (
 	startErr error
 	counter  int
 	mu       sync.Mutex
+	server   *embeddedpostgres.EmbeddedPostgres
+	runDir   string
 )
+
+// Main must be called from TestMain in every package that uses New, so the server is stopped and its
+// runtime directory removed when the test binary exits.
+func Main(m *testing.M) {
+	code := m.Run()
+	if server != nil {
+		_ = server.Stop()
+	}
+	if runDir != "" {
+		_ = os.RemoveAll(runDir)
+	}
+	os.Exit(code)
+}
 
 func start() {
 	port, err := freePort()
@@ -35,7 +50,11 @@ func start() {
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "vera-embedded-pg")
 	}
-	dir, err := os.MkdirTemp("", "vera-pg-run-")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		startErr = err
+		return
+	}
+	dir, err := os.MkdirTemp(root, "run-")
 	if err != nil {
 		startErr = err
 		return
@@ -48,6 +67,7 @@ func start() {
 		startErr = fmt.Errorf("start embedded postgres: %w", err)
 		return
 	}
+	server, runDir = pg, dir
 	baseDSN = fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%d", port)
 }
 

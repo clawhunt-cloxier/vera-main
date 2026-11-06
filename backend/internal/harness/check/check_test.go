@@ -11,17 +11,17 @@ import (
 )
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
-func in(v string) facts.Input   { return facts.Input{EvidenceID: uuid.New(), Value: d(v), Unit: "CNY"} }
+func in(v string) facts.Input    { return facts.Input{EvidenceID: uuid.New(), Value: d(v), Unit: "CNY"} }
 
 func sheet() *facts.Sheet {
 	s := facts.NewSheet(uuid.New(), 1)
-	s.Value("fin.income", "演示制造", "营业收入（合并）", "2025 年度", facts.KindReported, "", "CNY", d("12000000000"), uuid.New()) // F1 120.00 亿元
-	s.Computed("fin.income", "演示制造", "营业收入同比", "2025 年度 vs 2024 年度", facts.YoY(in("12000000000"), in("9000000000")), "yoy") // F2 33.33%
-	s.Value("fin.income", "演示制造", "归母净利润", "2025 年度", facts.KindReported, "", "CNY", d("1500000000"), uuid.New())        // F3 15.00 亿元
-	s.Computed("flow.margin", "演示制造", "融资余额变化", "近 20 个交易日", facts.BalanceChange(in("500000000"), in("420000000")), "mb") // F4 -8000.00 万元
+	s.Value("fin.income", "演示制造", "营业收入（合并）", "2025 年度", facts.KindReported, "", "CNY", d("12000000000"), uuid.New())                           // F1 120.00 亿元
+	s.Computed("fin.income", "演示制造", "营业收入同比", "2025 年度 vs 2024 年度", facts.YoY(in("12000000000"), in("9000000000")), "yoy")                     // F2 33.33%
+	s.Value("fin.income", "演示制造", "归母净利润", "2025 年度", facts.KindReported, "", "CNY", d("1500000000"), uuid.New())                               // F3 15.00 亿元
+	s.Computed("flow.margin", "演示制造", "融资余额变化", "近 20 个交易日", facts.BalanceChange(in("500000000"), in("420000000")), "mb")                       // F4 -8000.00 万元
 	s.Value("flow.order_size", "演示制造", "特大单净额", "近 20 个交易日", facts.KindVendorDerived, "厂商 demo 口径：单笔≥100 万元", "CNY", d("30000000"), uuid.New()) // F5 3000.00 万元
-	s.TextFact("doc.periodic_text", "演示制造", "经营讨论", "2025 年度", facts.KindText, "", "公司表示 2025 年新增产能 3 条产线。", uuid.New()) // F6
-	s.Computed("val.pe", "演示亏损", "PE(TTM) 近 3 年分位", "2026-06-30", facts.Percentile(facts.Point{Value: d("-5")}, nil, 10), "pe") // F7 n/a
+	s.TextFact("doc.periodic_text", "演示制造", "经营讨论", "2025 年度", facts.KindText, "", "公司表示 2025 年新增产能 3 条产线。", uuid.New())                        // F6
+	s.Computed("val.pe", "演示亏损", "PE(TTM) 近 3 年分位", "2026-06-30", facts.Percentile(facts.Point{Value: d("-5")}, nil, 10), "pe")                 // F7 n/a
 	return s
 }
 
