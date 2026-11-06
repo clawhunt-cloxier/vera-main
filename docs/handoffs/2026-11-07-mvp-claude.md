@@ -55,3 +55,23 @@
 2. 把浏览器脚本整理成仓库里的 Playwright 用例，并接入 `make verify`。
 3. 在真实模型下跑资金动向与深度研究，检查弃权与受限结果的展示。
 4. 重跑 `make test-go`、`make build-web`，重写 README-MVP.md，再开 PR。
+
+## 更新（同日晚）
+
+已处理：
+
+- 核验降级：语义核验不可用时，章节不再标记为已核验，并在报告的数据与限制中披露（044e24f）。摘要仍只经确定性检查，没有语义核验，这一点仍然开放。
+- `allow_model_processing`、`VERA_REGISTRATION_ENABLED`、`VERA_REAL_RESEARCH_ENABLED` 已强制执行，并有三个负向测试（ec7489c）。`vera demo` 默认开启注册。
+- harness 包此前的测试失败，原因是 /tmp 这个 tmpfs 报 Disk quota exceeded，不是代码问题。把 `VERA_TEST_PG_DIR` 指到有空间的磁盘后，`go test ./...` 全包通过。
+- 浏览器补验：快速启动、提交后取消（最终为 CANCELLED，原因 USER_CANCELLED）、自选股添加、分析、移出、反馈提交（接口 201，界面已修为提交后保留确认提示，1eb8a09）。
+- 真实模型（deepseek-flash）下三个技能各跑一次：个股分析完整；资金动向、深度研究完成但标为受限。
+- README-MVP.md 已重写为只含已验证内容。
+
+仍然开放：
+
+1. 摘要没有语义核验。
+2. `MODEL_<PROFILE>_THINKING` 未接入请求；输出上限仍写死在代码里。
+3. `vera harness eval` 不能在有存活 worker 的库上运行。
+4. `choose` 分支没有在浏览器里走过；仓库里没有 Playwright 用例。
+5. `contracts/examples/policy.json` 的预算为演示放宽，试点前必须收紧。
+6. 模型密钥出现在对话记录里，联调结束后需要轮换。
