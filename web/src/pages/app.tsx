@@ -50,7 +50,7 @@ export function App() {
         <h2>快速启动</h2>
         <div className="grid">
           {skills.data?.skills.map((sk) => (
-            <Link key={sk.id} to="/app/quick/$skill" params={{ skill: sk.id as SkillId }} className="card">
+            <Link key={sk.id} to="/app/quick/$skill" params={{ skill: sk.id as any }} className="card">
               <h3>{sk.name}</h3>
               <p>{sk.description}</p>
             </Link>
@@ -89,7 +89,7 @@ export function App() {
 export function Quick({ skill }: { skill: SkillId }) {
   const me = useMe();
   const s = useQuery({ queryKey: ['skill', skill], queryFn: () => get<Skill>(`/api/v1/skills/${skill}`), staleTime: 3600_000 });
-  const [subject, setSubject] = useState<S<'Entity'] | null>(null);
+  const [subject, setSubject] = useState<Entity | null>(null);
   const [mode, setMode] = useState('');
   const nav = useNavigate();
   const plan = useMutation({
