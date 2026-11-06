@@ -132,7 +132,7 @@ type SectionSpec struct {
 
 ### 6.2 输出结构
 
-模型输出必须是 JSON，用 JSON Output 模式请求；Harness 再用 Go 侧的 JSON Schema 严格校验，不依赖厂商的 strict 能力。
+模型输出必须是 JSON，用 JSON Output 模式请求；Harness 再用 Go 侧的 JSON Schema 严格校验，不依赖厂商的 strict 能力。Schema 见 [contracts/model/](../contracts/model/)：section-output、verify-output、summary-output、plan-parse-output。这些 Schema 限定在厂商 strict 模式支持的子集内（对象封闭、所有字段必填、不用长度和 null 类型，不需要的字段填空字符串或空数组），以便将来切换 strict 模式；长度、条数上限由 Harness 规则检查。结论编号 `S3.1` 由 Harness 按顺序分配，模型不输出编号。
 
 ```json
 {
@@ -143,14 +143,14 @@ type SectionSpec struct {
       "text": "2025 年营业收入 120.00 亿元，同比增长 33.33%。",
       "refs": ["F12", "F15"],
       "numbers": [{"text": "120.00", "fact": "F12"}, {"text": "33.33", "fact": "F15"}],
-      "scenario": null
+      "scenario": {"trigger": "", "watch": [], "invalidation": ""}
     }
   ],
   "omitted": [{"reason": "insufficient_facts", "topic": "分产品毛利率"}]
 }
 ```
 
-`kind` 取值：`fact`、`computed`、`inference`、`attributed`、`scenario`。`scenario` 结论必须填写 `{"trigger": ..., "watch": [...fact_id], "invalidation": ...}`，不得给出概率或价格。
+`kind` 取值：`fact`、`computed`、`inference`、`attributed`、`scenario`。`scenario` 结论必须填写非空的 `trigger`、`watch`、`invalidation`，其他类型三者为空；不得给出概率或价格。
 
 `numbers` 由模型声明，但校验器会独立从 `text` 中提取所有数字，两边不一致即判为失败（§7）。
 

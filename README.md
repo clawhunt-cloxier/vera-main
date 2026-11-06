@@ -27,6 +27,10 @@ Vera 是可信金融投研 Agent 的网页应用。用户登录后在私人 work
 | [docs/HARNESS.md](docs/HARNESS.md) | 投研 Harness：计划、事实表、写作、核验、状态机、模型网关 |
 | [docs/DATA_SERVICE.md](docs/DATA_SERVICE.md) | 多厂商数据接入、统一数据集与字段、来源等级 |
 | [docs/skills/](docs/skills/) | 四个模块的章节、数据需求、公式与写作约束 |
+| [docs/WEB.md](docs/WEB.md) | 网站页面与交互（MVP）|
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | 自建组件、环境、管理 CLI、备份与发布 |
+| [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | 目录结构与编码约定 |
+| [contracts/](contracts/) | OpenAPI、请求 Schema、模型输出 Schema、数据集字段字典 |
 | [API.md](API.md) | HTTP 约定与路由 |
 | [DATA_MODEL.md](DATA_MODEL.md) | 表、隔离、事务与竞争 |
 | [TASKS.md](TASKS.md) | 任务、依赖、状态 |

@@ -1,0 +1,12 @@
+{
+  "intent": "research",
+  "skill_id": "capital_flow",
+  "subject_mentions": [
+    "DEMO 制造"
+  ],
+  "subject_kind": "stock",
+  "deep_research_mode": "none",
+  "window_days": 20,
+  "focus": "",
+  "unsupported_reason": "none"
+}

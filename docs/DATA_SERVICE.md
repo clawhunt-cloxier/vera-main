@@ -44,10 +44,11 @@ type Mapper interface {
 - 错误分类：`RATE_LIMITED`（可退避重试）、`AUTH_FAILED`（不重试，置 BLOCKED）、`NOT_COVERED`（该厂商不覆盖此对象或时间）、`SCHEMA_CHANGED`（映射失败，告警并隔离）、`UPSTREAM_UNAVAILABLE`（可重试）、`EMPTY_VALID`（确认无数据，例如当日无龙虎榜）。
 - 适配器只能访问配置中登记的域名；凭证以 secret 引用读取，不写日志。
 - 每个适配器必须附带录制样本与映射单元测试；`fixture` 适配器只在 development 和 test 模式可用，production 启动时检测到即拒绝启动。
+- `fixture` 适配器的数据按 [demo-universe](../tests/fixtures/demo-universe.json) 清单以固定种子生成：12 只演示证券、2 个演示行业，覆盖亏损、缺数据、金融类、次新与停牌、无报表、会计更正、成分调整，以及注入与诱导评级的对抗样例。
 
 ## 3. 数据集目录
 
-统一数据集按 `dataset_id` 登记，版本化。首版需要以下数据集（标注所属技能：S=个股分析，F=资金动向，D=深度研究，W=自选股）。
+统一数据集按 `dataset_id` 登记，版本化。字段级定义（字段名、类型、单位、必填、财务科目代码）见机器可校验的 [contracts/datasets/catalog.json](../contracts/datasets/catalog.json)，适配器与公式都以它为准。首版需要以下数据集（标注所属技能：S=个股分析，F=资金动向，D=深度研究，W=自选股）。
 
 | dataset_id | 内容 | 粒度 | 技能 | 必需性 |
 | --- | --- | --- | --- | --- |

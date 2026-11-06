@@ -31,6 +31,7 @@
 | POST | /api/v1/research-tasks/{id}/cancel | 校验 `expected_revision`；202 取消处理中 / 200 已取消 / 409 已完成 |
 | GET | /api/v1/reports | 报告列表，可按对象、技能过滤 |
 | GET | /api/v1/reports/{id}/versions/{version} | 已交付的报告：抬头、章节、结论、表格、图表数据、限制 |
+| GET | /api/v1/reports/{id}/versions/{version}/series/{series_id} | 报告图表数据，来自该报告冻结的数据快照，不取实时数据 |
 | GET | /api/v1/evidence/{id} | 证据版本：来源、口径、时点、原文片段或数值；不返回可公开访问的永久 URL |
 | GET | /api/v1/calculations/{id} | 公式、版本、输入引用、结果 |
 | POST | /api/v1/reports/{id}/versions/{version}/feedback | 反馈：useful/confusing/incorrect/other，可关联 claim；备注 ≤ 2000 字；幂等，201 |

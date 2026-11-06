@@ -3,8 +3,8 @@
 ## 1. 当前规范的优先级
 
 1. [ADR-0003](decisions/0003-product-harness-runtime.md)：当前有效的总体决定。它部分取代 ADR-0001，完全取代 ADR-0002 的模板与请求部分。
-2. 根目录 SPEC、ARCHITECTURE、API、DATA_MODEL，以及 [HARNESS](HARNESS.md)、[DATA_SERVICE](DATA_SERVICE.md)、[RESEARCH_SCOPE](RESEARCH_SCOPE.md)、[skills/](skills/)：实施基线。
-3. contracts/：机器可检查的传输契约，与 API.md 冲突时以契约为准，并修正 API.md。
+2. 根目录 SPEC、ARCHITECTURE、API、DATA_MODEL，以及 [HARNESS](HARNESS.md)、[DATA_SERVICE](DATA_SERVICE.md)、[RESEARCH_SCOPE](RESEARCH_SCOPE.md)、[skills/](skills/)、[WEB](WEB.md)、[OPERATIONS](OPERATIONS.md)、[CONVENTIONS](CONVENTIONS.md)：实施基线。
+3. contracts/：机器可检查的契约——openapi.json 与 schemas/（HTTP）、model/（模型输出）、datasets/catalog.json（数据集字段）。与文字规范冲突时以契约为准，并修正文字规范。
 4. AGENTS、CONTRIBUTING、[BRANCHING](BRANCHING.md)、[COLLABORATION](COLLABORATION.md)：协作规则。TASKS 记录事实进度。
 5. [research/](research/README.md)：历史研究档案，只作背景。其中与上述规范冲突的内容一律不适用。
 
@@ -14,15 +14,15 @@
 
 | 工作 | 必读 |
 | --- | --- |
-| 所有任务 | AGENTS、SPEC、TASKS、最新 handoff |
+| 所有任务 | AGENTS、SPEC、TASKS、CONVENTIONS、最新 handoff |
 | 工程门禁（T011） | CONTRIBUTING、BRANCHING、TESTING、API §4 |
-| 数据库与身份（T012、T013） | ARCHITECTURE、DATA_MODEL、API、SECURITY |
-| 数据服务（T014、T015） | DATA_SERVICE、DATA_MODEL §1.2、skills/ 中的数据需求表 |
+| 数据库与身份（T012、T013） | ARCHITECTURE、DATA_MODEL、API、SECURITY、OPERATIONS |
+| 数据服务（T014、T015） | DATA_SERVICE、contracts/datasets/catalog.json、tests/fixtures/demo-universe.json、DATA_MODEL §1.2 |
 | 公式与模型网关（T016、T017） | HARNESS §5、§9；skills/ 中的公式表 |
-| Harness 与技能（T018、T019） | HARNESS 全文、skills/、RESEARCH_SCOPE |
+| Harness 与技能（T018、T019a/b） | HARNESS 全文、contracts/model/、skills/、RESEARCH_SCOPE、demo-universe |
 | 评测（T020） | TESTING §3、HARNESS §11 |
-| 网站（T022） | SPEC §2–3、API、contracts/openapi.json、skills/ 的章节表、HARNESS §8 |
-| 部署（T023） | RELEASE、ARCHITECTURE §2、TESTING §4 |
+| 网站（T022） | WEB、API、contracts/openapi.json、skills/ 的章节表 |
+| 部署与管理（T023、T024） | OPERATIONS、RELEASE、TESTING §4 |
 
 ## 3. 历史研究档案的可复用内容
 

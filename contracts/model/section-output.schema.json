@@ -1,0 +1,120 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "section_id": {
+      "type": "string",
+      "pattern": "^S[0-9X]{1,2}$"
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "fact",
+              "computed",
+              "inference",
+              "attributed",
+              "scenario"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "description": "Chinese sentence; every number must equal the display of a cited fact"
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^F[0-9]{1,4}$"
+            }
+          },
+          "numbers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "fact": {
+                  "type": "string",
+                  "pattern": "^F[0-9]{1,4}$"
+                }
+              },
+              "required": [
+                "text",
+                "fact"
+              ]
+            }
+          },
+          "scenario": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "trigger": {
+                "type": "string",
+                "description": "empty string unless kind=scenario"
+              },
+              "watch": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^F[0-9]{1,4}$"
+                }
+              },
+              "invalidation": {
+                "type": "string",
+                "description": "empty string unless kind=scenario"
+              }
+            },
+            "required": [
+              "trigger",
+              "watch",
+              "invalidation"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "text",
+          "refs",
+          "numbers",
+          "scenario"
+        ]
+      }
+    },
+    "omitted": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "insufficient_facts",
+              "not_applicable",
+              "conflicting_facts"
+            ]
+          }
+        },
+        "required": [
+          "topic",
+          "reason"
+        ]
+      }
+    }
+  },
+  "required": [
+    "section_id",
+    "claims",
+    "omitted"
+  ]
+}

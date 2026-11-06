@@ -8,6 +8,7 @@ from decimal import Decimal as D, ROUND_HALF_UP
 ROOT = Path(__file__).resolve().parents[1]
 required = ['README.md','AGENTS.md','CLAUDE.md','SPEC.md','ARCHITECTURE.md','API.md','DATA_MODEL.md','TASKS.md','TESTING.md','CONTRIBUTING.md','docs/README.md','docs/RELEASE.md',
             'docs/HARNESS.md','docs/DATA_SERVICE.md','docs/RESEARCH_SCOPE.md','docs/decisions/0003-product-harness-runtime.md',
+            'docs/WEB.md','docs/OPERATIONS.md','docs/CONVENTIONS.md','contracts/datasets/catalog.json','tests/fixtures/demo-universe.json',
             'docs/skills/stock-analysis.md','docs/skills/capital-flow.md','docs/skills/deep-research.md','docs/skills/watchlist.md']
 for f in required:
     assert (ROOT/f).is_file(), f

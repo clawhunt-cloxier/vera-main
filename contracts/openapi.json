@@ -1148,6 +1148,64 @@
           }
         }
       }
+    },
+    "/api/v1/reports/{id}/versions/{version}/series/{series_id}": {
+      "get": {
+        "operationId": "getReportSeries",
+        "summary": "getReportSeries",
+        "description": "Frozen chart data from the report's dataset snapshot; never live data.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,40}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartSeries"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2283,24 +2341,26 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "series_id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9_]{1,40}$"
+                },
                 "kind": {
                   "enum": [
                     "line",
                     "bar",
-                    "area"
+                    "area",
+                    "candlestick"
                   ]
                 },
                 "title": {
                   "type": "string"
-                },
-                "data_ref": {
-                  "type": "string"
                 }
               },
               "required": [
+                "series_id",
                 "kind",
-                "title",
-                "data_ref"
+                "title"
               ]
             }
           },
@@ -2590,6 +2650,98 @@
           "added_at",
           "snapshot",
           "last_report"
+        ]
+      },
+      "ChartSeries": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "series_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "line",
+              "bar",
+              "area",
+              "candlestick"
+            ]
+          },
+          "x": {
+            "enum": [
+              "trade_date",
+              "report_period"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "points": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    ],
+                    "items": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "minItems": 2
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "points"
+              ]
+            }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "series_id",
+          "title",
+          "kind",
+          "x",
+          "unit",
+          "series",
+          "evidence_refs",
+          "note"
         ]
       }
     }

@@ -1,0 +1,54 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "claim_ref": {
+            "type": "string",
+            "pattern": "^S[0-9X]{1,2}\\.[0-9]{1,2}$"
+          },
+          "verdict": {
+            "enum": [
+              "supported",
+              "overstated",
+              "unsupported",
+              "wrong_kind"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rewrite": {
+            "type": "string",
+            "description": "weaker rewrite for overstated, else empty"
+          },
+          "suggested_kind": {
+            "enum": [
+              "fact",
+              "computed",
+              "inference",
+              "attributed",
+              "scenario",
+              "none"
+            ]
+          }
+        },
+        "required": [
+          "claim_ref",
+          "verdict",
+          "reason",
+          "rewrite",
+          "suggested_kind"
+        ]
+      }
+    }
+  },
+  "required": [
+    "verdicts"
+  ]
+}
