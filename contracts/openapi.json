@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Vera P0 API",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "Implementation target per ADR-0003. Only health/readiness implemented."
   },
   "security": [
@@ -118,6 +118,52 @@
       "get": {
         "operationId": "getMe",
         "summary": "getMe",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateMe",
+        "summary": "Update the experience label (never grants permissions)",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MePatch"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Success",
@@ -1206,6 +1252,54 @@
           }
         }
       }
+    },
+    "/api/v1/onboarding": {
+      "post": {
+        "operationId": "redeemInvite",
+        "summary": "Redeem an invite and create the private workspace (idempotent per user)",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1480,8 +1574,12 @@
             "format": "uuid"
           },
           "workspace_id": {
-            "type": "string",
-            "format": "uuid"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "null until an invite is redeemed"
           },
           "csrf_token": {
             "type": "string"
@@ -1520,15 +1618,29 @@
               "queued_remaining",
               "daily_remaining",
               "deep_research_daily_remaining"
-            ]
+            ],
+            "description": "All zero before onboarding"
+          },
+          "onboarded": {
+            "type": "boolean"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "description": "deployment uses demo data or simulated models; the UI shows a fixed banner"
+          },
+          "display_name": {
+            "type": "string"
           }
         },
         "required": [
-          "user_id",
-          "workspace_id",
           "csrf_token",
+          "display_name",
+          "onboarded",
           "persona",
-          "quota"
+          "quota",
+          "synthetic",
+          "user_id",
+          "workspace_id"
         ]
       },
       "Cancel": {
@@ -2742,6 +2854,46 @@
           "series",
           "evidence_refs",
           "note"
+        ]
+      },
+      "OnboardingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "invite_code": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 64
+          },
+          "persona": {
+            "enum": [
+              "fund_manager",
+              "analyst",
+              "individual",
+              "unspecified"
+            ]
+          }
+        },
+        "required": [
+          "invite_code",
+          "persona"
+        ]
+      },
+      "MePatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "persona": {
+            "enum": [
+              "fund_manager",
+              "analyst",
+              "individual",
+              "unspecified"
+            ]
+          }
+        },
+        "required": [
+          "persona"
         ]
       }
     }
