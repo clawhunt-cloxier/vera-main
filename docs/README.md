@@ -1,35 +1,43 @@
 # 开发资料导航
 
-## 当前规范与历史研究
+## 1. 当前规范的优先级
 
-根目录 SPEC/ARCHITECTURE/API/DATA_MODEL 是实施基线；contracts 是机器可检查的传输契约。AGENTS/CONTRIBUTING 定义协作，TASKS 定义事实进度。若冲突，应修正规范与契约，而不是让代码各选一套。
+1. [ADR-0003](decisions/0003-product-harness-runtime.md)：当前有效的总体决定。它部分取代 ADR-0001，完全取代 ADR-0002 的模板与请求部分。
+2. 根目录 SPEC、ARCHITECTURE、API、DATA_MODEL，以及 [HARNESS](HARNESS.md)、[DATA_SERVICE](DATA_SERVICE.md)、[RESEARCH_SCOPE](RESEARCH_SCOPE.md)、[skills/](skills/)：实施基线。
+3. contracts/：机器可检查的传输契约，与 API.md 冲突时以契约为准，并修正 API.md。
+4. AGENTS、CONTRIBUTING、[BRANCHING](BRANCHING.md)、[COLLABORATION](COLLABORATION.md)：协作规则。TASKS 记录事实进度。
+5. [research/](research/README.md)：历史研究档案，只作背景。其中与上述规范冲突的内容一律不适用。
 
-[首版决定](decisions/0001-p0-baseline.md) 收敛全部Q项；[协作流程](COLLABORATION.md)管理Agent交接；[上线依赖](RELEASE.md)只约束真实开放，不阻塞框架开发。
+发现冲突时，修正规范和契约，不要让代码各选一套。
 
-## 按任务阅读
+## 2. 按任务阅读
 
 | 工作 | 必读 |
 | --- | --- |
-| 所有任务 | 根 AGENTS、SPEC、TASKS 与当前handoff |
-| API与身份 | API、contracts/openapi.json、DATA_MODEL、SECURITY |
-| 数据治理 | 当前决定 + research/financial-research-data-governance-design.md |
-| Agent/Worker | ARCHITECTURE + research/financial-research-multi-agent-design.md |
-| 报告/前端 | 当前SPEC + research/financial-research-mvp-report-spec.md、模拟报告 |
-| 部署与恢复 | RELEASE、TESTING、research/financial-research-backend-design.md §14–15 |
+| 所有任务 | AGENTS、SPEC、TASKS、最新 handoff |
+| 工程门禁（T011） | CONTRIBUTING、BRANCHING、TESTING、API §4 |
+| 数据库与身份（T012、T013） | ARCHITECTURE、DATA_MODEL、API、SECURITY |
+| 数据服务（T014、T015） | DATA_SERVICE、DATA_MODEL §1.2、skills/ 中的数据需求表 |
+| 公式与模型网关（T016、T017） | HARNESS §5、§9；skills/ 中的公式表 |
+| Harness 与技能（T018、T019） | HARNESS 全文、skills/、RESEARCH_SCOPE |
+| 评测（T020） | TESTING §3、HARNESS §11 |
+| 网站（T022） | SPEC §2–3、API、contracts/openapi.json、skills/ 的章节表、HARNESS §8 |
+| 部署（T023） | RELEASE、ARCHITECTURE §2、TESTING §4 |
 
-## 完整研究档案
+## 3. 历史研究档案的可复用内容
 
-[research/README.md](research/README.md) 提供九份材料的详细导读，涵盖产品、后端、治理、Agent论文、RPC、年度模板、模拟样例、历史决策和变更。
+research/ 中以下设计在当前规范中被引用或简化后沿用，可作为实现细节参考：
 
-这些文件完整迁入以保留研究依据，但不再是待填写的当前决策表。模型价格、具体型号与论文状态是原研究快照，上线采购前复核。原“机构内部试用”“待确认”的范围已由根SPEC覆盖为基金经理及散户网站试用。P1/P2能力不因写在研究文档中就成为首版任务。
+- 数据治理：统一记录信封、L1–L5 来源等级、冲突与对账、快照冻结（已收敛到 DATA_SERVICE）。
+- Agent 设计：Operation 台账、未知外部调用的费用处理、崩溃窗口分析（已收敛到 HARNESS §9–10 与 DATA_MODEL §4）。
+- 年度模板：F01–F08 公式与财务口径规则（并入 skills/stock-analysis.md §4）。
 
-## 外部工程依据
+不适用的部分：Temporal 工作流与队列设计、多角色研讨与投票、T2 路由、gRPC 与 mTLS、Redis 缓存层、向量检索与重排、K8s 与多可用区部署。
 
-- [AGENTS.md 开放格式](https://agents.md/)：独立项目指令入口与命令说明。
-- [Claude Code 项目记忆](https://code.claude.com/docs/en/memory)：CLAUDE.md 导入，实际客户端确认加载；本仓库不依赖私有会话记忆。
-- [GitHub Spec Kit](https://github.com/github/spec-kit)：借鉴规格、计划、任务可追溯；不安装另一套自动审批流程。
-- [Go 发布策略](https://go.dev/doc/devel/release)、[Node 发布周期](https://nodejs.org/en/about/previous-releases)：工具链冻结和维护期复核。
+## 4. 外部参考
 
-当前产品范围与通用报告说明见 [研究范围](RESEARCH_SCOPE.md)。
-
-开发从 origin/dev 开始，main 为稳定发布线，见 [分支规范](BRANCHING.md)。
+- [AGENTS.md 开放格式](https://agents.md/)、[Claude Code 项目记忆](https://code.claude.com/docs/en/memory)：协作入口文件。
+- [River](https://github.com/riverqueue/river)：PostgreSQL 作业队列。
+- [DeepSeek API 文档](https://api-docs.deepseek.com/)：模型、价格、JSON Output、Tool Calls、上下文缓存。
+- [Qovest](https://news.aibase.com/news/32069)：同类产品的公开介绍。
+- [FinFIRST](https://arxiv.org/abs/2609.25192)：金融信息检索、来源核验与可追溯性评测，评分分为取数、来源核验、计算与答案三个维度。
