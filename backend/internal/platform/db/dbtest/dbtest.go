@@ -59,10 +59,17 @@ func start() {
 		startErr = err
 		return
 	}
-	pg := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
+	cfg := embeddedpostgres.DefaultConfig().
 		Version(embeddedpostgres.V18).Port(uint32(port)).
 		CachePath(filepath.Join(root, "cache")).RuntimePath(dir).
-		Logger(nil))
+		Logger(nil)
+	// VERA_TEST_PG_LOG=<file> keeps the server log, to diagnose crashes during a test run.
+	if lf := os.Getenv("VERA_TEST_PG_LOG"); lf != "" {
+		if f, err := os.Create(lf); err == nil {
+			cfg = cfg.Logger(f)
+		}
+	}
+	pg := embeddedpostgres.NewDatabase(cfg)
 	if err := pg.Start(); err != nil {
 		startErr = fmt.Errorf("start embedded postgres: %w", err)
 		return

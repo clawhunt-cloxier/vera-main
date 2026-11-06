@@ -240,6 +240,9 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 			}
 			doc.ResultKind = "limited"
 		}
+		if (ds.Status == "ok" || ds.Status == "limited") && !r.Verified {
+			doc.Limitations = append(doc.Limitations, fmt.Sprintf("%s %s：语义核验不可用，已删除推断与情景结论，仅保留经确定性检查的事实与计算结论。", s.ID, s.Title))
+		}
 		for _, c := range final {
 			if c.Section != s.ID {
 				continue

@@ -137,6 +137,8 @@ type writeOut struct {
 	Claims  []check.Claim `json:"claims"`
 	Removed []Removed     `json:"removed"`
 	Failed  string        `json:"failed"`
+	// Degraded marks a section whose semantic verification was unavailable (HARNESS 7.2 fallback).
+	Degraded bool `json:"degraded"`
 }
 
 func (e *Engine) checkCtx(t *taskRow, sheet *facts.Sheet, s Section) check.Context {
@@ -201,7 +203,7 @@ func (e *Engine) runSection(ctx context.Context, t *taskRow, sk *Skill, subject 
 	if err != nil {
 		return SectionResult{ID: s.ID}, err
 	}
-	res := SectionResult{ID: s.ID, Status: "ok", Claims: v.Claims, Removed: append(slices.Clone(w.Removed), v.Removed...), Verified: true}
+	res := SectionResult{ID: s.ID, Status: "ok", Claims: v.Claims, Removed: append(slices.Clone(w.Removed), v.Removed...), Verified: !v.Degraded}
 	if len(res.Claims) == 0 {
 		res.Status, res.Note = "omitted", "所有结论未通过核验"
 	} else if e.sectionState(t, s.ID) == "limited" {
@@ -239,7 +241,7 @@ func applyRules(claims []check.Claim, cx check.Context, s Section) writeOut {
 }
 
 func keepFactual(w writeOut) writeOut {
-	out := writeOut{}
+	out := writeOut{Degraded: true}
 	for _, c := range w.Claims {
 		if c.Kind == KInf || c.Kind == KScen {
 			out.Removed = append(out.Removed, Removed{Claim: c, Rule: "VERIFY", Reason: "语义核验不可用，删除推断与情景结论"})
