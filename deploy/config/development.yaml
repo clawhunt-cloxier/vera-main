@@ -1,0 +1,45 @@
+version: p0-2
+environment: development
+
+budgets:
+  stock_analysis:
+    deadline_seconds: 360
+    max_model_calls: 24
+    input_tokens: 240000
+    output_tokens: 36000
+    cost_limit_usd: "0.20"
+  capital_flow:
+    deadline_seconds: 300
+    max_model_calls: 16
+    input_tokens: 150000
+    output_tokens: 24000
+    cost_limit_usd: "0.12"
+  deep_research:
+    deadline_seconds: 900
+    max_model_calls: 48
+    input_tokens: 600000
+    output_tokens: 80000
+    cost_limit_usd: "0.50"
+  plan_parse:
+    deadline_seconds: 20
+    max_model_calls: 2
+    input_tokens: 6000
+    output_tokens: 600
+    cost_limit_usd: "0.01"
+
+quota:
+  user_active_tasks: 2
+  user_queued_tasks: 3
+  user_daily_tasks: 20
+  user_daily_deep_research: 5
+  platform_in_flight_tasks: 30
+  platform_model_concurrency: 32
+  per_task_model_concurrency: 6
+  platform_daily_cost_limit_usd: "30.00"
+  plan_parse_per_user_per_minute: 10
+
+model_call:
+  http_timeout_seconds: 90
+  transient_retries: 2
+  format_repairs: 1
+  unknown_result_hold_hours: 24

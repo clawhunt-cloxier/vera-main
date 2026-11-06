@@ -1,0 +1,26 @@
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	log {
+		output stdout
+		format json
+	}
+
+	# API and auth endpoints
+	handle /api/* {
+		reverse_proxy localhost:8081
+	}
+	handle /auth/* {
+		reverse_proxy localhost:8081
+	}
+
+	# Static web files
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}
