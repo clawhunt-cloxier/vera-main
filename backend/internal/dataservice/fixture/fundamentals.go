@@ -109,7 +109,7 @@ func (g *gen) fundamentals() {
 			if per.typ == "FY" {
 				g.fin[s.Code][fmt.Sprint(per.end.Year())] = finYear{revenue, net, parent, deducted, equity, opCash}
 			}
-			if short == "DM0001" && per.typ == "FY" {
+			if (short == "DM0001" || short == "DM0002") && per.typ == "FY" {
 				g.segments(s.Code, per, revenue)
 			}
 		}

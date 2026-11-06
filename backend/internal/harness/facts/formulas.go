@@ -60,6 +60,9 @@ func YoY(cur, prev Input) Calc {
 	if !prev.Value.IsPositive() {
 		return c.na("上年同期值不为正，同比增长率不适用")
 	}
+	if cur.Value.IsNegative() {
+		return c.na("本期由正转负，同比增长率不适用，以两期原值描述")
+	}
 	return c.ok(cur.Value.Div(prev.Value).Sub(one))
 }
 
@@ -309,4 +312,68 @@ func ConsecutiveDays(ps []Point) Calc {
 // StableID derives calculation IDs from the task and a key so recomputation is idempotent.
 func StableID(task uuid.UUID, epoch int64, key string) uuid.UUID {
 	return uuid.NewSHA1(task, fmt.Appendf(nil, "%d|%s", epoch, key))
+}
+
+// Derived records an aggregate calculation (industry sums, medians, shares) over many evidence inputs.
+// fn returns the result or a not-applicable reason. Used for F22 share_of_total, F25 top_n, F27 event_sum,
+// F28 aggregate_yoy, F19 net_margin and F26 interest_bearing_debt.
+func Derived(id, unit string, in []Input, fn func() (*decimal.Decimal, string)) Calc {
+	c := newCalc(id, unit, in)
+	v, reason := fn()
+	if v == nil {
+		return c.na(reason)
+	}
+	return c.ok(*v)
+}
+
+// Sum adds inputs (F27 event_sum / F26 interest_bearing_debt).
+func Sum(id, unit string, in []Input) Calc {
+	return Derived(id, unit, in, func() (*decimal.Decimal, string) {
+		t := decimal.Zero
+		for _, i := range in {
+			t = t.Add(i.Value)
+		}
+		return &t, ""
+	})
+}
+
+// AggregateYoY = sum(cur)/sum(prev) - 1 over the same member set, positive base only (F28).
+func AggregateYoY(cur, prev []Input) Calc {
+	all := append(slices.Clone(cur), prev...)
+	return Derived("F28.aggregate_yoy", "ratio", all, func() (*decimal.Decimal, string) {
+		a, b := decimal.Zero, decimal.Zero
+		for _, i := range cur {
+			a = a.Add(i.Value)
+		}
+		for _, i := range prev {
+			b = b.Add(i.Value)
+		}
+		if !b.IsPositive() {
+			return nil, "上年同期合计不为正"
+		}
+		r := a.Div(b).Sub(one)
+		return &r, ""
+	})
+}
+
+// Median of positive values (F16 variant for industry medians).
+func Median(id, unit string, in []Input, minN int) Calc {
+	return Derived(id, unit, in, func() (*decimal.Decimal, string) {
+		var vals []decimal.Decimal
+		for _, i := range in {
+			if i.Value.IsPositive() {
+				vals = append(vals, i.Value)
+			}
+		}
+		if len(vals) < minN {
+			return nil, fmt.Sprintf("有效样本 %d 个，不足 %d 个", len(vals), minN)
+		}
+		slices.SortFunc(vals, func(a, b decimal.Decimal) int { return a.Cmp(b) })
+		n := len(vals)
+		m := vals[n/2]
+		if n%2 == 0 {
+			m = vals[n/2-1].Add(vals[n/2]).Div(decimal.NewFromInt(2))
+		}
+		return &m, ""
+	})
 }

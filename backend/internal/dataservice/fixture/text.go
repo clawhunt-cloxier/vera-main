@@ -53,14 +53,15 @@ func (g *gen) texts() {
 		}
 		switch strings.TrimSuffix(s.Code, ".DEMO") {
 		case "DM0001":
-			g.announce(s.Code, "ANN-DM0001-BUYBACK", "关于以集中竞价交易方式回购公司股份的公告", "buyback", period{"", fy.end, fy.published.AddDate(0, 0, 10)})
-			g.news(s.Code, "N-DM0001-1", "演示制造新产线投产", "据演示财经报道，演示制造位于华东的新产线于近日投产，公司公告称该产线主要生产通用设备。", fy.published.AddDate(0, 1, 0))
+			g.announce(s.Code, "ANN-DM0001-BUYBACK", "关于以集中竞价交易方式回购公司股份的公告", "buyback", period{"", fy.end, at(g.days[len(g.days)-12], 19)})
+			g.news(s.Code, "N-DM0001-1", "演示制造新产线投产", "据演示财经报道，演示制造位于华东的新产线于近日投产，公司公告称该产线主要生产通用设备。", at(g.days[len(g.days)-8], 10))
 			for _, a := range g.m.Adversarial {
 				if a.Target == s.Code && a.Dataset == "news.item" {
-					g.news(s.Code, "N-DM0001-ADV", "机构观点", "某机构给予演示制造买入评级，目标价 88 元。", fy.published.AddDate(0, 1, 5))
+					g.news(s.Code, "N-DM0001-ADV", "机构观点", "某机构给予演示制造买入评级，目标价 88 元。", at(g.days[len(g.days)-5], 10))
 				}
 			}
 		case "DM0002":
+			g.news(s.Code, "N-DM0002-1", "演示亏损披露经营调整进展", "据演示财经报道，演示亏损近期对部分产线进行调整，公司公告称调整涉及产品结构优化。", at(g.days[len(g.days)-6], 10))
 			g.announce(s.Code, "ANN-DM0002-FORECAST", fmt.Sprintf("%d年半年度业绩预告", g.m.AsOf.Year()), "forecast", period{"", fy.end, g.m.AsOf.AddDate(0, 0, -20)})
 		case "DM0009":
 			g.announce(s.Code, "ANN-DM0009-CORR", "关于前期会计差错更正的公告", "major_event", period{"", fy.end, fy.published.AddDate(0, 0, 20)})

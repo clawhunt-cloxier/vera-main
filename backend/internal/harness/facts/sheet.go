@@ -114,7 +114,7 @@ func (s *Sheet) Computed(group, subject, label, period string, c Calc, key strin
 	f := Fact{Group: group, Subject: subject, Label: label, Period: period, Kind: KindComputed, Evidence: ev, CalcID: &id,
 		Change: c.Unit == "pp" || strings.Contains(c.FormulaID, "change") || strings.Contains(c.FormulaID, "yoy") ||
 			strings.Contains(c.FormulaID, "return") || strings.Contains(c.FormulaID, "gap") || strings.Contains(c.FormulaID, "premium") ||
-			strings.Contains(c.FormulaID, "drawdown")}
+			strings.Contains(c.FormulaID, "drawdown") || strings.Contains(c.FormulaID, "consecutive")}
 	if !c.OK() {
 		f.Display, f.Unit, f.Flags, f.Text = "不适用", "", []string{"not_applicable"}, c.Reason
 		return s.add(f)
@@ -123,6 +123,17 @@ func (s *Sheet) Computed(group, subject, label, period string, c Calc, key strin
 	f.Value = &v
 	f.Display, f.Unit = Display(v, c.Unit)
 	return s.add(f)
+}
+
+// Vendor marks a computed fact as derived from vendor-defined data, which requires the basis in prose (R-07).
+func (f *Fact) Vendor(basis string) *Fact { f.Kind, f.Basis = KindVendorDerived, basis; return f }
+
+// Flag adds a flag (restated, scheduled, small_base, stale, suspicious, …).
+func (f *Fact) Flag(fl string) *Fact {
+	if !slices.Contains(f.Flags, fl) {
+		f.Flags = append(f.Flags, fl)
+	}
+	return f
 }
 
 // TextFact adds a paragraph. Text facts carry no numeric value; numbers inside may only be quoted from Text.

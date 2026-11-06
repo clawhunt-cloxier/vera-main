@@ -37,7 +37,7 @@ func TestSyncAndPointInTimeQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	fy := time.Date(p.Now().Year()-1, 12, 31, 0, 0, 0, 0, time.UTC)
-	q := dataservice.Query{DatasetID: "fin.statement", EntityIDs: []uuid.UUID{dm9}, From: &fy, To: &fy, AsOf: p.Now()}
+	q := dataservice.Query{DatasetIDs: []string{"fin.statement"}, EntityIDs: []uuid.UUID{dm9}, From: &fy, To: &fy, AsOf: p.Now()}
 	recs, err := st.Query(ctx, q)
 	if err != nil {
 		t.Fatal(err)

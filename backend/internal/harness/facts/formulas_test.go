@@ -30,8 +30,8 @@ func TestFormulas(t *testing.T) {
 	if c := YoY(n("-5"), n("-10")); c.OK() {
 		t.Fatal("negative base must be NOT_APPLICABLE")
 	}
-	if c := YoY(n("-5"), n("10")); !c.OK() {
-		t.Fatal("positive base turning negative is computable")
+	if c := YoY(n("-5"), n("10")); c.OK() {
+		t.Fatal("sign change must be NOT_APPLICABLE (ADV-04)")
 	}
 	if c := ROE(n("10"), n("-50"), n("-30")); c.OK() {
 		t.Fatal("negative equity ROE must be NOT_APPLICABLE")

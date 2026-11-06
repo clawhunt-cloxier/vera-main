@@ -153,11 +153,6 @@ func checkKind(c Claim, cited []facts.Fact, cx Context) *Failure {
 			return fail("R-05", "fact 结论必须引用事实")
 		}
 	}
-	for _, f := range cited {
-		if slices.Contains(f.Flags, "not_applicable") && numberPat.MatchString(stripNonValues(c.Text)) && len(cited) == 1 {
-			return fail("R-02", "引用的计算 %s 不适用，不得给出数值", f.ID)
-		}
-	}
 	return nil
 }
 
@@ -217,24 +212,24 @@ var (
 func checkTime(text string, cited []facts.Fact, asOf time.Time) *Failure {
 	periods := ""
 	for _, f := range cited {
-		periods += " " + f.Period + " " + f.Label + " " + f.Text
+		periods += " " + f.Period + " " + f.Label + " " + f.Subject + " " + f.Text
 	}
 	for _, m := range fullDate.FindAllStringSubmatch(text, -1) {
 		y, _ := strconv.Atoi(m[1])
 		mo, _ := strconv.Atoi(m[2])
 		d, _ := strconv.Atoi(m[3])
 		t := time.Date(y, time.Month(mo), d, 0, 0, 0, 0, asOf.Location())
-		if t.After(asOf) {
+		iso := t.Format("2006-01-02")
+		if t.After(asOf) && !scheduled(cited, iso) {
 			return fail("R-04", "日期 %s 晚于数据截止时点", m[0])
 		}
-		iso := t.Format("2006-01-02")
 		if !strings.Contains(periods, iso) && !strings.Contains(periods, m[0]) {
 			return fail("R-04", "日期 %s 不属于被引用事实的期间", m[0])
 		}
 	}
 	for _, m := range append(yearMonth.FindAllStringSubmatch(text, -1), yearOnly.FindAllStringSubmatch(text, -1)...) {
 		y, _ := strconv.Atoi(m[1])
-		if y > asOf.Year() {
+		if y > asOf.Year() && !scheduled(cited, m[1]) {
 			return fail("R-04", "年份 %d 晚于数据截止时点", y)
 		}
 		if !strings.Contains(periods, m[1]) {
@@ -242,6 +237,16 @@ func checkTime(text string, cited []facts.Fact, asOf time.Time) *Failure {
 		}
 	}
 	return nil
+}
+
+// scheduled allows a future date only when a cited fact is an announced schedule (e.g. unlock date) for that date.
+func scheduled(cited []facts.Fact, iso string) bool {
+	for _, f := range cited {
+		if slices.Contains(f.Flags, "scheduled") && strings.Contains(f.Period, iso) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- R-02 / R-03 / R-08 numbers ----
@@ -255,16 +260,10 @@ var (
 	windowPat = regexp.MustCompile(`(近|过去|最近|前)\s*(\d+)\s*(个)?\s*(交易日|日|天|个月|月|年|季度|个季度|家)`)
 )
 
-var units = []string{"个百分点", "百分点", "亿元", "万元", "亿股", "万股", "%", "倍", "元", "股", "点", "家", "次", "户", "天", "个交易日", "只"}
+var units = []string{"个百分点", "百分点", "亿元", "万元", "亿股", "万股", "%", "倍", "元", "股", "点", "家", "次", "户", "天", "个交易日", "只", "笔", "位"}
 
 var up = []string{"增长", "增加", "上升", "上涨", "提升", "提高", "回升", "流入", "净买入", "扩大", "走高", "改善", "涨幅", "增幅", "净增", "多增", "溢价"}
 var down = []string{"下降", "减少", "下滑", "下跌", "降低", "回落", "流出", "净卖出", "收窄", "走低", "恶化", "萎缩", "跌幅", "降幅", "减幅", "净减", "回撤", "折价", "亏损"}
-
-func stripNonValues(text string) string {
-	t := codePat.ReplaceAllString(text, " ")
-	t = timePat.ReplaceAllString(t, " ")
-	return t
-}
 
 type token struct {
 	val      decimal.Decimal
@@ -314,6 +313,9 @@ func windows(text string) []string {
 	return out
 }
 
+// Direction returns +1/-1/0 for the last direction word in a clause (exported for simulators and tests).
+func Direction(before string) int { return direction(before) }
+
 func direction(before string) int {
 	if strings.Contains(before, "涨跌幅") || strings.Contains(before, "变化") || strings.Contains(before, "变动") {
 		// neutral words: sign must be explicit
@@ -339,8 +341,8 @@ func candidates(f facts.Fact) []decimal.Decimal {
 	if v, err := decimal.NewFromString(f.Display); err == nil {
 		out = append(out, v.Abs())
 	}
-	if f.Kind == facts.KindText {
-		for _, tk := range tokens(f.Text) {
+	if f.Kind == facts.KindText || f.Value == nil {
+		for _, tk := range tokens(f.Text + " " + f.Display) {
 			out = append(out, tk.val)
 		}
 	}
@@ -350,7 +352,7 @@ func candidates(f facts.Fact) []decimal.Decimal {
 func checkNumbers(c Claim, text string, cited []facts.Fact) *Failure {
 	context := ""
 	for _, f := range cited {
-		context += " " + f.Period + " " + f.Label
+		context += " " + f.Period + " " + f.Label + " " + f.Subject + " " + f.Basis
 	}
 	for _, w := range windows(text) {
 		if !slices.Contains(numberPat.FindAllString(context, -1), w) {
@@ -398,7 +400,7 @@ func checkNumbers(c Claim, text string, cited []facts.Fact) *Failure {
 }
 
 func checkUnit(tk token, f facts.Fact) *Failure {
-	if f.Kind == facts.KindText || f.Unit == "" {
+	if f.Kind == facts.KindText || f.Unit == "" || f.Value == nil {
 		return nil
 	}
 	want := f.Unit
