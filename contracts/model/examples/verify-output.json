@@ -1,0 +1,11 @@
+{
+  "verdicts": [
+    {
+      "claim_ref": "S3.1",
+      "verdict": "supported",
+      "reason": "F12、F15 直接给出",
+      "rewrite": "",
+      "suggested_kind": "none"
+    }
+  ]
+}

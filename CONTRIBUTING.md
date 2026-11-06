@@ -4,10 +4,10 @@
 
 ## 分支与任务领取
 
-- main 保持可验证；初始化之后通过短分支和 PR 集成，不 force push。
-- 每个 Agent 使用独立 worktree：`git worktree add ../vera-<actor>-Txxx -b agent/<actor>/Txxx-<slug> origin/main`。
-- 在自己的分支更新 TASKS.md owner/status/时间与 docs/handoffs 记录，并推送领取分支。集成负责人将领取变更合入 main 后才开始有冲突风险的工作；若无法创建PR，推送分支并向协作者提供commit，不假定本地领取全局可见。
-- 同时领取时以 main 中先合入的记录为准；另一个 Agent 重新选择任务。不使用对话中的私有承诺作为锁。
+- dev 保持可验证，main 保存发布基线；日常通过短分支和 PR 集成到 dev，不 force push。
+- 每个 Agent 使用独立 worktree：`git worktree add ../vera-<actor>-Txxx -b agent/<actor>/Txxx-<slug> origin/dev`。
+- 在自己的分支更新 TASKS.md owner/status/时间与 docs/handoffs 记录，并推送领取分支。集成负责人将领取变更合入 dev 后才开始有冲突风险的工作；若无法创建PR，推送分支并向协作者提供commit，不假定本地领取全局可见。
+- 同时领取时以 dev 中先合入的记录为准；另一个 Agent 重新选择任务。不使用对话中的私有承诺作为锁。
 - TASKS.md 的 REVIEW 表示工程代码审查，不是产品报告人工审核。
 
 ## PR 与完成
@@ -21,3 +21,5 @@ PR 写问题、变更、规范影响、测试命令/输出、限制、迁移及�
 ## 规范维护
 
 根规格冻结 P0，细节规则按 docs/README.md 的当前规范与历史研究划分维护；研究文档只提供背景。重大改变新增 docs/decisions/ ADR，解释影响、迁移和验收。例行库安全补丁可在任务中锁版本并记录，不需要重写总体架构。
+
+分支与发布的完整规则以 [BRANCHING](docs/BRANCHING.md) 为准；任务到 dev 用 squash，dev 到 main 用 merge commit。

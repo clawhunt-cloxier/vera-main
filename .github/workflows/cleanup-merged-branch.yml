@@ -1,0 +1,110 @@
+name: Cleanup merged task branch
+on:
+  pull_request:
+    branches: [dev]
+    types: [closed]
+permissions: {}
+concurrency:
+  group: cleanup-branch-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      # No checkout or execution of task-branch files. PR data is never shell code.
+      - name: Delete unchanged merged task branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import base64
+          import json
+          import os
+          import re
+          import subprocess
+          import tempfile
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          def cleanup(event, repo, api, remove):
+              pr = event.get('pull_request') or {}
+              if event.get('action') != 'closed' or pr.get('merged') is not True:
+                  return 'Skipped: PR was not merged'
+              if pr.get('base', {}).get('ref') != 'dev':
+                  return 'Skipped: target is not dev'
+              head = pr.get('head') or {}
+              if (head.get('repo') or {}).get('full_name') != repo:
+                  return 'Skipped: source is outside this repository'
+              branch, sha = head.get('ref', ''), head.get('sha', '')
+              if not re.fullmatch(r'(agent|feat|fix|docs)/.+', branch):
+                  return 'Skipped: source is not an eligible task branch'
+              if not re.fullmatch(r'[0-9a-f]{40}', sha):
+                  raise ValueError('Invalid event head SHA')
+              current = api('/pulls/' + str(int(pr['number'])))
+              if (not current['merged'] or current['state'] != 'closed'
+                      or current['base']['ref'] != 'dev'
+                      or current['head']['ref'] != branch
+                      or current['head']['sha'] != sha
+                      or (current['head'].get('repo') or {}).get('full_name') != repo):
+                  return 'Skipped: PR state changed'
+              if branch in ('main', 'dev', api('')['default_branch']):
+                  return 'Skipped: long-lived branch'
+              owner = repo.split('/')[0]
+              # Preserve branches used as either source or base of another open PR.
+              for key, value in [('head', owner + ':' + branch), ('base', branch)]:
+                  query = urllib.parse.urlencode({'state': 'open', key: value, 'per_page': 1})
+                  if api('/pulls?' + query):
+                      return 'Skipped: another open PR uses this branch'
+              ref = api('/git/ref/heads/' + urllib.parse.quote(branch, safe=''), missing_ok=True)
+              if ref is None:
+                  return 'Skipped: branch already deleted'
+              if ref['object']['sha'] != sha:
+                  return 'Skipped: branch has new commits'
+              # Lease is checked by Git during deletion, closing the SHA read/delete race.
+              remove(branch, sha)
+              return 'Deleted merged task branch: ' + branch
+
+          def main():
+              repo = os.environ['GITHUB_REPOSITORY']
+              token = os.environ['GH_TOKEN']
+              with open(os.environ['GITHUB_EVENT_PATH']) as stream:
+                  event = json.load(stream)
+              api_root = os.environ['GITHUB_API_URL'] + '/repos/' + repo
+              def api(path, missing_ok=False):
+                  request = urllib.request.Request(api_root + path, headers={
+                      'Authorization': 'Bearer ' + token,
+                      'Accept': 'application/vnd.github+json',
+                      'X-GitHub-Api-Version': '2022-11-28',
+                  })
+                  try:
+                      with urllib.request.urlopen(request, timeout=20) as response:
+                          return json.load(response)
+                  except urllib.error.HTTPError as error:
+                      if missing_ok and error.code == 404:
+                          return None
+                      raise
+              def remove(branch, sha):
+                  server = os.environ['GITHUB_SERVER_URL']
+                  auth = base64.b64encode(('x-access-token:' + token).encode()).decode()
+                  env = {**os.environ, 'VERA_GIT_AUTH': 'AUTHORIZATION: basic ' + auth,
+                         'GIT_TERMINAL_PROMPT': '0'}
+                  with tempfile.TemporaryDirectory() as directory:
+                      subprocess.run(['git', 'init', '--bare', '--quiet', directory], check=True)
+                      subprocess.run([
+                          'git', '--config-env=http.' + server + '/.extraheader=VERA_GIT_AUTH',
+                          '-c', 'credential.helper=', 'push',
+                          '--force-with-lease=refs/heads/' + branch + ':' + sha,
+                          server + '/' + repo + '.git', ':refs/heads/' + branch,
+                      ], cwd=directory, env=env, check=True, timeout=60)
+              print(cleanup(event, repo, api, remove))
+
+          if __name__ == '__main__':
+              main()

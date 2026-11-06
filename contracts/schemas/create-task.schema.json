@@ -1,45 +1,30 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Confirms a server-side research plan. Skill, subject, params and data scope come from the plan, never from this request.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "template_id": {
-      "const": "annual_financial_review"
-    },
-    "template_version": {
-      "const": "1.0.0"
-    },
-    "entity_id": {
+    "plan_id": {
       "type": "string",
       "format": "uuid"
     },
-    "report_year": {
-      "type": "integer",
-      "minimum": 2000,
-      "maximum": 2100
-    },
-    "research_as_of": {
+    "plan_hash": {
       "type": "string",
-      "format": "date-time"
+      "pattern": "^[0-9a-f]{64}$"
     },
-    "as_of_mode": {
-      "const": "public_as_of"
-    },
-    "purpose": {
-      "const": "trial_research"
-    },
-    "locale": {
-      "const": "zh-CN"
+    "disabled_sections": {
+      "type": "array",
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^S[0-9X]{1,2}$"
+      }
     }
   },
   "required": [
-    "template_id",
-    "template_version",
-    "entity_id",
-    "report_year",
-    "research_as_of",
-    "as_of_mode",
-    "purpose",
-    "locale"
-  ],
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+    "plan_id",
+    "plan_hash",
+    "disabled_sections"
+  ]
 }

@@ -6,7 +6,10 @@ import re
 from decimal import Decimal as D, ROUND_HALF_UP
 
 ROOT = Path(__file__).resolve().parents[1]
-required = ['README.md','AGENTS.md','CLAUDE.md','SPEC.md','ARCHITECTURE.md','API.md','DATA_MODEL.md','TASKS.md','TESTING.md','CONTRIBUTING.md','docs/README.md','docs/RELEASE.md']
+required = ['README.md','AGENTS.md','CLAUDE.md','SPEC.md','ARCHITECTURE.md','API.md','DATA_MODEL.md','TASKS.md','TESTING.md','CONTRIBUTING.md','docs/README.md','docs/RELEASE.md',
+            'docs/HARNESS.md','docs/DATA_SERVICE.md','docs/RESEARCH_SCOPE.md','docs/decisions/0003-product-harness-runtime.md',
+            'docs/WEB.md','docs/OPERATIONS.md','docs/CONVENTIONS.md','contracts/datasets/catalog.json','tests/fixtures/demo-universe.json',
+            'docs/skills/stock-analysis.md','docs/skills/capital-flow.md','docs/skills/deep-research.md','docs/skills/watchlist.md']
 for f in required:
     assert (ROOT/f).is_file(), f
 count = 0
@@ -30,8 +33,12 @@ for p in ROOT.rglob('*.md'):
 for p in (ROOT/'contracts').rglob('*.json'):
     json.loads(p.read_text())
 tasks=(ROOT/'TASKS.md').read_text()
-ids=re.findall(r'^\| (T\d{3}) \|',tasks,re.M)
-assert len(ids)==len(set(ids))==10
+rows=re.findall(r'^\| (T\d{3}[a-z]?) \|[^|]*\| ([^|]*) \| (TODO|IN_PROGRESS|REVIEW|DONE|BLOCKED) \|',tasks,re.M)
+ids=[r[0] for r in rows]
+assert ids and len(ids)==len(set(ids)), 'Task IDs must be unique and every row must carry a valid status'
+for tid, deps, _ in rows:
+    for dep in re.findall(r'T\d{3}[a-z]?', deps):
+        assert dep in ids, f'{tid} depends on unknown task {dep}'
 assert '@AGENTS.md' in (ROOT/'CLAUDE.md').read_text()
 f=json.loads((ROOT/'tests/fixtures/annual-review.json').read_text())
 assert f['synthetic'] and f['production_eligible'] is False

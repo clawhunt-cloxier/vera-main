@@ -1,46 +1,68 @@
 # 首版 HTTP API
 
-契约源：[contracts/openapi.json](contracts/openapi.json)，OpenAPI 3.1；请求结构以 contracts/schemas/ 中 JSON Schema 2020-12 为准。当前契约是实现目标；健康端点外的业务路由尚未实现，见 TASKS.md。
+契约源：[contracts/openapi.json](contracts/openapi.json)（OpenAPI 3.1）；请求结构以 contracts/schemas/ 中的 JSON Schema 2020-12 为准。当前只实现了健康检查，其余是实现目标，见 TASKS。
 
 ## 1. 身份与通用行为
 
-- 浏览器同源 API `/api/v1`，OIDC Authorization Code + PKCE 由后端完成，HttpOnly/Secure/SameSite=Lax 会话 cookie；不把访问 token 放 localStorage。
-- 开发仅本地可配置不使用 Secure cookie，生产启动拒绝。写请求验证 session 绑定的 CSRF token 与 Origin；token 从 GET /me 获取。
-- 服务端从会话确定 workspace，客户端不提交 tenant_id；证据/报告检查父任务归属及当前许可，越权资源统一 404。
-- 所有业务 JSON 响应带 request_id（健康探针和登录重定向除外），日志不存原文、密钥和 cookie。JSON 时间 RFC3339；decimal 用字符串；ID 为服务端 UUID，fixture 使用隔离 DEMO 命名空间。
-- 需要幂等的写方法带 Idempotency-Key（1–128 字符）。同 workspace+HTTP 方法+规范化路由+键同 hash 返回原响应，不同 hash 返回409；保存30天，核心业务唯一约束永久防重复。
-- 列表 page_size 默认20，上限100；不透明游标含排序边界，created_at+id 稳定排序；每页重新授权。响应不承诺跨页冻结。
+- 浏览器使用同源 API `/api/v1`。OIDC Authorization Code + PKCE 由后端完成，会话 cookie 为 HttpOnly、Secure、SameSite=Lax；访问 token 不放入 localStorage。
+- 只有开发环境可配置关闭 Secure cookie，生产环境启动时拒绝该配置。写请求校验会话绑定的 CSRF token 与 Origin；token 从 `GET /me` 获取。
+- 服务端从会话确定 workspace，客户端不提交 workspace 或租户 ID。访问不属于本 workspace 的资源一律返回 404。
+- 业务 JSON 响应带 `request_id`（健康检查和登录重定向除外）。日志不记录报告正文、密钥和 cookie。
+- 时间用 RFC3339；十进制数值用字符串；ID 为服务端生成的 UUID。
+- 需要幂等的写请求带 `Idempotency-Key`（1–128 字符）。同一 workspace、方法、规范化路由和键：请求哈希相同则返回原响应，不同则返回 409。幂等记录保存 30 天。
+- 列表：`page_size` 默认 20、上限 100；不透明游标，按 `created_at` + `id` 稳定排序。
 
 ## 2. 路由
 
 | 方法 | 路径 | 行为 |
 | --- | --- | --- |
-| GET | /healthz | 存活，不检查模型；无敏感配置 |
-| GET | /readyz | 当前骨架返回503；实现后检查必需启动配置和业务库，不以模型即时健康触发重启 |
-| GET | /auth/login、/auth/callback | 登录重定向与回调；state/nonce/PKCE、防开放重定向 |
-| POST | /auth/logout | 销毁本地 session，CSRF |
-| GET | /api/v1/me | 用户、workspace、CSRF token、配额摘要 |
-| GET | /api/v1/entities | q 搜索白名单主体；按名称/代码返回稳定 ID |
-| POST/GET | /api/v1/research-tasks | 幂等创建202 / 分页列表 |
-| GET | /api/v1/research-tasks/{id} | 阶段、revision、reason、可选 report_ref；无未验证正文 |
-| POST | /api/v1/research-tasks/{id}/cancel | 校验 expected_revision；202取消处理中/200已取消/409已完成 |
-| GET | /api/v1/reports/{id}/versions/{version} | 冻结报告和覆盖情况；只读已交付版本 |
-| GET | /api/v1/evidence/{id} | 通过 evidence_ref 对应唯一版本 ID 查询原文位置/许可内片段，不返回公开永久URL |
-| GET | /api/v1/calculations/{id} | 输入版本、公式与结果 |
-| POST | /api/v1/reports/{id}/versions/{version}/feedback | useful/confusing/incorrect/other；备注最多2000字，幂等201 |
+| GET | /healthz | 进程存活 |
+| GET | /readyz | 检查配置、数据库与 River 可用；不检查模型与厂商 |
+| GET | /auth/login、/auth/callback | 登录与回调；state、nonce、PKCE；防开放重定向；首次登录需有效邀请码 |
+| POST | /auth/logout | 销毁会话 |
+| GET | /api/v1/me | 用户、workspace、CSRF token、配额剩余 |
+| GET | /api/v1/skills | 技能列表、版本、参数 Schema、当前可用性 |
+| GET | /api/v1/entities | `q` 搜索；`kind` 过滤 stock/industry/market；返回各技能可用性 |
+| POST | /api/v1/research-plans | 一句话或结构化输入生成计划；返回计划或候选列表；不预留配额 |
+| GET | /api/v1/research-plans/{id} | 读取未过期计划 |
+| POST | /api/v1/research-tasks | 用 `plan_id` + `plan_hash` 确认计划并创建任务，幂等，202 |
+| GET | /api/v1/research-tasks | 任务列表，可按技能、状态、对象过滤 |
+| GET | /api/v1/research-tasks/{id} | 状态、revision、步骤进度、原因、`report_ref` |
+| POST | /api/v1/research-tasks/{id}/cancel | 校验 `expected_revision`；202 取消处理中 / 200 已取消 / 409 已完成 |
+| GET | /api/v1/reports | 报告列表，可按对象、技能过滤 |
+| GET | /api/v1/reports/{id}/versions/{version} | 已交付的报告：抬头、章节、结论、表格、图表数据、限制 |
+| GET | /api/v1/reports/{id}/versions/{version}/series/{series_id} | 报告图表数据，来自该报告冻结的数据快照，不取实时数据 |
+| GET | /api/v1/evidence/{id} | 证据版本：来源、口径、时点、原文片段或数值；不返回可公开访问的永久 URL |
+| GET | /api/v1/calculations/{id} | 公式、版本、输入引用、结果 |
+| POST | /api/v1/reports/{id}/versions/{version}/feedback | 反馈：useful/confusing/incorrect/other，可关联 claim；备注 ≤ 2000 字；幂等，201 |
+| GET / POST | /api/v1/watchlist | 列表 / 添加 |
+| PATCH / DELETE | /api/v1/watchlist/{item_id} | 修改标签、备注、提醒 / 移除 |
 
-轮询使用 Retry-After 建议3秒，可退避到15秒，终态停止；首版无 SSE。重新研究使用新的创建请求和新幂等键，不能自动覆盖旧报告。
+轮询：任务详情响应带 `Retry-After`，执行中建议 3 秒，可退避到 15 秒，终态后停止。首版不提供 SSE。
 
 ## 3. 错误
 
-错误信封 `{request_id, error:{code,message,retryable,details}}`。400 参数/范围错误；401 未登录；403 CSRF/用途拒绝；404 资源不可见；409 幂等冲突/并发版本冲突；422 预检查可确定的范围不支持；429 配额；503 依赖不可用。创建后发生的缺证是任务 ABSTAINED，不把成功查询任务写成 HTTP500。
+错误信封：`{request_id, error: {code, message, retryable, details}}`。
 
-业务终态 COMPLETED/ABSTAINED/BUDGET_EXHAUSTED/CANCELLED/BLOCKED/FAILED；result_kind 仅在可读报告上是 full/limited。取消、反馈和交付均不能接受客户端声明的验证通过。
+| 状态码 | 用途 |
+| --- | --- |
+| 400 | 参数格式错误 |
+| 401 | 未登录 |
+| 403 | CSRF 或 Origin 校验失败 |
+| 404 | 资源不存在或不可见 |
+| 409 | 幂等冲突、`plan_hash` 不匹配、计划过期、revision 冲突、`ALREADY_COMPLETED` |
+| 422 | 不支持的需求或对象（`UNSUPPORTED_REQUEST`、`UNSUPPORTED_SUBJECT`、`CAPABILITY_UNAVAILABLE`）|
+| 429 | 配额或限流 |
+| 503 | 依赖不可用 |
+
+任务创建成功后发生的缺数据、预算耗尽等情况通过任务终态表达，不返回 HTTP 5xx。
+
+任务终态：COMPLETED、ABSTAINED、BUDGET_EXHAUSTED、CANCELLED、BLOCKED、FAILED。`result_kind`（full/limited）只出现在已交付的报告上。客户端不能提交或修改核验结果。
 
 ## 4. 变更
 
-Schema、OpenAPI、Go DTO、前端类型一起更新，新增契约测试。生成器产物不能替代运行时语义验证；跨期口径、授权、价格和预算由业务服务检查。升级删除字段要经过版本兼容窗口，不默默改变已冻结任务的 schema。
+修改契约时同步更新 OpenAPI、JSON Schema、Go DTO、前端类型和契约测试。前端类型由 OpenAPI 生成（T013 选定生成器并锁定版本），不手写重复类型。删除或改名字段需要兼容窗口；已冻结的报告不随 schema 变化而改写。
 
-## 5. 领域对象与浏览器投影
+## 5. 浏览器投影
 
-OpenAPI 的 Claim 是报告页读取投影，并非模型直接输出结构；模型候选沿用 Agent 研究文档的领域协议，在验证和交付后由服务端转换。浏览器不回传 Claim，也不能改其状态。evidence_ref 指向被冻结的证据版本；GET /evidence/{id} 使用该版本的 UUID，而非厂商记录 ID。原文位置、来源级别和引用许可由数据治理写入，禁止在展示时用模型补造。
+OpenAPI 中的 Claim、Evidence 是报告页的读取投影，不是模型的输出结构；模型输出结构见 [HARNESS](docs/HARNESS.md) §6.2。浏览器不能回传或修改 Claim。证据的来源等级、口径和原文位置由数据服务写入，展示时不由模型补充。

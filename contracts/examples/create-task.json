@@ -1,10 +1,7 @@
 {
-  "template_id": "annual_financial_review",
-  "template_version": "1.0.0",
-  "entity_id": "00000000-0000-4000-8000-000000000001",
-  "report_year": 2025,
-  "research_as_of": "2026-04-30T23:59:59+08:00",
-  "as_of_mode": "public_as_of",
-  "purpose": "trial_research",
-  "locale": "zh-CN"
+  "plan_id": "00000000-0000-4000-8000-000000000101",
+  "plan_hash": "05af1c05a553bc1e17cc928a4ff83f19699cf13be2689a79600b6fec8ae83bb2",
+  "disabled_sections": [
+    "S9"
+  ]
 }

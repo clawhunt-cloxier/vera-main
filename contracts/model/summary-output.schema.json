@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "claim_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^S[0-9X]{1,2}\\.[0-9]{1,2}$"
+            }
+          }
+        },
+        "required": [
+          "text",
+          "claim_refs"
+        ]
+      }
+    }
+  },
+  "required": [
+    "points"
+  ]
+}
