@@ -35,4 +35,4 @@ T000/T001：2026-11-04 20:26 UTC 完成，本地检查证据及范围限制见 [
 
 日常领取与集成真值在 dev，任务 PR 目标 dev。分支规范初始化：Codex / agent/codex/branch-policy；范围为协作规范与 CI，详见 docs/BRANCHING.md。现有范围调整分支待以 dev 为目标审查集成。
 
-CI 运行时修订（REVIEW）：Codex / agent/codex/ci-action-runtime；仅升级基础 Action 的 Node 24 运行时，见 [交接](docs/handoffs/2026-11-06-ci-runtime-codex.md)。
+CI 运行时修订（REVIEW）：Codex / agent/codex/ci-action-runtime；升级基础 Action 的 Node 24 运行时，并加入 dev 合并后任务分支自动清理，见 [交接](docs/handoffs/2026-11-06-ci-runtime-codex.md)。

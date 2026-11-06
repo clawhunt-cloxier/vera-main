@@ -63,3 +63,15 @@ GitHub 配置路径：Settings → Rules → Rulesets（或 Branches）。待实
 ## 本次迁移
 
 用户已要求落实分支规范。本次从现有 main 创建 dev，并直接写入分支规范与 CI，作为一次性流程初始化；不代表业务发布或独立审查完成。之后执行上述 PR 流程。既有 agent/codex/p0-research-scope 保留，下一步以 dev 为目标提交 PR并完成契约审查；不静默合入该范围变更。
+
+## 合并后自动清理
+
+[Cleanup merged task branch](../.github/workflows/cleanup-merged-branch.yml) 在 PR closed 且 merged=true、目标为 dev 时执行，仅删除本仓库的 agent/*、feat/*、fix/*、docs/* 分支。hotfix/* 留待 main/dev 修复同步完成后手动清理；main、dev、当前默认分支以及其他命名空间不删除。
+
+工作流重新读取 PR，检查是否有其他打开的 PR 将来源分支作为 head 或 base，并核对分支 SHA。删除通过 Git 的明确 SHA lease 完成，若检查后又有新提交，远端拒绝删除。仅此维护作业申请 contents:write 和 pull-requests:read；不检出或执行任务分支的文件。删除被权限/保护规则拒绝时作业失败并保留分支，不修改保护配置。分支已不存在时跳过。
+
+流程使用 pull_request/closed，随合并后的 dev 工作流生效；不会追溯清理历史分支，首次合并需查看 Actions 确认触发和仓库权限。不要将这个合并后作业设为合并前的 required check，也不需要额外开启 GitHub 全仓库的自动删分支选项。
+
+自动化只删除远端任务引用。开发机仍需 git fetch origin --prune，随后确认 PR 已合并、没有新增本地提交和未提交文件，再移除对应 worktree 并删除本地分支。squash 后 git branch --merged 不能证明全部已合入；应结合 PR 记录和本地内容确认。一个任务分支合入后不再复用，新任务从 dev 新建分支。
+
+依据：[GitHub 合并事件说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)。

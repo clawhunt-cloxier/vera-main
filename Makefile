@@ -1,4 +1,4 @@
-.PHONY: setup setup-web check-docs check-contracts test-go build-web verify dev-api dev-web
+.PHONY: setup setup-web check-docs check-contracts test-go test-automation build-web verify dev-api dev-web
 setup:
 	python3 -m venv .venv
 	.venv/bin/python -m pip install -r tooling/requirements.txt
@@ -13,7 +13,9 @@ test-go:
 	cd backend && go test -race ./...
 build-web:
 	cd web && npm ci && npm run build
-verify: check-docs check-contracts test-go build-web
+test-automation:
+	.venv/bin/python scripts/test_branch_cleanup.py
+verify: check-docs check-contracts test-go test-automation build-web
 dev-api:
 	cd backend && go run ./cmd/api
 dev-web:
