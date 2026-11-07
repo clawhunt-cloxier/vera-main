@@ -1,0 +1,300 @@
+--- /home/cloxier/go/pkg/mod/github.com/tdewolff/font@v0.0.0-20260822205238-d0d2f004b117/sfnt_cff.go	2026-11-07 07:07:26.647900492 +0800
++++ /home/cloxier/.claude/jobs/668a3dce/tmp/fontfork/sfnt_cff.go	2026-11-07 07:50:48.369241822 +0800
+@@ -483,7 +483,7 @@
+ 				}
+ 				stack = stack[:0]
+ 			case cffHintmask, cffCntrmask:
+-				if b0 == cffHintmask && 0 < len(stack) {
++				if (b0 == cffHintmask || b0 == cffCntrmask) && 0 < len(stack) {
+ 					// vstem or vstemhm
+ 					if len(stack)%2 != 0 {
+ 						return fmt.Errorf("%v: %v", table, ErrBadNumOperands)
+@@ -1040,6 +1040,9 @@
+ // reindex subroutines in the order in which they appear and rearrange the global and local subroutines INDEX
+ func (cff *cffTable) ReindexSubrs() error {
+ 	if 1 < len(cff.fonts.localSubrs) {
++		return cff.blankUnusedSubrs()
++	}
++	if 1 < len(cff.fonts.localSubrs) {
+ 		return fmt.Errorf("only single-font CFFs are supported")
+ 	}
+ 
+@@ -1304,7 +1307,7 @@
+ 	} else if offSize == 3 {
+ 		for _, offset := range t.offset {
+ 			w.WriteUint8(uint8((offset + 1) >> 16))
+-			w.WriteUint16(uint16((offset + 1) & 0x00FF))
++			w.WriteUint16(uint16((offset + 1) & 0xFFFF))
+ 		}
+ 	} else if offSize == 4 {
+ 		for _, offset := range t.offset {
+@@ -2102,6 +2105,9 @@
+ 		return nil, fmt.Errorf("unsupported version: %d", cff.version)
+ 	}
+ 
++	if cff.top != nil && cff.top.IsCID && cff.fonts != nil && 0 < len(cff.fonts.private) {
++		return cff.writeCID()
++	}
+ 	if 1 < len(cff.fonts.private) || 1 < len(cff.fonts.localSubrs) {
+ 		return nil, fmt.Errorf("must contain only one font")
+ 	}
+--- /home/cloxier/go/pkg/mod/github.com/tdewolff/font@v0.0.0-20260822205238-d0d2f004b117/sfnt_subset.go	2026-11-07 07:07:26.648562024 +0800
++++ /home/cloxier/.claude/jobs/668a3dce/tmp/fontfork/sfnt_subset.go	2026-11-07 07:26:19.380615275 +0800
+@@ -190,6 +190,21 @@
+ 				cff.charset = charset
+ 			}
+ 
++			// the Font DICT selection follows the glyph order, so remap it to the subset before looking up subroutines
++			if cff.fonts != nil && 1 < len(cff.fonts.private) {
++				fonts := *cff.fonts
++				fonts.fds = make([]uint8, len(glyphIDs))
++				for i, glyphID := range glyphIDs {
++					fd, ok := sfntOld.CFF.fonts.Index(uint32(glyphID))
++					if !ok || int(fd) >= len(fonts.private) {
++						return nil, fmt.Errorf("CFF: bad FDSelect for glyph %v", glyphID)
++					}
++					fonts.fds[i] = uint8(fd)
++				}
++				fonts.first, fonts.fd = nil, nil
++				cff.fonts = &fonts
++			}
++
+ 			// trim globalSubrs and localSubrs INDEX
+ 			if err := cff.ReindexSubrs(); err != nil {
+ 				return nil, err
+--- /dev/null	2026-11-04 02:25:20.979761611 +0800
++++ /home/cloxier/.claude/jobs/668a3dce/tmp/fontfork/sfnt_cff_cid.go	2026-11-07 07:26:19.380615275 +0800
+@@ -0,0 +1,233 @@
++package font
++
++import (
++	"fmt"
++
++	"github.com/tdewolff/parse/v2"
++)
++
++// blankUnusedSubrs keeps every subroutine index in place but replaces subroutines that no glyph uses with a
++// bare return, per Font DICT for local subroutines. Indices and biases stay valid, so charstrings need no rewrite.
++func (cff *cffTable) blankUnusedSubrs() error {
++	numGlyphs := uint16(cff.charStrings.Len())
++	nFD := len(cff.fonts.localSubrs)
++	localUsed := make([]map[int32]bool, nFD)
++	for i := range localUsed {
++		localUsed[i] = map[int32]bool{}
++	}
++	globalUsed := map[int32]bool{}
++	for glyphID := uint16(0); glyphID < numGlyphs; glyphID++ {
++		fd, ok := cff.fonts.Index(uint32(glyphID))
++		if !ok || int(fd) >= nFD {
++			return fmt.Errorf("CFF: bad FDSelect for glyph %v", glyphID)
++		}
++		err := cff.parseCharString(glyphID, func(_ *parse.BinaryReader, b0 int32, stack []int32) error {
++			if b0 != cffCallsubr && b0 != cffCallgsubr {
++				return nil
++			} else if len(stack) == 0 {
++				return ErrBadNumOperands
++			}
++			index, _, err := cff.getSubroutine(glyphID, b0, stack[len(stack)-1])
++			if err != nil {
++				return err
++			}
++			if b0 == cffCallsubr {
++				localUsed[fd][index] = true
++			} else {
++				globalUsed[index] = true
++			}
++			return nil
++		})
++		if err != nil {
++			return err
++		}
++	}
++	blank := func(in *cffINDEX, used map[int32]bool) *cffINDEX {
++		if in == nil {
++			return nil
++		}
++		out := &cffINDEX{}
++		for i := 0; i < in.Len(); i++ {
++			if used[int32(i)] {
++				out.Add(in.Get(uint16(i)))
++			} else {
++				out.Add([]byte{0x0B}) // return
++			}
++		}
++		return out
++	}
++	fonts := *cff.fonts
++	fonts.localSubrs = make([]*cffINDEX, nFD)
++	for i := range fonts.localSubrs {
++		fonts.localSubrs[i] = blank(cff.fonts.localSubrs[i], localUsed[i])
++	}
++	cff.fonts = &fonts
++	cff.globalSubrs = blank(cff.globalSubrs, globalUsed)
++	return nil
++}
++
++// writeCID writes a CID-keyed CFF with one Private DICT and Local Subrs INDEX per Font DICT. The charset is the
++// identity mapping (CID equals glyph ID), which is what PDF writers expect after subsetting.
++func (cff *cffTable) writeCID() ([]byte, error) {
++	if cff.version != 1 {
++		return nil, fmt.Errorf("unsupported version: %d", cff.version)
++	}
++	numGlyphs := cff.charStrings.Len()
++	nFD := len(cff.fonts.private)
++	if nFD == 0 || 255 < nFD || len(cff.fonts.localSubrs) != nFD {
++		return nil, fmt.Errorf("CID font: bad number of Font DICTs")
++	}
++	// fixed-size integers keep every offset calculation single-pass
++	int5 := func(w *parse.BinaryWriter, v int) {
++		w.WriteUint8(29)
++		w.WriteUint32(uint32(v))
++	}
++
++	nameIdx := &cffINDEX{}
++	nameIdx.Add([]byte(cff.name))
++	nameINDEX, err := nameIdx.Write()
++	if err != nil {
++		return nil, fmt.Errorf("Name INDEX: %v", err)
++	}
++
++	strs := &cffINDEX{}
++	topBase, err := cff.top.Write(strs)
++	if err != nil {
++		return nil, fmt.Errorf("Top DICT: %v", err)
++	}
++	reg := strs.AddSID([]byte("Adobe"))
++	ord := strs.AddSID([]byte("Identity"))
++	stringINDEX, err := strs.Write()
++	if err != nil {
++		return nil, fmt.Errorf("String INDEX: %v", err)
++	}
++
++	globalSubrs := cff.globalSubrs
++	if globalSubrs == nil {
++		globalSubrs = &cffINDEX{}
++	}
++	globalSubrsINDEX, err := globalSubrs.Write()
++	if err != nil {
++		return nil, fmt.Errorf("Global Subrs INDEX: %v", err)
++	}
++	charStringsINDEX, err := cff.charStrings.Write()
++	if err != nil {
++		return nil, fmt.Errorf("CharStrings INDEX: %v", err)
++	}
++
++	var charset []byte
++	if 2 <= numGlyphs {
++		charset = []byte{2, 0, 1, byte((numGlyphs - 2) >> 8), byte(numGlyphs - 2)}
++	} else {
++		charset = []byte{0}
++	}
++	fdSelect := make([]byte, 1+numGlyphs) // format 0
++	for g := 0; g < numGlyphs; g++ {
++		fd, ok := cff.fonts.Index(uint32(g))
++		if !ok || int(fd) >= nFD {
++			return nil, fmt.Errorf("CID font: bad FDSelect for glyph %d", g)
++		}
++		fdSelect[1+g] = byte(fd)
++	}
++
++	privs := make([][]byte, nFD)
++	subrs := make([][]byte, nFD)
++	for i := 0; i < nFD; i++ {
++		if cff.fonts.private[i] == nil {
++			return nil, fmt.Errorf("CID font: missing Private DICT %d", i)
++		}
++		p, err := cff.fonts.private[i].Write()
++		if err != nil {
++			return nil, fmt.Errorf("Private DICT: %v", err)
++		}
++		if ls := cff.fonts.localSubrs[i]; ls != nil && 0 < ls.Len() {
++			subrs[i], err = ls.Write()
++			if err != nil {
++				return nil, fmt.Errorf("Local Subrs INDEX: %v", err)
++			}
++			pw := parse.NewBinaryWriter(append([]byte{}, p...))
++			int5(pw, len(p)+6) // Subrs offset is relative to the Private DICT and the INDEX follows it
++			pw.WriteUint8(19)
++			p = pw.Bytes()
++		}
++		privs[i] = p
++	}
++
++	buildTop := func(charsetOff, fdSelectOff, charStringsOff, fdArrayOff int) ([]byte, error) {
++		w := parse.NewBinaryWriter([]byte{})
++		writeDICTEntry(w, 256+30, reg, ord, 0) // ROS must come first
++		w.WriteBytes(topBase)
++		writeDICTEntry(w, 256+34, numGlyphs)
++		int5(w, charsetOff)
++		w.WriteUint8(15)
++		int5(w, fdSelectOff)
++		w.WriteUint8(12)
++		w.WriteUint8(37)
++		int5(w, charStringsOff)
++		w.WriteUint8(17)
++		int5(w, fdArrayOff)
++		w.WriteUint8(12)
++		w.WriteUint8(36)
++		idx := &cffINDEX{}
++		idx.Add(w.Bytes())
++		return idx.Write()
++	}
++	buildFDs := func(offs []int) ([]byte, error) {
++		idx := &cffINDEX{}
++		for i := 0; i < nFD; i++ {
++			w := parse.NewBinaryWriter([]byte{})
++			int5(w, len(privs[i]))
++			int5(w, offs[i])
++			w.WriteUint8(18)
++			idx.Add(w.Bytes())
++		}
++		return idx.Write()
++	}
++
++	header := []byte{1, 0, 4, 1}
++	topProbe, err := buildTop(0, 0, 0, 0)
++	if err != nil {
++		return nil, fmt.Errorf("Top DICT INDEX: %v", err)
++	}
++	fdProbe, err := buildFDs(make([]int, nFD))
++	if err != nil {
++		return nil, fmt.Errorf("Font DICT INDEX: %v", err)
++	}
++	charsetOff := len(header) + len(nameINDEX) + len(topProbe) + len(stringINDEX) + len(globalSubrsINDEX)
++	fdSelectOff := charsetOff + len(charset)
++	charStringsOff := fdSelectOff + len(fdSelect)
++	fdArrayOff := charStringsOff + len(charStringsINDEX)
++	offs := make([]int, nFD)
++	next := fdArrayOff + len(fdProbe)
++	for i := range offs {
++		offs[i] = next
++		next += len(privs[i]) + len(subrs[i])
++	}
++	topINDEX, err := buildTop(charsetOff, fdSelectOff, charStringsOff, fdArrayOff)
++	if err != nil {
++		return nil, fmt.Errorf("Top DICT INDEX: %v", err)
++	}
++	fdINDEX, err := buildFDs(offs)
++	if err != nil {
++		return nil, fmt.Errorf("Font DICT INDEX: %v", err)
++	}
++	if len(topINDEX) != len(topProbe) || len(fdINDEX) != len(fdProbe) {
++		return nil, fmt.Errorf("CID font: unstable DICT sizes")
++	}
++
++	w := parse.NewBinaryWriter([]byte{})
++	w.WriteBytes(header)
++	w.WriteBytes(nameINDEX)
++	w.WriteBytes(topINDEX)
++	w.WriteBytes(stringINDEX)
++	w.WriteBytes(globalSubrsINDEX)
++	w.WriteBytes(charset)
++	w.WriteBytes(fdSelect)
++	w.WriteBytes(charStringsINDEX)
++	w.WriteBytes(fdINDEX)
++	for i := 0; i < nFD; i++ {
++		w.WriteBytes(privs[i])
++		w.WriteBytes(subrs[i])
++	}
++	return w.Bytes(), nil
++}

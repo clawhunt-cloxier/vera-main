@@ -64,7 +64,7 @@ export function ReportPage({ id }: { id: string }) {
       <p><Link to="/app/reports">← 返回报告列表</Link></p>
       {r.isLoading && <Loading />}
       {r.error && <ErrorBox error={r.error} />}
-      {r.data && <ReportView report={r.data} loaders={loaders} onFeedback={(ref) => { fb.reset(); setFeedbackClaim(ref); }} />}
+      {r.data && <ReportView report={r.data} loaders={loaders} actions={<a className="btn-link" href={`/api/v1/reports/${id}/versions/${r.data.version}/pdf`} download>下载 PDF</a>} onFeedback={(ref) => { fb.reset(); setFeedbackClaim(ref); }} />}
       {feedbackClaim && (
         <Dialog title="反馈结论" onClose={() => { fb.reset(); setFeedbackClaim(''); }}>
           <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); fb.mutate({ kind: fd.get('kind') as 'useful' | 'confusing' | 'incorrect' | 'other', comment: String(fd.get('comment') ?? '').slice(0, 2000), claim_ref: feedbackClaim }); }}>

@@ -324,6 +324,26 @@ func TestAPIFlow(t *testing.T) {
 	}
 	b = c.json("POST", rp+"/feedback", map[string]any{"kind": "useful", "claim_ref": rep.Claims[0].Ref}, 201, nil)
 	k.check(t, schema("Feedback"), b)
+	// PDF export: typeset on the server, embedded fonts, same access rules as the report itself.
+	code, pdfBody, hdr := c.do("GET", rp+"/pdf", nil, nil)
+	if code != 200 {
+		t.Fatalf("pdf export: %d %s", code, clip(string(pdfBody), 300))
+	}
+	if ct := hdr.Get("Content-Type"); ct != "application/pdf" {
+		t.Fatalf("pdf content type %q", ct)
+	}
+	if cd := hdr.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") || !strings.Contains(cd, "filename*=UTF-8''") {
+		t.Fatalf("pdf content disposition %q", cd)
+	}
+	if !bytes.HasPrefix(pdfBody, []byte("%PDF-")) || !bytes.Contains(pdfBody[max(0, len(pdfBody)-64):], []byte("%%EOF")) {
+		t.Fatalf("pdf body is not a complete PDF (%d bytes)", len(pdfBody))
+	}
+	if len(pdfBody) < 20_000 || len(pdfBody) > 5<<20 {
+		t.Fatalf("pdf size %d out of the expected range", len(pdfBody))
+	}
+	if !bytes.Contains(pdfBody, []byte("SourceHanSansCN")) {
+		t.Fatal("pdf does not embed the Source Han Sans font")
+	}
 	// Watchlist.
 	var wi struct {
 		ID      uuid.UUID `json:"id"`
@@ -344,10 +364,16 @@ func TestAPIFlow(t *testing.T) {
 	bob := e.login(t, "bob")
 	bob.json("POST", "/api/v1/onboarding", map[string]string{"invite_code": codes[1], "persona": "individual"}, 200, nil)
 	bob.json("GET", rp, nil, 404, nil)
+	bob.json("GET", rp+"/pdf", nil, 404, nil)
 	bob.json("GET", "/api/v1/research-tasks/"+task.ID.String(), nil, 404, nil)
 	bob.json("GET", "/api/v1/evidence/"+rep.Claims[0].Ev[0].String(), nil, 404, nil)
 	bob.json("DELETE", "/api/v1/watchlist/"+wi.ID.String(), nil, 404, nil)
 	c.json("DELETE", "/api/v1/watchlist/"+wi.ID.String(), nil, 204, nil)
+
+	// Signed-out requests are refused.
+	if code, _, _ := (&client{t: t, e: e, http: &http.Client{}}).do("GET", rp+"/pdf", nil, nil); code != 401 {
+		t.Fatalf("signed-out pdf export: %d want 401", code)
+	}
 
 	b = c.json("GET", "/readyz", nil, 200, nil)
 	k.check(t, resp("/readyz", "get", "200"), b)

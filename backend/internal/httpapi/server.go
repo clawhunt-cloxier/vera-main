@@ -70,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	m.Handle("POST /api/v1/research-tasks/{id}/cancel", auth(s.idempotent(h(s.cancelTask))))
 	m.Handle("GET /api/v1/reports", auth(h(s.listReports)))
 	m.Handle("GET /api/v1/reports/{id}/versions/{version}", auth(h(s.getReport)))
+	m.Handle("GET /api/v1/reports/{id}/versions/{version}/pdf", auth(h(s.getReportPDF)))
 	m.Handle("GET /api/v1/reports/{id}/versions/{version}/series/{series_id}", auth(h(s.getSeries)))
 	m.Handle("POST /api/v1/reports/{id}/versions/{version}/feedback", auth(s.idempotent(h(s.feedback))))
 	m.Handle("GET /api/v1/evidence/{id}", auth(h(s.getEvidence)))

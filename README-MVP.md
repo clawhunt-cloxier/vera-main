@@ -97,3 +97,11 @@ export DATABASE_URL='postgres://vera:vera-demo@127.0.0.1:55433/vera?sslmode=disa
 
 - 模型密钥只放环境变量，不写入文件、不提交。
 - 开发登录与 vera demo 只用于本机。生产环境会拒绝开发登录以及 fixture、sim、replay。
+
+## 10. 导出 PDF
+
+- 报告页点「下载 PDF」，或请求 `GET /api/v1/reports/{id}/versions/{version}/pdf`。权限与读取报告相同：需要登录，且只能导出自己工作区的报告，其他用户得到 404，未登录得到 401。
+- PDF 在服务器端用纯 Go 排版（`backend/internal/reportpdf`）。思源黑体 Regular 和 Bold 内嵌在二进制里，许可证为 SIL OFL，文本见 `backend/internal/reportpdf/fonts/`。导出不依赖浏览器、系统字体或客户端环境，输出体积约 0.2MB。
+- 版面：封面、带页码的目录、章节正文（结论类型标签和编号）、情景条件面板、表格（自动列宽、跨页重复表头、数值右对齐）、矢量折线图、面积图和柱状图、数据与限制、阅读指引、页眉页脚、书签。受限或未生成的章节在目录和正文里明确标出。
+- 已验证：用真实模型生成的资金动向（6 页）和深度研究（7 页）报告渲染并逐页看图；在浏览器里点「下载 PDF」取得文件；API 测试覆盖状态码、响应头、文件头尾、字体内嵌以及跨用户隔离。
+- 限制：只导出已交付的报告，不含证据面板内容；版面只用这两份样例报告验证过，没有对超长表格或几十页的报告做视觉验收；`backend/third_party/tdewolff-font` 是打过补丁的上游字体库副本（补丁见其中 `PATCHES.diff`）。

@@ -75,3 +75,11 @@
 4. `choose` 分支没有在浏览器里走过；仓库里没有 Playwright 用例。
 5. `contracts/examples/policy.json` 的预算为演示放宽，试点前必须收紧。
 6. 模型密钥出现在对话记录里，联调结束后需要轮换。
+
+## 更新：报告导出 PDF
+
+- 新增 `GET /api/v1/reports/{id}/versions/{version}/pdf`，已登记到 OpenAPI，并在 `TestAPIFlow` 中覆盖。前端报告页新增下载入口。
+- 排版在 `backend/internal/reportpdf`。canvas 对思源黑体（CID-keyed CFF）的子集化不可用，于是把 `tdewolff/font` 以 `replace` 方式放进 `backend/third_party/tdewolff-font`，补了三处：多 Font DICT 的 CFF 子集化与写出；`cntrmask` 对隐含 vstem 的计数（上游缺陷，导致大部分汉字解析失败）；cmap format 4 写出（原实现会产生非法 idRangeOffset）。补丁见该目录下 `PATCHES.diff`，建议之后向上游提交。
+- 字体文件约 17MB，直接提交进仓库（没有 Git LFS）。仓库此前最大的文件只有 92KB，请审阅时留意。
+- 已知排版经验：canvas 的 `TextOptions.Indent` 会把缩进插在首字符之后，所以不要使用；居中对齐拉丁字母混排的粗体标签会叠字，标签改为左对齐。
+- 未验证：超长表格、几十页报告的视觉效果；没有 PDF 视觉回归测试，目前只有结构性断言。

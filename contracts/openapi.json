@@ -1300,6 +1300,56 @@
           }
         }
       }
+    },
+    "/api/v1/reports/{id}/versions/{version}/pdf": {
+      "get": {
+        "operationId": "exportReportPdf",
+        "summary": "exportReportPdf",
+        "description": "Server-side typeset PDF of a delivered report version (A4, embedded fonts). Content is the same frozen document as getReport.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF file",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
