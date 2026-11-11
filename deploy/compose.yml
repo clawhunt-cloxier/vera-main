@@ -1,69 +1,30 @@
+# Test environment: one container running `vera demo` (embedded PostgreSQL, dev login).
+# Host nginx terminates TLS and proxies to 127.0.0.1:8080. Secrets live in ./.env (mode 600), never in git.
 services:
-  vera-api:
-    image: ghcr.io/clawhunt-cloxier/vera-main:dev
-    container_name: vera-api
+  vera:
+    image: ${VERA_IMAGE:-ghcr.io/clawhunt-cloxier/vera-main:dev}
+    container_name: vera
     restart: unless-stopped
-    ports:
-      - "8080:8080"
+    command: ["demo"]
+    env_file: .env
     environment:
-      - VERA_MODE=production
-      - VERA_LISTEN_ADDR=:8080
-      - VERA_WEB_DIR=/app/web/dist
-      - VERA_DB_DRIVER=postgres
-      - VERA_DB_DSN=${VERA_DB_DSN}
-      - VERA_SESSION_SECRET=${VERA_SESSION_SECRET}
-      - VERA_OIDC_ISSUER=${VERA_OIDC_ISSUER:-https://accounts.google.com}
-      - VERA_OIDC_CLIENT_ID=${VERA_OIDC_CLIENT_ID}
-      - VERA_OIDC_CLIENT_SECRET=${VERA_OIDC_CLIENT_SECRET}
-      - VERA_MODEL_PROVIDER=${VERA_MODEL_PROVIDER:-openai}
-      - VERA_MODEL_API_KEY=${VERA_MODEL_API_KEY}
-      - VERA_MODEL_BASE_URL=${VERA_MODEL_BASE_URL}
-      - VERA_REGISTRATION_ENABLED=${VERA_REGISTRATION_ENABLED:-false}
-      - VERA_REAL_RESEARCH_ENABLED=${VERA_REAL_RESEARCH_ENABLED:-false}
-      - TZ=Asia/Shanghai
+      VERA_ENV: test
+      VERA_API_ADDR: 0.0.0.0:8080
+      VERA_WEB_DIR: /app/web/dist
+      VERA_DEMO_DIR: /data
+      VERA_COOKIE_SECURE: "true"
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
-      - vera-data:/app/data
-    command: ["api"]
+      - vera-data:/data
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/readyz"]
-      interval: 30s
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  vera-worker:
-    image: ghcr.io/clawhunt-cloxier/vera-main:dev
-    container_name: vera-worker
-    restart: unless-stopped
-    environment:
-      - VERA_MODE=production
-      - VERA_DB_DRIVER=postgres
-      - VERA_DB_DSN=${VERA_DB_DSN}
-      - VERA_MODEL_PROVIDER=${VERA_MODEL_PROVIDER:-openai}
-      - VERA_MODEL_API_KEY=${VERA_MODEL_API_KEY}
-      - VERA_MODEL_BASE_URL=${VERA_MODEL_BASE_URL}
-      - VERA_REAL_RESEARCH_ENABLED=${VERA_REAL_RESEARCH_ENABLED:-false}
-      - TZ=Asia/Shanghai
-    volumes:
-      - vera-data:/app/data
-    command: ["worker"]
-    depends_on:
-      vera-api:
-        condition: service_healthy
-
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: vera-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - vera-api
+      retries: 5
+      start_period: 90s
 
 volumes:
   vera-data:
-    driver: local

@@ -1,120 +1,54 @@
-# Vera 部署指南
+# Vera 测试环境部署
 
-## 服务器环境准备
+测试环境对应 `dev` 分支：PR 合入 dev 且 `Verify` 工作流通过后，`Deploy to Test Environment` 自动构建镜像、推送 GHCR，并通过 SSH 更新服务器。
 
-### 1. 创建部署用户和配置 Docker
+## 架构
 
-已在服务器 `38.76.222.210` 上完成：
-- 安装 Docker 和 docker-compose-v2
-- 创建 `deploy` 用户并加入 docker 组
-- 配置 sudoers 允许 deploy 用户管理 vera 服务
-- 生成 SSH 密钥对用于 CD
+- 单个容器运行 `vera demo`：内嵌 PostgreSQL、开发登录、API、Worker 与前端静态文件。
+- 数据持久化在 Docker volume `vera-data`（挂载到容器 `/data`）。
+- 宿主机 nginx 终止 TLS，反向代理到 `127.0.0.1:8080`，站点配置模板见 `deploy/nginx-host.conf`。
+- 镜像：`ghcr.io/<owner>/<repo>`，标签 `dev` 与 `sha-<12位commit>`。
 
-### 2. 在服务器上创建部署目录
+## 服务器目录 `/opt/vera`（属主 deploy）
+
+| 文件 | 说明 |
+| --- | --- |
+| `compose.yml` | 由 CD 每次上传，来源 `deploy/compose.yml` |
+| `.env` | 权限 600，只在服务器上维护，不入库，模板见 `deploy/.env.example` |
+| `.current_image` | 最近一次健康的镜像标签，CD 用于回滚 |
+
+`.env` 中的模型密钥、价格表版本等使用真实变量名（`MODEL_{WRITER|VERIFIER|ROUTER}_*`、`VERA_PUBLIC_URL` 等），完整列表见 `backend/internal/platform/config/config.go`。
+
+## GitHub Secrets
+
+在仓库 Settings → Secrets and variables → Actions 配置：
+
+- `DEPLOY_HOST`：服务器地址。
+- `DEPLOY_SSH_KEY`：deploy 用户的 SSH 私钥。
+- `GHCR_PAT`：用于服务器拉取镜像的 PAT，仅需 `read:packages`。
+- `DEPLOY_KNOWN_HOSTS`（建议）：服务器主机指纹（`ssh-keyscan` 输出）。未设置时 CD 回退为现场扫描，存在被中间人替换的风险。
+
+## 更新与回滚
+
+- 自动：CD 拉取 `sha-<commit>` 镜像并启动，轮询 `/readyz` 最多约 200 秒；失败时自动回滚到 `.current_image` 记录的上一版本，并让工作流失败。
+- 手动回滚：
 
 ```bash
-ssh deploy@38.76.222.210
-sudo mkdir -p /opt/vera
-sudo chown deploy:deploy /opt/vera
 cd /opt/vera
+VERA_IMAGE=ghcr.io/<owner>/<repo>:sha-<旧commit> docker compose up -d
+echo ghcr.io/<owner>/<repo>:sha-<旧commit> > .current_image
 ```
 
-### 3. 创建 `.env` 文件
+## 常用命令
 
 ```bash
-cd /opt/vera
-cp deploy/.env.example .env
-# 编辑 .env 填入真实的凭证
-```
-
-必填环境变量：
-- `VERA_DB_DSN`: PostgreSQL 连接串（推荐使用托管数据库）
-- `VERA_SESSION_SECRET`: 会话密钥（用 `openssl rand -base64 32` 生成）
-- `VERA_OIDC_CLIENT_ID` / `VERA_OIDC_CLIENT_SECRET`: OIDC 登录凭证
-- `VERA_MODEL_API_KEY`: 模型 API 密钥
-
-### 4. 配置 GitHub Secrets
-
-在 GitHub 仓库的 Settings > Secrets and variables > Actions 中添加：
-
-- `DEPLOY_HOST`: `38.76.222.210`
-- `DEPLOY_SSH_KEY`: 服务器上 deploy 用户的私钥（已生成并打印）
-- `GHCR_PAT`: GitHub Personal Access Token（需要 `packages:read` 权限）
-
-## CD 工作流
-
-工作流在 `.github/workflows/deploy.yml`，触发条件：
-- CI 工作流在 `dev` 分支成功完成后自动触发
-- 构建 Docker 镜像并推送到 GHCR
-- SSH 到服务器，拉取新镜像并重启服务
-
-## 手动部署
-
-```bash
-ssh deploy@38.76.222.210
-cd /opt/vera
-
-# 拉取最新镜像
-docker compose pull
-
-# 启动服务
-docker compose up -d
-
-# 查看状态
 docker compose ps
-docker compose logs -f vera-api
-docker compose logs -f vera-worker
-
-# 健康检查
-curl http://localhost:8080/readyz
+docker compose logs -f vera
+curl -fsS http://127.0.0.1:8080/readyz
 ```
 
-## 数据库迁移
+## 注意事项
 
-首次部署需要运行迁移：
-
-```bash
-docker compose run --rm vera-api migrate
-```
-
-## 服务管理
-
-```bash
-# 重启
-docker compose restart
-
-# 停止
-docker compose down
-
-# 查看日志
-docker compose logs -f
-
-# 进入容器
-docker compose exec vera-api sh
-```
-
-## Nginx（可选）
-
-如果需要 HTTPS 和域名访问：
-
-1. 将 SSL 证书放到 `deploy/ssl/` 目录
-2. 取消注释 `deploy/nginx.conf` 中的 HTTPS server 块
-3. 重启 nginx 容器
-
-## 监控和日志
-
-- 健康检查端点：`/readyz`
-- API 日志：`docker compose logs vera-api`
-- Worker 日志：`docker compose logs vera-worker`
-- 数据持久化：Docker volume `vera-data`
-
-## 回滚
-
-```bash
-# 查看历史镜像
-docker images ghcr.io/clawhunt-cloxier/vera-main
-
-# 切换到特定版本
-docker tag ghcr.io/clawhunt-cloxier/vera-main:<sha> ghcr.io/clawhunt-cloxier/vera-main:dev
-docker compose up -d
-```
+- `vera demo` 使用开发登录，任何知道地址的人都能以任意用户名登录并消耗模型额度。测试环境对公网开放前，应加访问保护（nginx basic auth 或 IP 白名单），并保持 `VERA_DAILY_MODEL_COST_LIMIT_USD` 在可接受范围。
+- 内嵌 PostgreSQL 不能以 root 运行，镜像已使用非 root 用户 `vera`（uid 10001）；volume 首次创建时会继承 `/data` 的属主。
+- 轮换：对话中出现过的 DeepSeek 密钥、root 密码、deploy 私钥建议在上线后轮换。

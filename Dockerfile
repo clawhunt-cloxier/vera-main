@@ -25,17 +25,21 @@ COPY --from=web-builder /build/web/dist ./web/dist/
 RUN cd backend && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /vera ./cmd/vera
 
 # Stage 3: Final minimal image
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata && \
-    addgroup -g 10001 vera && \
-    adduser -u 10001 -G vera -D -h /home/vera vera
-WORKDIR /app
-COPY --from=go-builder --chown=vera:vera /vera /app/vera
+# debian-slim, not alpine: embedded PostgreSQL ships glibc binaries.
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata curl && rm -rf /var/lib/apt/lists/* && \
+    groupadd -g 10001 vera && useradd -u 10001 -g vera -m -d /home/vera vera && \
+    mkdir -p /data && chown vera:vera /data
+# Relative defaults (../contracts, ../deploy/config, ../tests/fixtures) resolve from /app/backend.
+WORKDIR /app/backend
+COPY --from=go-builder --chown=vera:vera /vera /app/backend/vera
 COPY --from=go-builder --chown=vera:vera /build/contracts /app/contracts
 COPY --from=go-builder --chown=vera:vera /build/deploy/config /app/deploy/config
 COPY --from=go-builder --chown=vera:vera /build/tests/fixtures /app/tests/fixtures
 COPY --from=go-builder --chown=vera:vera /build/web/dist /app/web/dist
+ENV VERA_ENV=test VERA_API_ADDR=0.0.0.0:8080 VERA_WEB_DIR=/app/web/dist VERA_DEMO_DIR=/data
 USER vera
+VOLUME /data
 EXPOSE 8080
-ENTRYPOINT ["/app/vera"]
-CMD ["api"]
+ENTRYPOINT ["/app/backend/vera"]
+CMD ["demo"]
