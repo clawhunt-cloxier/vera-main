@@ -105,7 +105,10 @@ jobs:
           set -euo pipefail
           cd /opt/vera
           IFS= read -r PAT
-          printf '%s' "$PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+          if ! printf '%s' "$PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin; then
+            echo "docker login to ghcr.io failed: check GHCR_PAT (read:packages, SSO authorized for the org) and package access" >&2
+            exit 1
+          fi
           unset PAT
           prev="$(cat .current_image 2>/dev/null || true)"
           deploy() {
