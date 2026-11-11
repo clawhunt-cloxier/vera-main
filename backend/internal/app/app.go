@@ -37,8 +37,7 @@ type App struct {
 
 // Provider returns the configured data provider. Vendor adapters register here once their SDK/contract is provided.
 func newProvider(c *config.Config) (dataservice.Provider, error) {
-	switch c.DataProvider {
-	case "fixture":
+	if c.DataProvider == "fixture" {
 		return fixture.New(c.FixtureManifest)
 	}
 	return nil, fmt.Errorf("data provider %q is not implemented yet: vendor adapters are added when vendor documentation is available", c.DataProvider)

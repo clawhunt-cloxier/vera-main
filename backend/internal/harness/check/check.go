@@ -410,7 +410,7 @@ func checkUnit(tk token, f facts.Fact) *Failure {
 		}
 		return nil
 	}
-	if tk.unit != want && !(want == "个交易日" && tk.unit == "天") {
+	if tk.unit != want && (want != "个交易日" || tk.unit != "天") {
 		return fail("R-03", "数字 %s 的单位“%s”与事实单位“%s”不一致", tk.raw, tk.unit, want)
 	}
 	return nil

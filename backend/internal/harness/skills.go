@@ -118,15 +118,6 @@ func (c cov) has(e uuid.UUID, ds ...string) bool {
 	return false
 }
 
-func (c cov) all(e uuid.UUID, ds ...string) bool {
-	for _, d := range ds {
-		if !c[e][d] {
-			return false
-		}
-	}
-	return true
-}
-
 func listedTradingDays(ctx context.Context, e *Engine, subject dataservice.EntityRow, asOf time.Time) (int, error) {
 	recs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{"mkt.daily_bar"}, EntityIDs: []uuid.UUID{subject.ID}, AsOf: asOf})
 	return len(recs), err

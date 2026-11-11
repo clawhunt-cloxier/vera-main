@@ -3,7 +3,6 @@ package harness
 import (
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -595,12 +594,4 @@ func (b *builder) industryMargins(industries []dataservice.EntityRow, membersOf 
 			facts.Derived("F18.balance_change", "CNY", all, func() (*decimal.Decimal, string) { return &tt, "" }), "mkt|indm|"+ind.Code)
 		f.Change = true
 	}
-}
-
-func joinNames(b *builder, ids []uuid.UUID) string {
-	var s []string
-	for _, id := range ids {
-		s = append(s, b.B.Entities[id].Name)
-	}
-	return strings.Join(s, "、")
 }

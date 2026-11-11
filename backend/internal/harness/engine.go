@@ -451,7 +451,8 @@ func step[T any](ctx context.Context, e *Engine, t *taskRow, key string, fn func
 		return out, err
 	}
 	if status == "SUCCEEDED" && stored != nil {
-		return out, json.Unmarshal(stored, &out)
+		err = json.Unmarshal(stored, &out)
+		return out, err
 	}
 	if err := e.stillCurrent(ctx, t); err != nil {
 		return out, err
