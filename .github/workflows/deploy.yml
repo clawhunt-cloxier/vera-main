@@ -1,0 +1,124 @@
+name: Deploy to Test Environment
+
+on:
+  workflow_run:
+    workflows: ["Verify"]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  deploy:
+    name: Build image and deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Resolve commit and image names
+        id: vars
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          sha="${RUN_SHA:-$GITHUB_SHA}"
+          image="${REGISTRY}/${GITHUB_REPOSITORY,,}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.vars.outputs.sha }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.image }}:dev
+            ${{ steps.vars.outputs.image }}:sha-${{ steps.vars.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Prepare SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -T 10 -H "$DEPLOY_HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: Upload compose file
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes deploy/compose.yml "deploy@${DEPLOY_HOST}:/opt/vera/compose.yml"
+
+      - name: Deploy with health check and rollback
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          GHCR_USER: ${{ github.actor }}
+          NEW_IMAGE: ${{ steps.vars.outputs.image }}:sha-${{ steps.vars.outputs.short }}
+        run: |
+          # The PAT travels over stdin only; the remote script is a quoted heredoc (no local expansion).
+          printf '%s\n' "$GHCR_PAT" | ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" \
+            "GHCR_USER='${GHCR_USER}' NEW_IMAGE='${NEW_IMAGE}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/vera
+          IFS= read -r PAT
+          printf '%s' "$PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+          unset PAT
+          prev="$(cat .current_image 2>/dev/null || true)"
+          deploy() {
+            VERA_IMAGE="$1" docker compose -f compose.yml pull
+            VERA_IMAGE="$1" docker compose -f compose.yml up -d --remove-orphans
+            for i in $(seq 1 40); do
+              if curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1; then return 0; fi
+              sleep 5
+            done
+            return 1
+          }
+          if deploy "$NEW_IMAGE"; then
+            echo "$NEW_IMAGE" > .current_image
+            echo "deployed $NEW_IMAGE"
+            docker image prune -f >/dev/null
+          else
+            echo "readyz failed for $NEW_IMAGE" >&2
+            docker compose -f compose.yml logs --tail=80 vera >&2 || true
+            if [ -n "$prev" ]; then
+              echo "rolling back to $prev" >&2
+              deploy "$prev" || echo "rollback also unhealthy" >&2
+            fi
+            exit 1
+          fi
+          REMOTE
+
+      - name: Cleanup SSH material
+        if: always()
+        run: rm -rf ~/.ssh/deploy_key

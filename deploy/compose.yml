@@ -1,0 +1,30 @@
+# Test environment: one container running `vera demo` (embedded PostgreSQL, dev login).
+# Host nginx terminates TLS and proxies to 127.0.0.1:8080. Secrets live in ./.env (mode 600), never in git.
+services:
+  vera:
+    image: ${VERA_IMAGE:-ghcr.io/clawhunt-cloxier/vera-main:dev}
+    container_name: vera
+    restart: unless-stopped
+    command: ["demo"]
+    env_file: .env
+    environment:
+      VERA_ENV: test
+      VERA_API_ADDR: 0.0.0.0:8080
+      VERA_WEB_DIR: /app/web/dist
+      VERA_DEMO_DIR: /data
+      VERA_COOKIE_SECURE: "true"
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - vera-data:/data
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+volumes:
+  vera-data:
