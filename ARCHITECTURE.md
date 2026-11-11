@@ -37,7 +37,7 @@ flowchart TB
 - `vera-harness`：开发者 CLI，提供 replay、eval 和数据适配器测试。
 - `vera-admin`：管理 CLI（邀请、用户、配额、厂商、费用、紧急停止），见 [OPERATIONS](docs/OPERATIONS.md)。
 
-部署方式为单机 Docker Compose，包含 caddy（静态文件与 TLS）、api、worker、postgres、对象存储、keycloak，全部自建（ADR-0003 D11）。代码目录与编码约定见 [CONVENTIONS](docs/CONVENTIONS.md)。业务库与对象存储使用持久卷。
+当前测试环境为 MVP 形态：单容器 `vera demo`（内嵌 PostgreSQL）加宿主机 nginx，见 [DEPLOYMENT](docs/DEPLOYMENT.md)；以下为目标形态。部署方式为单机 Docker Compose，包含 caddy（静态文件与 TLS）、api、worker、postgres、对象存储、keycloak，全部自建（ADR-0003 D11）。代码目录与编码约定见 [CONVENTIONS](docs/CONVENTIONS.md)。业务库与对象存储使用持久卷。
 
 ## 3. 后端模块
 

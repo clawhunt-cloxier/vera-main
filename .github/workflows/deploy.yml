@@ -1,10 +1,11 @@
 name: Deploy to Test Environment
 
 on:
-  workflow_run:
-    workflows: ["Verify"]
-    types: [completed]
+  push:
     branches: [dev]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   workflow_dispatch:
 
 concurrency:
@@ -19,15 +20,15 @@ jobs:
     name: Build image and deploy
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       packages: write
+      actions: read
     steps:
       - name: Resolve commit and image names
         id: vars
         env:
-          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_SHA: ${{ github.sha }}
         run: |
           sha="${RUN_SHA:-$GITHUB_SHA}"
           image="${REGISTRY}/${GITHUB_REPOSITORY,,}"
@@ -35,6 +36,18 @@ jobs:
           echo "short=${sha:0:12}" >> "$GITHUB_OUTPUT"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for Verify on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.vars.outputs.sha }}
+        run: |
+          for i in $(seq 1 60); do
+            c=$(gh run list -R $GITHUB_REPOSITORY --workflow Verify --commit $SHA --json conclusion --jq .[0].conclusion || true)
+            echo verify=$c
+            case $c in success) exit 0;; failure|cancelled|timed_out) exit 1;; esac
+            sleep 30
+          done
+          exit 1
       - uses: actions/checkout@v5
         with:
           ref: ${{ steps.vars.outputs.sha }}
