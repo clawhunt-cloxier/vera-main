@@ -16,6 +16,8 @@ FROM golang:${GO_VERSION}-alpine AS go-builder
 RUN apk add --no-cache git ca-certificates
 WORKDIR /build
 COPY backend/go.mod backend/go.sum ./backend/
+# go.mod replaces tdewolff/font with a local copy, so it must exist before go mod download.
+COPY backend/third_party/ ./backend/third_party/
 RUN cd backend && go mod download
 COPY backend/ ./backend/
 COPY contracts/ ./contracts/
