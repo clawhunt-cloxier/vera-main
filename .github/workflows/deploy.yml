@@ -95,7 +95,7 @@ jobs:
       - name: Deploy with health check and rollback
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          GHCR_PAT: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
           NEW_IMAGE: ${{ steps.vars.outputs.image }}:sha-${{ steps.vars.outputs.short }}
         run: |
@@ -106,7 +106,7 @@ jobs:
           cd /opt/vera
           IFS= read -r PAT
           if ! printf '%s' "$PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin; then
-            echo "docker login to ghcr.io failed: check GHCR_PAT (read:packages, SSO authorized for the org) and package access" >&2
+            echo "docker login to ghcr.io failed: the job GITHUB_TOKEN was rejected, check that the package is linked to this repository" >&2
             exit 1
           fi
           unset PAT
