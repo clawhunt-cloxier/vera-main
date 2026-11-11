@@ -1,0 +1,35 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+.claude
+
+# Documentation
+*.md
+!README.md
+docs/research
+
+# Development files
+**/.DS_Store
+**/node_modules
+**/.env*
+**/npm-debug.log*
+
+# Build artifacts
+web/dist
+backend/tmp
+*.test
+*.out
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Test and demo data that shouldn't be in production image
+# (but we DO include tests/fixtures for the fixture data provider)
