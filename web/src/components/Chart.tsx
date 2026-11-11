@@ -46,8 +46,15 @@ export function Chart({ load, title }: { load: () => Promise<ChartSeries>; title
   }, [load]);
   return (
     <figure className="chart">
-      <figcaption>{title}{data?.note ? '（' + data.note + '）' : ''}</figcaption>
-      {err ? <p className="muted">{err}</p> : <div ref={ref} className="chart-box" role="img" aria-label={title} />}
+      <figcaption>
+        {title}
+        {data?.note ? '（' + data.note + '）' : ''}
+      </figcaption>
+      {err ? (
+        <p className="muted">{err}</p>
+      ) : (
+        <div ref={ref} className="chart-box" role="img" aria-label={title} />
+      )}
     </figure>
   );
 }

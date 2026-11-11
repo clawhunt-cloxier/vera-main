@@ -1,0 +1,24 @@
+# Code owners for Vera project
+# Lines are evaluated from bottom to top; last match takes precedence.
+# At least one reviewer approval required from each pattern's owners.
+
+# Global fallback: repository owner
+* @clawhunt-cloxier
+
+# Contracts and specification files: owner approval required
+/contracts/ @clawhunt-cloxier
+/docs/decisions/ @clawhunt-cloxier
+SPEC.md @clawhunt-cloxier
+ARCHITECTURE.md @clawhunt-cloxier
+DATA_MODEL.md @clawhunt-cloxier
+
+# Skills and prompts: review by owner
+/docs/skills/ @clawhunt-cloxier
+/backend/internal/harness/skills/*/prompts/ @clawhunt-cloxier
+
+# Migrations: database changes need owner review
+/backend/migrations/ @clawhunt-cloxier
+
+# CI/CD and deployment: owner review
+/.github/workflows/ @clawhunt-cloxier
+/deploy/ @clawhunt-cloxier

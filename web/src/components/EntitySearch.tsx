@@ -1,7 +1,15 @@
 import { useEffect, useId, useState } from 'react';
 import { get, type Entity } from '../api/client';
 
-export function EntitySearch({ kinds, onPick, placeholder }: { kinds?: string[]; onPick: (e: Entity) => void; placeholder?: string }) {
+export function EntitySearch({
+  kinds,
+  onPick,
+  placeholder,
+}: {
+  kinds?: string[];
+  onPick: (e: Entity) => void;
+  placeholder?: string;
+}) {
   const [q, setQ] = useState('');
   const [items, setItems] = useState<Entity[]>([]);
   const [open, setOpen] = useState(false);
@@ -14,7 +22,9 @@ export function EntitySearch({ kinds, onPick, placeholder }: { kinds?: string[];
     }
     const t = setTimeout(async () => {
       try {
-        const r = await get<{ items: Entity[] }>('/api/v1/entities?q=' + encodeURIComponent(q.trim()));
+        const r = await get<{ items: Entity[] }>(
+          '/api/v1/entities?q=' + encodeURIComponent(q.trim())
+        );
         setItems(r.items.filter((e) => !kinds || kinds.includes(e.kind)));
         setActive(0);
         setOpen(true);
@@ -53,8 +63,20 @@ export function EntitySearch({ kinds, onPick, placeholder }: { kinds?: string[];
       {open && items.length > 0 && (
         <ul id={id} role="listbox" className="options">
           {items.map((e, i) => (
-            <li key={e.id} role="option" aria-selected={i === active} className={i === active ? 'active' : ''} onMouseDown={() => pick(e)}>
-              <strong>{e.name}</strong> <span className="muted">{e.symbol ?? ({ industry: '行业', market: '市场', stock: '' } as Record<string, string>)[e.kind]}</span>
+            <li
+              key={e.id}
+              role="option"
+              aria-selected={i === active}
+              className={i === active ? 'active' : ''}
+              onMouseDown={() => pick(e)}
+            >
+              <strong>{e.name}</strong>{' '}
+              <span className="muted">
+                {e.symbol ??
+                  ({ industry: '行业', market: '市场', stock: '' } as Record<string, string>)[
+                    e.kind
+                  ]}
+              </span>
             </li>
           ))}
         </ul>

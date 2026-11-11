@@ -16,7 +16,11 @@ const ruleLabel: Record<string, string> = {
 
 export function Watchlist() {
   const me = useMe();
-  const items = useQuery({ queryKey: ['watchlist'], queryFn: () => get<{ items: WatchItem[] }>('/api/v1/watchlist'), staleTime: 10_000 });
+  const items = useQuery({
+    queryKey: ['watchlist'],
+    queryFn: () => get<{ items: WatchItem[] }>('/api/v1/watchlist'),
+    staleTime: 10_000,
+  });
   const [adding, setAdding] = useState(false);
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -29,7 +33,11 @@ export function Watchlist() {
   });
   const analyze = useMutation({
     mutationFn: async (subject_id: string) => {
-      const r = await post<PlanResult>('/api/v1/research-plans', { skill_id: 'stock_analysis', subject_id, params: {} }, { idem: newKey() });
+      const r = await post<PlanResult>(
+        '/api/v1/research-plans',
+        { skill_id: 'stock_analysis', subject_id, params: {} },
+        { idem: newKey() }
+      );
       if (r.kind === 'plan' && r.plan) {
         nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
         return;
@@ -64,21 +72,51 @@ export function Watchlist() {
       {items.data?.items.length === 0 && <Empty>自选股为空。</Empty>}
       {items.data && items.data.items.length > 0 && (
         <table>
-          <thead><tr><th>标的</th><th>最新价</th><th>涨跌幅</th><th>数据日期</th><th>已触发提醒</th><th></th></tr></thead>
+          <thead>
+            <tr>
+              <th>标的</th>
+              <th>最新价</th>
+              <th>涨跌幅</th>
+              <th>数据日期</th>
+              <th>已触发提醒</th>
+              <th></th>
+            </tr>
+          </thead>
           <tbody>
             {items.data.items.map((it) => {
               const close = it.snapshot ? Number(it.snapshot.close) : null;
               const chg = it.snapshot ? Number(it.snapshot.change_pct) : null;
               return (
                 <tr key={it.id}>
-                  <td><strong>{it.entity.name}</strong> <span className="muted">{it.entity.symbol}</span></td>
-                  <td>{close !== null ? close.toFixed(2) : '—'}</td>
-                  <td className={chg === null ? '' : chg > 0 ? 'up' : chg < 0 ? 'down' : ''}>{chg !== null ? (chg > 0 ? '+' : '') + chg.toFixed(2) + '%' : '—'}</td>
-                  <td>{it.snapshot?.trade_date ?? '—'}</td>
-                  <td>{it.snapshot && it.snapshot.triggered.length > 0 ? it.snapshot.triggered.map((k) => <Tag key={k} tone="warn">{ruleLabel[k] ?? k}</Tag>) : '—'}</td>
                   <td>
-                    <button className="ghost small" disabled={analyze.isPending} onClick={() => analyze.mutate(it.entity.id)}>分析</button>
-                    <button className="ghost small" onClick={() => remove(it.id)}>移出</button>
+                    <strong>{it.entity.name}</strong>{' '}
+                    <span className="muted">{it.entity.symbol}</span>
+                  </td>
+                  <td>{close !== null ? close.toFixed(2) : '—'}</td>
+                  <td className={chg === null ? '' : chg > 0 ? 'up' : chg < 0 ? 'down' : ''}>
+                    {chg !== null ? (chg > 0 ? '+' : '') + chg.toFixed(2) + '%' : '—'}
+                  </td>
+                  <td>{it.snapshot?.trade_date ?? '—'}</td>
+                  <td>
+                    {it.snapshot && it.snapshot.triggered.length > 0
+                      ? it.snapshot.triggered.map((k) => (
+                          <Tag key={k} tone="warn">
+                            {ruleLabel[k] ?? k}
+                          </Tag>
+                        ))
+                      : '—'}
+                  </td>
+                  <td>
+                    <button
+                      className="ghost small"
+                      disabled={analyze.isPending}
+                      onClick={() => analyze.mutate(it.entity.id)}
+                    >
+                      分析
+                    </button>
+                    <button className="ghost small" onClick={() => remove(it.id)}>
+                      移出
+                    </button>
                   </td>
                 </tr>
               );
@@ -89,8 +127,17 @@ export function Watchlist() {
       {adding && (
         <div className="overlay" onClick={() => setAdding(false)}>
           <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="dialog-head"><h2>添加自选股</h2><button className="ghost" onClick={() => setAdding(false)}>×</button></div>
-            <EntitySearch kinds={['stock']} onPick={(e) => add.mutate(e.id)} placeholder="输入公司名称或代码" />
+            <div className="dialog-head">
+              <h2>添加自选股</h2>
+              <button className="ghost" onClick={() => setAdding(false)}>
+                ×
+              </button>
+            </div>
+            <EntitySearch
+              kinds={['stock']}
+              onPick={(e) => add.mutate(e.id)}
+              placeholder="输入公司名称或代码"
+            />
             {add.error && <ErrorBox error={add.error} />}
           </div>
         </div>
