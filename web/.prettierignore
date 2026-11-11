@@ -1,0 +1,8 @@
+# Editor & build
+node_modules/
+dist/
+.venv/
+*.min.js
+*.min.css
+src/routeTree.gen.ts
+src/api/schema.d.ts
