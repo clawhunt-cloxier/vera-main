@@ -31,7 +31,7 @@ func demo(ctx context.Context) error {
 	}
 	port := 55432
 	if p := os.Getenv("VERA_DEMO_PG_PORT"); p != "" {
-		fmt.Sscanf(p, "%d", &port)
+		_, _ = fmt.Sscanf(p, "%d", &port)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -42,7 +42,7 @@ func demo(ctx context.Context) error {
 	if err := pg.Start(); err != nil {
 		return fmt.Errorf("start embedded postgres: %w", err)
 	}
-	defer pg.Stop()
+	defer func() { _ = pg.Stop() }()
 	setDefault("VERA_ENV", "development")
 	setDefault("DATABASE_URL", fmt.Sprintf("postgres://vera:vera-demo@127.0.0.1:%d/vera?sslmode=disable", port))
 	setDefault("VERA_DEV_OIDC", "true")
@@ -79,12 +79,12 @@ func demo(ctx context.Context) error {
 	if err := rc.Start(ctx); err != nil {
 		return err
 	}
-	defer rc.Stop(context.Background())
+	defer func() { _ = rc.Stop(context.Background()) }()
 	h, err := a.HTTP()
 	if err != nil {
 		return err
 	}
-	ln, err := net.Listen("tcp", c.APIAddr)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", c.APIAddr)
 	if err != nil {
 		return err
 	}

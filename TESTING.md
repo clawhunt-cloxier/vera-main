@@ -17,7 +17,7 @@ Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch 
 
 | 任务 | 必须有的测试 |
 | --- | --- |
-| T011 | golangci-lint、前端 lint、OpenAPI → TS 类型生成一致性检查、契约兼容性检查 |
+| T011 | golangci-lint（`make lint-go`，已实现）、前端 lint 与格式检查（`make lint-web`，已实现）、OpenAPI → TS 类型生成一致性检查（未实现）、契约兼容性检查（未实现） |
 | T012 | 迁移在真实 PostgreSQL 上执行；RLS 与复合外键；唯一约束并发测试；River 事务入队 |
 | T013 | OIDC 登录回调（state/nonce/PKCE）、CSRF、会话过期、邀请码、跨账号访问返回 404 |
 | T014 | 每个厂商映射的样本测试；单位与口径转换；对账冲突；新鲜度；fixture 在 production 模式拒绝启动 |

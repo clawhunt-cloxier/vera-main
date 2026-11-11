@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"fmt"
 	"slices"
 
 	"github.com/google/uuid"
@@ -325,8 +324,6 @@ func (b *builder) corp(e uuid.UUID, group string) bool {
 	}
 	return found
 }
-
-func fmtCount(n int) string { return fmt.Sprint(n) }
 
 // groupInsider lists shareholder trade announcements of members disclosed within the window.
 func (b *builder) groupInsider(label string, members []uuid.UUID, n int, group string) bool {

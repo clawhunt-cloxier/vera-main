@@ -65,7 +65,7 @@ tests/fixtures/     # 入库的模拟数据与回放录制
 
 ## 4. 前端
 
-- TypeScript strict；ESLint + Prettier（T011 配置）。
+- TypeScript strict；ESLint + Prettier（配置在 `web/eslint.config.js`、`web/.prettierrc.json`，`make lint-web` 检查）。Go 使用 golangci-lint v2（`.golangci.yml`，`make lint-go`）。
 - 服务端数据只通过 TanStack Query 获取；不引入全局状态库，除非 PR 说明理由。
 - 样式用 CSS Modules 与 `src/styles/tokens.css` 中的变量；后续换设计系统时只替换 tokens 与组件样式。
 

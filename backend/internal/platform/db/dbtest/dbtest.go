@@ -116,7 +116,7 @@ func New(t *testing.T) *pgxpool.Pool {
 func DSN() string { return baseDSN }
 
 func freePort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, err
 	}

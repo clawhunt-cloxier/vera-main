@@ -117,7 +117,8 @@ func Load() (*Config, error) {
 			ExtraBody:  env("MODEL_"+u+"_EXTRA_BODY", ""),
 		}
 	}
-	return c, c.validate()
+	err = c.validate()
+	return c, err
 }
 
 func (c *Config) validate() error {

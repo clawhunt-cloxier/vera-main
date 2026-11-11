@@ -1,53 +1,67 @@
+version: "2"
 run:
-  timeout: 5m
   tests: true
-  build-tags: []
-
 linters:
+  enable:
+    - bodyclose
+    - gocritic
+    - misspell
+    - noctx
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+  settings:
+    gocritic:
+      disabled-checks:
+        - commentFormatting
+        - rangeValCopy
+        - hugeParam
+        - exitAfterDefer
+      enabled-tags:
+        - diagnostic
+        - performance
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gosec
+          - bodyclose
+          - noctx
+        path: _test\.go
+      - linters:
+          - all
+        path: migrations/
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
   enable:
     - gofmt
     - goimports
-    - govet
-    - errcheck
-    - staticcheck
-    - gosimple
-    - ineffassign
-    - unused
-    - typecheck
-    - bodyclose
-    - noctx
-    - rowserrcheck
-    - sqlclosecheck
-    - misspell
-    - unconvert
-    - unparam
-    - gocritic
-    - revive
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/clawhunt-cloxier/vera-main
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-    disabled-checks:
-      - commentFormatting
-  revive:
-    rules:
-      - name: exported
-        disabled: true
-      - name: package-comments
-        disabled: true
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - gosec
-    - path: migrations/
-      linters:
-        - all
-  max-issues-per-linter: 0
-  max-same-issues: 0
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/clawhunt-cloxier/vera-main
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

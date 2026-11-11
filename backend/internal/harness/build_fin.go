@@ -104,7 +104,7 @@ func priorYear(period string) string {
 	// "2025-12-31|FY" → "2024-12-31|FY"
 	y := period[:4]
 	var n int
-	fmt.Sscanf(y, "%d", &n)
+	_, _ = fmt.Sscanf(y, "%d", &n)
 	return fmt.Sprintf("%04d%s", n-1, period[4:])
 }
 
