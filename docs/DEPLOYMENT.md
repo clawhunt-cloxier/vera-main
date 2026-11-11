@@ -15,6 +15,7 @@
 | --- | --- |
 | `compose.yml` | 由 CD 每次上传，来源 `deploy/compose.yml` |
 | `.env` | 权限 600，只在服务器上维护，不入库，模板见 `deploy/.env.example` |
+| `remote-deploy.sh` | 由 CD 每次上传，来源 `deploy/remote-deploy.sh`；负责登录 GHCR、拉取、启动、健康检查与回滚，ssh 的 stdin 只传 GHCR 令牌 |
 | `.current_image` | 最近一次健康的镜像标签，CD 用于回滚 |
 
 `.env` 中的模型密钥、价格表版本等使用真实变量名（`MODEL_{WRITER|VERIFIER|ROUTER}_*`、`VERA_PUBLIC_URL` 等），完整列表见 `backend/internal/platform/config/config.go`。
@@ -29,6 +30,8 @@
 - `DEPLOY_KNOWN_HOSTS`（建议）：服务器主机指纹（`ssh-keyscan` 输出）。未设置时 CD 回退为现场扫描，存在被中间人替换的风险。
 
 ## 更新与回滚
+
+- 触发：push 到 dev，同一 commit 的 `Verify` 成功后才构建；只改 `**.md` 或 `docs/**` 的推送不会触发部署，`deploy/**` 的改动会触发。
 
 - 自动：CD 拉取 `sha-<commit>` 镜像并启动，轮询 `/readyz` 最多约 200 秒；失败时自动回滚到 `.current_image` 记录的上一版本，并让工作流失败。
 - 手动回滚：
