@@ -90,50 +90,17 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          scp -i ~/.ssh/deploy_key -o BatchMode=yes deploy/compose.yml "deploy@${DEPLOY_HOST}:/opt/vera/compose.yml"
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes deploy/compose.yml deploy/remote-deploy.sh "deploy@${DEPLOY_HOST}:/opt/vera/"
 
       - name: Deploy with health check and rollback
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          GHCR_PAT: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
           GHCR_USER: ${{ github.actor }}
           NEW_IMAGE: ${{ steps.vars.outputs.image }}:sha-${{ steps.vars.outputs.short }}
         run: |
-          # The PAT travels over stdin only; the remote script is a quoted heredoc (no local expansion).
-          printf '%s\n' "$GHCR_PAT" | ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" \
-            "GHCR_USER='${GHCR_USER}' NEW_IMAGE='${NEW_IMAGE}' bash -s" <<'REMOTE'
-          set -euo pipefail
-          cd /opt/vera
-          IFS= read -r PAT
-          if ! printf '%s' "$PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin; then
-            echo "docker login to ghcr.io failed: the job GITHUB_TOKEN was rejected, check that the package is linked to this repository" >&2
-            exit 1
-          fi
-          unset PAT
-          prev="$(cat .current_image 2>/dev/null || true)"
-          deploy() {
-            VERA_IMAGE="$1" docker compose -f compose.yml pull
-            VERA_IMAGE="$1" docker compose -f compose.yml up -d --remove-orphans
-            for i in $(seq 1 40); do
-              if curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1; then return 0; fi
-              sleep 5
-            done
-            return 1
-          }
-          if deploy "$NEW_IMAGE"; then
-            echo "$NEW_IMAGE" > .current_image
-            echo "deployed $NEW_IMAGE"
-            docker image prune -f >/dev/null
-          else
-            echo "readyz failed for $NEW_IMAGE" >&2
-            docker compose -f compose.yml logs --tail=80 vera >&2 || true
-            if [ -n "$prev" ]; then
-              echo "rolling back to $prev" >&2
-              deploy "$prev" || echo "rollback also unhealthy" >&2
-            fi
-            exit 1
-          fi
-          REMOTE
+          # stdin carries only the token; the script was uploaded in the previous step.
+          echo "$GHCR_PAT" | ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" "GHCR_USER='${GHCR_USER}' NEW_IMAGE='${NEW_IMAGE}' bash /opt/vera/remote-deploy.sh"
 
       - name: Cleanup SSH material
         if: always()
