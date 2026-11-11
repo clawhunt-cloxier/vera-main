@@ -3,6 +3,9 @@ name: Deploy to Test Environment
 on:
   push:
     branches: [dev]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   workflow_dispatch:
 
 concurrency:
