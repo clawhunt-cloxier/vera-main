@@ -24,6 +24,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T021 | 自选股 | T015、T016 | TODO | 未领取 | 增删改、提醒、收盘快照作业、研究历史 |
 | T022 | 网站 | T013、T018 | TODO | 未领取 | 按 docs/WEB.md；M1 先做首页、计划确认、进度、报告与证据侧栏、反馈；M2 加自选股；Playwright；V07。可先用 mock API 开发 |
 | T024 | 管理 CLI | T013、T017 | TODO | 未领取 | vera-admin 全部命令（OPERATIONS §4），写审计事件 |
+| T025 | MVP 前后端、PDF 导出与测试环境 CD | T010 | REVIEW | Claude-Code / agent/claude/mvp | README-MVP、[MVP 交接](docs/handoffs/2026-11-07-mvp-claude.md)、[DEPLOYMENT](docs/DEPLOYMENT.md)；PDF 为服务器端排版；真实数据厂商与 T011–T024 的完整实现仍未完成 |
 | T023 | test 环境部署、性能与恢复 | T019a、T022、T024 | TODO | 未领取 | 镜像、Compose 生产配置、Caddy/TLS、备份恢复演练、压测、告警、费用总上限开关；EXT-03；V08 |
 
 ## 里程碑

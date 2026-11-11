@@ -22,6 +22,8 @@
 | test | 给产品与客户看效果（DEMO 阶段）| fixture，厂商资料到位后切换真实厂商 | 真实 key | Keycloak test realm，邀请码注册 |
 | pilot | 一线投研人员试用 | 真实厂商 | 真实 key | 同 test |
 
+当前已上线的 test 环境是 MVP 形态：单个容器运行 `vera demo`（内嵌 PostgreSQL、开发登录、模拟数据），宿主机 nginx 终止 TLS（自签证书），由 dev 分支 CD 自动更新，见 [DEPLOYMENT](DEPLOYMENT.md)。下面的 Compose/Keycloak/Caddy 形态是 T012/T023 的目标，尚未实现。
+
 `make dev-up` 启动 local 全部组件；`deploy/compose.test.yml` 用于 test 机器。配置来自 `.env`（不入库）与 `deploy/config/*.yaml`（入库，无密钥）。
 
 test 环境在拿到真实厂商资料前可以用 fixture 运行，此时页面顶部固定显示“演示数据”横幅，报告标注 `synthetic=true`。production 模式（pilot）拒绝 fixture 与 replay 适配器。
