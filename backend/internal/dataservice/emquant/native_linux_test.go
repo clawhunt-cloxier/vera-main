@@ -61,6 +61,16 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	if _, err = c.CSD("ERROR", "X", "D1", "D2", ""); err == nil || !strings.Contains(err.Error(), "88") {
 		t.Fatalf("query error: %v", err)
 	}
+	snapshot, err := c.CSS("A,B", "X,Y", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, err = snapshot.At(1, 0, 1); err != nil || value.Value != int64(6) {
+		t.Fatalf("snapshot: %#v, %v", value, err)
+	}
+	if _, err = c.CSS("ERROR", "X", ""); err == nil || !strings.Contains(err.Error(), "88") {
+		t.Fatalf("snapshot error: %v", err)
+	}
 	if err = c.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -119,5 +129,15 @@ func TestLiveSDK(t *testing.T) {
 	}
 	if !strings.ContainsFunc(text, func(r rune) bool { return unicode.Is(unicode.Han, r) }) {
 		t.Fatal("status response did not contain Chinese text")
+	}
+	snapshot, err := c.CSS("300059.SZ,000002.SZ", "OPEN,CLOSE", "TradeDate=20261102,AdjustFlag=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Codes) != 2 || len(snapshot.Indicators) != 2 || len(snapshot.Dates) != 1 {
+		t.Fatal("unexpected CSS dimensions")
+	}
+	if _, err := snapshot.At(1, 1, 0); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -22,6 +22,7 @@ typedef struct {
  int (*start)(void *, const char *, void *);
  int (*stop)(void);
  int (*csd)(const char *, const char *, const char *, const char *, const char *, void *);
+ int (*css)(const char *, const char *, const char *, void *);
  int (*release)(void *);
 } eqapi;
 static int log_cb(const char *message) { (void)message; return 1; }
@@ -33,8 +34,8 @@ static int eq_open(eqapi *a, const char *path) {
  a->setdir = dlsym(a->handle, "setserverlistdir");
  a->setcallback = dlsym(a->handle, "setcallback");
  a->start = dlsym(a->handle, "start"); a->stop = dlsym(a->handle, "stop");
- a->csd = dlsym(a->handle, "csd"); a->release = dlsym(a->handle, "releasedata");
- if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->release) {
+ a->csd = dlsym(a->handle, "csd"); a->css = dlsym(a->handle, "css"); a->release = dlsym(a->handle, "releasedata");
+ if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->release) {
   dlclose(a->handle); memset(a, 0, sizeof(*a)); return -2;
  }
  return 0;
@@ -52,6 +53,9 @@ static int eq_start(eqapi *a, const char *dir, const char *user, const char *pas
 }
 static int eq_query(eqapi *a, const char *codes, const char *indicators, const char *from, const char *to, const char *options, eqdata **out) {
  return a->csd(codes, indicators, from, to, options, out);
+}
+static int eq_snapshot(eqapi *a, const char *codes, const char *indicators, const char *options, eqdata **out) {
+ return a->css(codes, indicators, options, out);
 }
 static int eq_release(eqapi *a, eqdata *d) { return a->release(d); }
 static int eq_stop(eqapi *a) { return a->stop(); }
@@ -119,6 +123,16 @@ func Open(library, user, password string) (*Client, error) {
 // CSD is synchronous. SDK calls cannot be cancelled until the vendor exposes
 // a verified cancellation mechanism; callers must isolate long-running calls.
 func (c *Client) CSD(codes, indicators, from, to, options string) (cube Cube, err error) {
+	return c.query(false, codes, indicators, from, to, options)
+}
+
+// CSS obtains a cross-sectional response. Its dates and dimensions are
+// retained as returned; the caller must validate the requested as-of semantics.
+func (c *Client) CSS(codes, indicators, options string) (Cube, error) {
+	return c.query(true, codes, indicators, "", "", options)
+}
+
+func (c *Client) query(snapshot bool, codes, indicators, from, to, options string) (cube Cube, err error) {
 	nativeMu.Lock()
 	defer nativeMu.Unlock()
 	if c == nil || c.closed || !c.started || nativeCurrent != c {
@@ -129,7 +143,7 @@ func (c *Client) CSD(codes, indicators, from, to, options string) (cube Cube, er
 			return Cube{}, errors.New("emquant: NUL in query")
 		}
 	}
-	if codes == "" || indicators == "" || from == "" || to == "" {
+	if codes == "" || indicators == "" || (!snapshot && (from == "" || to == "")) {
 		return Cube{}, errors.New("emquant: incomplete query")
 	}
 	a := C.CString(codes)
@@ -143,7 +157,13 @@ func (c *Client) CSD(codes, indicators, from, to, options string) (cube Cube, er
 	f := C.CString(options)
 	defer C.free(unsafe.Pointer(f))
 	var data *C.eqdata
-	if rc := C.eq_query(&c.api, a, b, d, e, f, &data); rc != 0 {
+	var rc C.int
+	if snapshot {
+		rc = C.eq_snapshot(&c.api, a, b, f, &data)
+	} else {
+		rc = C.eq_query(&c.api, a, b, d, e, f, &data)
+	}
+	if rc != 0 {
 		return Cube{}, fmt.Errorf("emquant: query failed (code %d)", int(rc))
 	}
 	if data == nil {

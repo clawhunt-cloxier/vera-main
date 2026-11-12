@@ -26,3 +26,6 @@ int csd(const char *codes, const char *indicators, const char *from, const char 
  *(eqdata**)out = &data;
  return 0;
 }
+int css(const char *codes, const char *indicators, const char *options, void *out) {
+ return csd(codes, indicators, "", "", options, out);
+}

@@ -14,6 +14,12 @@
 - 验证：`go test -race ./internal/dataservice/emquant`、`CGO_ENABLED=0 go test ./internal/dataservice/emquant`、`go vet ./internal/dataservice/emquant` 和 `make check-docs` 通过；用 `EMQUANT_INTEGRATION=1` 与隔离 SDK 副本运行 `TestLiveSDK` 通过。未执行全量项目测试。凭证只通过临时进程环境传入，未写入仓库。
 - 解包 SDK 附带的 V2.7.9.0 CHM 指标手册（仅本地临时目录）。沪深股票序列行情表列出 `OPEN/HIGH/LOW/CLOSE/PRECLOSE/VOLUME/AMOUNT/TURN/TRADESTATUS/TAFACTOR`，可分别作为日线字段候选；参数表记载 `Period=1` 为日、`AdjustFlag=1` 为不复权。融资融券表列出 `TRADINGBALANCEM/PURCHASEWITHBORROWEDMONEYM/REPAYMENTTOBROKERM/SECLENDINGBALANCEVOLUMEM/SECLENDINGBALANCEM`。估值表列出 `MV/PETTM/PSTTM/PBMRQ` 等。以上只是字段名称候选，不是已经验证的映射：手册表格未明确这些字段的全部数值单位、停牌状态编码、后复权因子基准、流通市值与股息率口径；对应字段不得据此猜测换算或声明可用。需取得厂商口径、授权可保存的样本并与统一数据目录逐字段核验。
 - SDK Python 包装将 Linux 语言版本设为 `LANGUAGEVERSION=503`；Go 组件已与其对齐并拒绝无效 UTF-8。原先探针用的 `4` 虽能跑通单次数值请求，但不足以证明文本编码；更新后的真实 SDK 测试查询了交易状态，确认返回文本包含汉字，未输出或留存返回内容。
+- Go 组件新增 CSS 同步截面查询；模拟动态库测试覆盖错误和结果维度，真实 SDK 用两个证券、两个指标及指定历史交易日的截面查询通过。该测试不是盘中实时行情验证。
+- 在隔离 SDK 副本用厂商包装进行一次实时能力探测：`csq` 订阅 `TIME,NOW,VOLUME` 返回成功，收到含一个代码、三个指标的成功回调，`csqcancel` 成功，未保存返回数据。该结果尚未证明行情时延、逐个字段权限、重连或一致性，也尚未接入 Go 应用。
+
+## 最新用户要求与现有规格冲突
+
+用户已明确要求研究同时支持盘中实时行情和发起研究时最新可用的其他数据，并确认允许数据持久化、向用户展示及第三方模型处理。此要求与 SPEC §5、DATA_SERVICE §8 和资金动向技能中仅使用上一个已收盘交易日的限制冲突；不能把财报、公告、资金等低频数据标成实时行情，也不能以任务创建时间冒充各数据项的实际时间。需要按公共契约协作规则领取范围修订任务，更新根规格、数据集和新鲜度规则、涉及的技能版本与评测样例，并在实际链路中体现行情事件时间、接收时间、延迟/过期和缺失处理。当前尚未修订原规格，不能宣称盘中研究已实现。用户确认是用途许可输入；具体产品、权限、时延和数据字段仍需以厂商资料及账户能力验证。
 
 ## 未完成与下一步
 
