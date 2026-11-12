@@ -10,10 +10,12 @@
 - 同一诊断在受限网络沙箱中返回错误码 10002002（厂商错误文本为 network connect failure）；开放网络后上述调用成功。SDK 可修改自身目录中的运行文件，联调用副本并按厂商要求持久配置运行目录。
 - 原生库导出 `start`、`stop`、`csd`、`css`、`releasedata`、`setcallback` 和 `setserverlistdir`。Python 包装中有对应 ctypes 签名及数据结构，可作为 Go 原生绑定的参考；数据返回的内存须按 SDK 约定释放。厂商 C 头文件、ABI 兼容承诺及并发/取消语义尚未核实。
 - 使用从 Go 官方发布清单核验 SHA-256 的 Go 1.27.3，在 `/tmp/vera-emquant-go-probe` 编译一次性 cgo/dlopen 探针。该探针根据 Python ctypes 声明调用 SDK 原生 ABI：登录返回 0；同一 `csd` 查询返回 0，代码、日期、指标和数值数量均为 1，数值类型为 11（double）；随后调用 `releasedata` 和 `stop`。未记录价格。验证范围限于本机这份 SDK 的一次调用，不证明 ABI 稳定、映射正确、线程安全或可用于生产；临时探针不属于应用实现。
+- 在 `backend/internal/dataservice/emquant` 增加未注册的 Go 调用准备组件：Linux/cgo 动态加载、同步 CSD 查询、返回维度与类型解码、串行单会话和显式释放；不支持的平台明确返回错误。模拟动态库覆盖登录/查询错误、数组截断、顺序、空值和关闭行为；可选真实库测试仅检查数据形状和类型，不输出行情。SDK 包装及并发语义尚需厂商确认，不应视为完整适配器。
+- 验证：`go test -race ./internal/dataservice/emquant`、`CGO_ENABLED=0 go test ./internal/dataservice/emquant`、`go vet ./internal/dataservice/emquant` 和 `make check-docs` 通过；用 `EMQUANT_INTEGRATION=1` 与隔离 SDK 副本运行 `TestLiveSDK` 通过。未执行全量项目测试。凭证只通过临时进程环境传入，未写入仓库。
 
 ## 未完成与下一步
 
 1. T014b 依赖 T014，现有 `dataservice.Provider` 的全量 `Entities/Records/Capabilities` 接口与 DATA_SERVICE 的分页原始响应、映射与血缘设计不同；先厘清 T014 未完成范围及任务依赖，避免绕过原始响应存档、映射和快照机制。
 2. 账户许可的存储、试用用户展示、第三方模型处理范围尚未确认；生产数据应继续默认禁用，不能由登录成功推断授权。不得提交真实凭证、登录日志和未获许可的录制样本。
 3. 核实原生 ABI、版本、服务器连接和部署依赖；实现 Go 接入与安全的密钥注入。逐个验证各必需数据集的字段、单位、时间与修订语义和历史覆盖，并为每个映射制作允许入库的样本测试，完成目录、来源、血缘与许可登记。一次日线查询不能证明 V02。
-4. 此次只是单次接口探测，未运行项目测试、未修改应用代码、未完成厂商适配器或端到端研究；用户原工作树中的 `.claude/` 未触碰。
+4. 组件尚未接入 provider、数据治理或应用启动路径，没有原始存档和字段映射；不声明 T014b 或 V02 完成。用户原工作树中的 `.claude/` 未触碰。
