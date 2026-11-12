@@ -3,6 +3,7 @@
 package emquant
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -152,7 +153,8 @@ func TestLiveSDK(t *testing.T) {
 	if _, err := snapshot.At(1, 1, 0); err != nil {
 		t.Fatal(err)
 	}
-	quote, err := c.QuoteSnapshot("300059.SZ", "TIME,NOW,VOLUME", "")
+	store := &testRawStore{ref: "object://test/live"}
+	quote, ref, err := (Collector{Fetcher: c, Store: store}).CollectQuote(context.Background(), "300059.SZ", "TIME,NOW,VOLUME", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,5 +172,12 @@ func TestLiveSDK(t *testing.T) {
 	}
 	if _, err := quote.EventTime(0, quote.ObservedAt, 7*24*time.Hour); err != nil {
 		t.Fatalf("quote event time: %v", err)
+	}
+	replayed, received, err := DecodeArchive(store.body, ref.BodySHA256)
+	if err != nil || !received.Equal(quote.ObservedAt) || len(replayed.Indicators) != 3 {
+		t.Fatalf("live archive replay failed: %v", err)
+	}
+	if _, err = (Quote{Data: replayed, ObservedAt: received}).EventTime(0, received, 7*24*time.Hour); err != nil {
+		t.Fatal(err)
 	}
 }

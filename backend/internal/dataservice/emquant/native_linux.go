@@ -118,7 +118,7 @@ func Open(library, user, password string) (*Client, error) {
 	defer func() { C.memset(unsafe.Pointer(p), 0, C.size_t(len(password))); C.free(unsafe.Pointer(p)) }()
 	if rc := C.eq_start(&c.api, dir, u, p); rc != 0 {
 		C.eq_unload(&c.api)
-		return nil, fmt.Errorf("emquant: login failed (code %d)", int(rc))
+		return nil, &SDKError{Operation: "login", Code: int(rc)}
 	}
 	c.started = true
 	nativeCurrent = c
@@ -182,7 +182,7 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 		rc = C.eq_query(&c.api, a, b, d, e, f, &data)
 	}
 	if rc != 0 {
-		return Cube{}, fmt.Errorf("emquant: query failed (code %d)", int(rc))
+		return Cube{}, &SDKError{Operation: "query", Code: int(rc)}
 	}
 	if data == nil {
 		return Cube{}, errors.New("emquant: null response")
@@ -190,7 +190,7 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 	defer func() {
 		if rc := C.eq_release(&c.api, data); rc != 0 {
 			cube = Cube{}
-			err = fmt.Errorf("emquant: release failed (code %d)", int(rc))
+			err = &SDKError{Operation: "release", Code: int(rc)}
 		}
 	}()
 	return decode(data)
@@ -290,7 +290,7 @@ func (c *Client) Close() error {
 	}
 	rc := C.eq_stop(&c.api)
 	if rc != 0 {
-		return fmt.Errorf("emquant: stop failed (code %d)", int(rc))
+		return &SDKError{Operation: "stop", Code: int(rc)}
 	}
 	C.eq_unload(&c.api)
 	c.closed = true
