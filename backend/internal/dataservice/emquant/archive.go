@@ -59,7 +59,7 @@ type archiveBody struct {
 // DecodeArchive restores SDK value types and checks the content hash before
 // replay. JSON's default float64 decoding would silently lose 64-bit integers.
 func DecodeArchive(body []byte, expectedHash string) (Cube, time.Time, error) {
-	if len(body) > 64<<20 {
+	if len(body) > maxArchiveSize {
 		return Cube{}, time.Time{}, errors.New("emquant: archive too large")
 	}
 	if len(expectedHash) != 64 || digest(body) != expectedHash {
@@ -154,6 +154,9 @@ func (c Collector) persist(ctx context.Context, req request, cube Cube, received
 	body, err := json.Marshal(archiveBody{Format: "emquant-sdk-decoded-v1", ReceivedAt: received.UTC(), Data: cube})
 	if err != nil {
 		return ArchiveRef{}, fmt.Errorf("emquant: encode raw result: %w", err)
+	}
+	if len(body) > maxArchiveSize {
+		return ArchiveRef{}, errors.New("emquant: archive too large")
 	}
 	hash := digest(body)
 	ref, err := c.Store.Put(ctx, hash, body)

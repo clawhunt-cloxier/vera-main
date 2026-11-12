@@ -181,3 +181,39 @@ func TestLiveSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestLiveArchiveS3 must be opted into explicitly: it writes authorized real
+// vendor data into the specified S3 bucket and consumes a vendor request.
+func TestLiveArchiveS3(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_TEST_S3_ENDPOINT") == "" {
+		t.Skip("live SDK and S3 integration not requested")
+	}
+	c, err := Open(os.Getenv("EMQUANT_LIBRARY"), os.Getenv("EMQUANT_USER"), os.Getenv("EMQUANT_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	store, err := NewS3RawStore(testS3Client(os.Getenv("EMQUANT_TEST_S3_ENDPOINT"), os.Getenv("EMQUANT_TEST_S3_ACCESS"), os.Getenv("EMQUANT_TEST_S3_SECRET")), os.Getenv("EMQUANT_TEST_S3_BUCKET"), "integration-live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quote, ref, err := (Collector{Fetcher: c, Store: store}).CollectQuote(context.Background(), "300059.SZ", "TIME,NOW,VOLUME", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := store.Get(context.Background(), ref.BodySHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cube, observed, err := DecodeArchive(body, ref.BodySHA256)
+	if err != nil || !observed.Equal(quote.ObservedAt) {
+		t.Fatalf("archive replay: %v", err)
+	}
+	if _, err = (Quote{Data: cube, ObservedAt: observed}).EventTime(0, observed, 7*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+}
