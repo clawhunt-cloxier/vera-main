@@ -45,7 +45,7 @@ static int eq_start(eqapi *a, const char *dir, const char *user, const char *pas
  memcpy(login.user, user, strlen(user)); memcpy(login.password, password, strlen(password));
  // The vendor wrapper does not interpret the return values of these setters.
  a->setdir(dir); a->setcallback((void*)event_cb);
- int rc = a->start(&login, "LANGUAGEVERSION=4,ForceLogin=0,RecordLoginInfo=0", (void*)log_cb);
+ int rc = a->start(&login, "LANGUAGEVERSION=503,ForceLogin=0,RecordLoginInfo=0", (void*)log_cb);
  volatile char *p = (volatile char*)&login;
  for (size_t i = 0; i < sizeof(login); i++) p[i] = 0;
  return rc;
@@ -69,6 +69,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -159,6 +160,20 @@ func (c *Client) CSD(codes, indicators, from, to, options string) (cube Cube, er
 
 func decode(data *C.eqdata) (Cube, error) {
 	const limit = 1000000
+	readString := func(p *C.char) (string, error) {
+		if p == nil {
+			return "", fmt.Errorf("%w: null string", ErrShape)
+		}
+		n := C.strnlen(p, limit+1)
+		if n > limit {
+			return "", fmt.Errorf("%w: string too long", ErrShape)
+		}
+		s := C.GoStringN(p, C.int(n))
+		if !utf8.ValidString(s) {
+			return "", fmt.Errorf("%w: invalid UTF-8", ErrShape)
+		}
+		return s, nil
+	}
 	if data.codes.n > limit || data.indicators.n > limit || data.dates.n > limit || data.values.n > limit {
 		return Cube{}, fmt.Errorf("%w: response too large", ErrShape)
 	}
@@ -168,10 +183,11 @@ func decode(data *C.eqdata) (Cube, error) {
 	stringsOf := func(a C.eqchars) ([]string, error) {
 		out := make([]string, 0, int(a.n))
 		for _, x := range unsafe.Slice(a.p, int(a.n)) {
-			if x.p == nil {
-				return nil, fmt.Errorf("%w: null label", ErrShape)
+			value, err := readString(x.p)
+			if err != nil {
+				return nil, err
 			}
-			out = append(out, C.GoString(x.p))
+			out = append(out, value)
 		}
 		return out, nil
 	}
@@ -202,7 +218,11 @@ func decode(data *C.eqdata) (Cube, error) {
 			cell.Value = x
 		case 13, 14:
 			if v.text.p != nil {
-				cell.Value = C.GoString(v.text.p)
+				value, err := readString(v.text.p)
+				if err != nil {
+					return Cube{}, err
+				}
+				cell.Value = value
 			} else {
 				cell.Value = ""
 			}

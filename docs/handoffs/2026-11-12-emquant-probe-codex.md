@@ -12,6 +12,8 @@
 - 使用从 Go 官方发布清单核验 SHA-256 的 Go 1.27.3，在 `/tmp/vera-emquant-go-probe` 编译一次性 cgo/dlopen 探针。该探针根据 Python ctypes 声明调用 SDK 原生 ABI：登录返回 0；同一 `csd` 查询返回 0，代码、日期、指标和数值数量均为 1，数值类型为 11（double）；随后调用 `releasedata` 和 `stop`。未记录价格。验证范围限于本机这份 SDK 的一次调用，不证明 ABI 稳定、映射正确、线程安全或可用于生产；临时探针不属于应用实现。
 - 在 `backend/internal/dataservice/emquant` 增加未注册的 Go 调用准备组件：Linux/cgo 动态加载、同步 CSD 查询、返回维度与类型解码、串行单会话和显式释放；不支持的平台明确返回错误。模拟动态库覆盖登录/查询错误、数组截断、顺序、空值和关闭行为；可选真实库测试仅检查数据形状和类型，不输出行情。SDK 包装及并发语义尚需厂商确认，不应视为完整适配器。
 - 验证：`go test -race ./internal/dataservice/emquant`、`CGO_ENABLED=0 go test ./internal/dataservice/emquant`、`go vet ./internal/dataservice/emquant` 和 `make check-docs` 通过；用 `EMQUANT_INTEGRATION=1` 与隔离 SDK 副本运行 `TestLiveSDK` 通过。未执行全量项目测试。凭证只通过临时进程环境传入，未写入仓库。
+- 解包 SDK 附带的 V2.7.9.0 CHM 指标手册（仅本地临时目录）。沪深股票序列行情表列出 `OPEN/HIGH/LOW/CLOSE/PRECLOSE/VOLUME/AMOUNT/TURN/TRADESTATUS/TAFACTOR`，可分别作为日线字段候选；参数表记载 `Period=1` 为日、`AdjustFlag=1` 为不复权。融资融券表列出 `TRADINGBALANCEM/PURCHASEWITHBORROWEDMONEYM/REPAYMENTTOBROKERM/SECLENDINGBALANCEVOLUMEM/SECLENDINGBALANCEM`。估值表列出 `MV/PETTM/PSTTM/PBMRQ` 等。以上只是字段名称候选，不是已经验证的映射：手册表格未明确这些字段的全部数值单位、停牌状态编码、后复权因子基准、流通市值与股息率口径；对应字段不得据此猜测换算或声明可用。需取得厂商口径、授权可保存的样本并与统一数据目录逐字段核验。
+- SDK Python 包装将 Linux 语言版本设为 `LANGUAGEVERSION=503`；Go 组件已与其对齐并拒绝无效 UTF-8。原先探针用的 `4` 虽能跑通单次数值请求，但不足以证明文本编码；更新后的真实 SDK 测试查询了交易状态，确认返回文本包含汉字，未输出或留存返回内容。
 
 ## 未完成与下一步
 

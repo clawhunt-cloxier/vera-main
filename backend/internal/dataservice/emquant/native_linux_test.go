@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func TestOpenRejectsInvalidAndMissingLibrary(t *testing.T) {
@@ -53,6 +54,9 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	}
 	if _, err = c.CSD("TRUNCATED", "X", "D1", "D2", ""); err == nil {
 		t.Fatal("accepted truncated result")
+	}
+	if _, err = c.CSD("BADUTF", "X", "D1", "D2", ""); err == nil {
+		t.Fatal("accepted invalid UTF-8")
 	}
 	if _, err = c.CSD("ERROR", "X", "D1", "D2", ""); err == nil || !strings.Contains(err.Error(), "88") {
 		t.Fatalf("query error: %v", err)
@@ -100,5 +104,20 @@ func TestLiveSDK(t *testing.T) {
 	value, err := cube.At(0, 0, 0)
 	if err != nil || value.Type != 11 {
 		t.Fatalf("unexpected cell type %d, error %v", value.Type, err)
+	}
+	status, err := c.CSD("300059.SZ", "TRADESTATUS", "2026-11-02", "2026-11-02", "Period=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusValue, err := status.At(0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, ok := statusValue.Value.(string)
+	if !ok {
+		t.Fatalf("unexpected status cell type %d", statusValue.Type)
+	}
+	if !strings.ContainsFunc(text, func(r rune) bool { return unicode.Is(unicode.Han, r) }) {
+		t.Fatal("status response did not contain Chinese text")
 	}
 }

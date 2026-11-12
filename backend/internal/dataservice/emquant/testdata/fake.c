@@ -10,7 +10,7 @@ int setserverlistdir(const char *s) { return s != 0; }
 int setcallback(void *p) { return p != 0; }
 int start(void *p, const char *s, void *cb) {
  eqlogin *login = p;
- return strcmp(login->user, "user") || strcmp(login->password, "pass") || !s || !cb ? 77 : 0;
+ return strcmp(login->user, "user") || strcmp(login->password, "pass") || !s || !strstr(s,"LANGUAGEVERSION=503") || !cb ? 77 : 0;
 }
 int stop(void) { return 0; }
 int releasedata(void *p) { return p ? 0 : 1; }
@@ -22,6 +22,7 @@ int csd(const char *codes, const char *indicators, const char *from, const char 
  static eqdata data;
  data = (eqdata){{code,2},{indicator,2},{date,2},{values,8}};
  if (!strcmp(codes, "TRUNCATED")) data.values.n = 7;
+ if (!strcmp(codes, "BADUTF")) { static eqchar bad[] = {{"\xff",1}}; data.codes = (eqchars){bad,1}; }
  *(eqdata**)out = &data;
  return 0;
 }
