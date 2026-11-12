@@ -25,6 +25,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T022 | 网站 | T013、T018 | TODO | 未领取 | 按 docs/WEB.md；M1 先做首页、计划确认、进度、报告与证据侧栏、反馈；M2 加自选股；Playwright；V07。可先用 mock API 开发 |
 | T024 | 管理 CLI | T013、T017 | TODO | 未领取 | vera-admin 全部命令（OPERATIONS §4），写审计事件 |
 | T025 | MVP 前后端、PDF 导出与测试环境 CD | T010 | REVIEW | Claude-Code / agent/claude/mvp | README-MVP、[MVP 交接](docs/handoffs/2026-11-07-mvp-claude.md)、[DEPLOYMENT](docs/DEPLOYMENT.md)；PDF 为服务器端排版；真实数据厂商与 T011–T024 的完整实现仍未完成 |
+| T026 | 盘中行情与最新可用数据规格 | T001 | IN_PROGRESS | Codex / agent/codex/T026-realtime-spec | 领取于 2026-11-12T05:39:22Z；范围：根规格、DATA_SERVICE、相关技能规格及评测样例、数据与 API 契约；依据用户要求记录行情实时性、各数据实际时点、过期降级与权限，不代表实现完成。公共契约及根规范待领取记录合入 dev 后修改 |
 | T023 | test 环境部署、性能与恢复 | T019a、T022、T024 | TODO | 未领取 | 镜像、Compose 生产配置、Caddy/TLS、备份恢复演练、压测、告警、费用总上限开关；EXT-03；V08 |
 
 ## 里程碑
