@@ -32,3 +32,13 @@ int css(const char *codes, const char *indicators, const char *options, void *ou
 int csqsnapshot(const char *codes, const char *indicators, const char *options, void *out) {
  return csd(codes, indicators, "", "", options, out);
 }
+int tradedates(const char *from, const char *to, const char *options, void *out) {
+ (void)to; (void)options;
+ if (!strcmp(from, "ERROR")) return 88;
+ static eqchar code[] = {{"",0}}, indicator[] = {{"TRADEDATE",9}}, date[] = {{"2026/11/9",9},{"2026/11/10",10}};
+ static eqvariant values[] = {{.type=13,.text={"2026/11/9",9}},{.type=13,.text={"2026/11/10",10}}};
+ static eqdata data;
+ data = (eqdata){{code,1},{indicator,1},{date,2},{values,2}};
+ *(eqdata**)out = &data;
+ return 0;
+}

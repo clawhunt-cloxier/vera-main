@@ -45,6 +45,11 @@ type Fetcher interface {
 	QuoteSnapshot(codes, indicators, options string) (Quote, error)
 }
 
+// CalendarFetcher is optional until a source supplies a trading calendar.
+type CalendarFetcher interface {
+	TradeDates(from, to, options string) (Cube, error)
+}
+
 type Collector struct {
 	Fetcher Fetcher
 	Store   RawStore
@@ -240,4 +245,41 @@ func (c Collector) CollectLastPrice(ctx context.Context, code string, maxAge tim
 		return ArchivedLastPrice{}, err
 	}
 	return ArchivedLastPrice{Price: price, Source: ref, Cutoff: cutoff}, nil
+}
+
+// CollectOpenDates archives and validates the vendor's open-date list. It does
+// not infer that missing dates are closed or that historical coverage is complete.
+func (c Collector) CollectOpenDates(ctx context.Context, market, from, to string) ([]string, ArchiveRef, error) {
+	f, ok := c.Fetcher.(CalendarFetcher)
+	if !ok || c.Store == nil {
+		return nil, ArchiveRef{}, errors.New("emquant: calendar fetcher and raw store are required")
+	}
+	if market != "CNSESH" && market != "CNSESZ" {
+		return nil, ArchiveRef{}, errors.New("emquant: unsupported calendar market")
+	}
+	start, err := time.Parse("2006-01-02", from)
+	if err != nil {
+		return nil, ArchiveRef{}, errors.New("emquant: invalid calendar start")
+	}
+	end, err := time.Parse("2006-01-02", to)
+	if err != nil || end.Before(start) || end.Sub(start) > 3660*24*time.Hour {
+		return nil, ArchiveRef{}, errors.New("emquant: invalid calendar end")
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, ArchiveRef{}, err
+	}
+	options := "Market=" + market + ",Period=1,Order=1"
+	cube, err := f.TradeDates(from, to, options)
+	if err != nil {
+		return nil, ArchiveRef{}, err
+	}
+	ref, err := c.persist(ctx, request{Method: "tradedates", From: from, To: to, Options: options}, cube, time.Now())
+	if err != nil {
+		return nil, ArchiveRef{}, err
+	}
+	dates, err := openDates(cube, start, end)
+	if err != nil {
+		return nil, ArchiveRef{}, err
+	}
+	return dates, ref, nil
 }

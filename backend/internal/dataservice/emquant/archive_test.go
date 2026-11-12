@@ -18,6 +18,7 @@ type testFetcher struct {
 
 func (f *testFetcher) CSD(_, _, _, _, _ string) (Cube, error)      { f.calls++; return f.cube, f.err }
 func (f *testFetcher) QuoteSnapshot(_, _, _ string) (Quote, error) { f.calls++; return f.quote, f.err }
+func (f *testFetcher) TradeDates(_, _, _ string) (Cube, error)     { f.calls++; return f.cube, f.err }
 
 type testRawStore struct {
 	hash  string

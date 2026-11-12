@@ -22,4 +22,8 @@ func (*Client) QuoteSnapshot(_, _, _ string) (Quote, error) {
 	return Quote{}, errors.New("emquant: native SDK requires Linux and cgo")
 }
 
+func (*Client) TradeDates(_, _, _ string) (Cube, error) {
+	return Cube{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
 func (*Client) Close() error { return nil }

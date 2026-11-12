@@ -24,6 +24,7 @@ typedef struct {
  int (*csd)(const char *, const char *, const char *, const char *, const char *, void *);
  int (*css)(const char *, const char *, const char *, void *);
  int (*csqsnapshot)(const char *, const char *, const char *, void *);
+ int (*tradedates)(const char *, const char *, const char *, void *);
  int (*release)(void *);
 } eqapi;
 static int log_cb(const char *message) { (void)message; return 1; }
@@ -35,8 +36,8 @@ static int eq_open(eqapi *a, const char *path) {
  a->setdir = dlsym(a->handle, "setserverlistdir");
  a->setcallback = dlsym(a->handle, "setcallback");
  a->start = dlsym(a->handle, "start"); a->stop = dlsym(a->handle, "stop");
- a->csd = dlsym(a->handle, "csd"); a->css = dlsym(a->handle, "css"); a->csqsnapshot = dlsym(a->handle, "csqsnapshot"); a->release = dlsym(a->handle, "releasedata");
- if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->csqsnapshot || !a->release) {
+ a->csd = dlsym(a->handle, "csd"); a->css = dlsym(a->handle, "css"); a->csqsnapshot = dlsym(a->handle, "csqsnapshot"); a->tradedates = dlsym(a->handle, "tradedates"); a->release = dlsym(a->handle, "releasedata");
+ if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->csqsnapshot || !a->tradedates || !a->release) {
   dlclose(a->handle); memset(a, 0, sizeof(*a)); return -2;
  }
  return 0;
@@ -60,6 +61,9 @@ static int eq_snapshot(eqapi *a, const char *codes, const char *indicators, cons
 }
 static int eq_quote(eqapi *a, const char *codes, const char *indicators, const char *options, eqdata **out) {
  return a->csqsnapshot(codes, indicators, options, out);
+}
+static int eq_calendar(eqapi *a, const char *from, const char *to, const char *options, eqdata **out) {
+ return a->tradedates(from, to, options, out);
 }
 static int eq_release(eqapi *a, eqdata *d) { return a->release(d); }
 static int eq_stop(eqapi *a) { return a->stop(); }
@@ -148,6 +152,12 @@ func (c *Client) QuoteSnapshot(codes, indicators, options string) (Quote, error)
 	return Quote{Data: cube, ObservedAt: time.Now().UTC()}, nil
 }
 
+// TradeDates returns the raw calendar response. Callers must validate market,
+// requested interval and coverage before treating absence as a closed day.
+func (c *Client) TradeDates(from, to, options string) (Cube, error) {
+	return c.query(3, "", "", from, to, options)
+}
+
 func (c *Client) query(mode int, codes, indicators, from, to, options string) (cube Cube, err error) {
 	nativeMu.Lock()
 	defer nativeMu.Unlock()
@@ -159,7 +169,7 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 			return Cube{}, errors.New("emquant: NUL in query")
 		}
 	}
-	if codes == "" || indicators == "" || (mode == 0 && (from == "" || to == "")) {
+	if (mode != 3 && (codes == "" || indicators == "")) || ((mode == 0 || mode == 3) && (from == "" || to == "")) {
 		return Cube{}, errors.New("emquant: incomplete query")
 	}
 	a := C.CString(codes)
@@ -174,7 +184,9 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 	defer C.free(unsafe.Pointer(f))
 	var data *C.eqdata
 	var rc C.int
-	if mode == 2 {
+	if mode == 3 {
+		rc = C.eq_calendar(&c.api, d, e, f, &data)
+	} else if mode == 2 {
 		rc = C.eq_quote(&c.api, a, b, f, &data)
 	} else if mode == 1 {
 		rc = C.eq_snapshot(&c.api, a, b, f, &data)

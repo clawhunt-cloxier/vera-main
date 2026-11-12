@@ -153,6 +153,11 @@ func TestLiveSDK(t *testing.T) {
 	if _, err := snapshot.At(1, 1, 0); err != nil {
 		t.Fatal(err)
 	}
+	calendarStore := &testRawStore{ref: "object://test/calendar"}
+	days, _, err := (Collector{Fetcher: c, Store: calendarStore}).CollectOpenDates(context.Background(), "CNSESH", "2026-11-02", "2026-11-06")
+	if err != nil || len(days) == 0 {
+		t.Fatalf("calendar query: %v", err)
+	}
 	store := &testRawStore{ref: "object://test/live"}
 	quote, ref, err := (Collector{Fetcher: c, Store: store}).CollectQuote(context.Background(), "300059.SZ", "TIME,NOW,VOLUME", "")
 	if err != nil {
