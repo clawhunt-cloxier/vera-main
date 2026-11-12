@@ -9,6 +9,7 @@
 - 复制 SDK 到 `/tmp/vera-emquant-probe` 后，使用包内 Python 包装做一次临时诊断：账号登录返回错误码 0，`csd` 查询 `300059.SZ` 的 `CLOSE`（2026-11-02）返回错误码 0，结果有一个代码和一个日期。已调用 `stop`。登录使用 `ForceLogin=0`、`RecordLoginInfo=0`；未在此仓库保存凭证、返回值或原始响应。这仅证明该账户该次调用可用，不证明其他字段、数据集或许可范围。
 - 同一诊断在受限网络沙箱中返回错误码 10002002（厂商错误文本为 network connect failure）；开放网络后上述调用成功。SDK 可修改自身目录中的运行文件，联调用副本并按厂商要求持久配置运行目录。
 - 原生库导出 `start`、`stop`、`csd`、`css`、`releasedata`、`setcallback` 和 `setserverlistdir`。Python 包装中有对应 ctypes 签名及数据结构，可作为 Go 原生绑定的参考；数据返回的内存须按 SDK 约定释放。厂商 C 头文件、ABI 兼容承诺及并发/取消语义尚未核实。
+- 使用从 Go 官方发布清单核验 SHA-256 的 Go 1.27.3，在 `/tmp/vera-emquant-go-probe` 编译一次性 cgo/dlopen 探针。该探针根据 Python ctypes 声明调用 SDK 原生 ABI：登录返回 0；同一 `csd` 查询返回 0，代码、日期、指标和数值数量均为 1，数值类型为 11（double）；随后调用 `releasedata` 和 `stop`。未记录价格。验证范围限于本机这份 SDK 的一次调用，不证明 ABI 稳定、映射正确、线程安全或可用于生产；临时探针不属于应用实现。
 
 ## 未完成与下一步
 
