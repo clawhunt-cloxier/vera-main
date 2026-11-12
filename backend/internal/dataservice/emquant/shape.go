@@ -5,6 +5,7 @@ package emquant
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Cell is an unnormalized SDK value. Null is explicit: an absent value is not
@@ -21,6 +22,13 @@ type Cube struct {
 	Indicators []string
 	Dates      []string
 	Values     []Cell
+}
+
+// Quote carries the unnormalized SDK response and the local observation time.
+// Neither this timestamp nor a successful call proves real-time freshness.
+type Quote struct {
+	Data       Cube
+	ObservedAt time.Time
 }
 
 var ErrShape = errors.New("emquant: invalid result shape")

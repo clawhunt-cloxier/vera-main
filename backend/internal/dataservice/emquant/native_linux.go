@@ -23,6 +23,7 @@ typedef struct {
  int (*stop)(void);
  int (*csd)(const char *, const char *, const char *, const char *, const char *, void *);
  int (*css)(const char *, const char *, const char *, void *);
+ int (*csqsnapshot)(const char *, const char *, const char *, void *);
  int (*release)(void *);
 } eqapi;
 static int log_cb(const char *message) { (void)message; return 1; }
@@ -34,8 +35,8 @@ static int eq_open(eqapi *a, const char *path) {
  a->setdir = dlsym(a->handle, "setserverlistdir");
  a->setcallback = dlsym(a->handle, "setcallback");
  a->start = dlsym(a->handle, "start"); a->stop = dlsym(a->handle, "stop");
- a->csd = dlsym(a->handle, "csd"); a->css = dlsym(a->handle, "css"); a->release = dlsym(a->handle, "releasedata");
- if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->release) {
+ a->csd = dlsym(a->handle, "csd"); a->css = dlsym(a->handle, "css"); a->csqsnapshot = dlsym(a->handle, "csqsnapshot"); a->release = dlsym(a->handle, "releasedata");
+ if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->csqsnapshot || !a->release) {
   dlclose(a->handle); memset(a, 0, sizeof(*a)); return -2;
  }
  return 0;
@@ -57,6 +58,9 @@ static int eq_query(eqapi *a, const char *codes, const char *indicators, const c
 static int eq_snapshot(eqapi *a, const char *codes, const char *indicators, const char *options, eqdata **out) {
  return a->css(codes, indicators, options, out);
 }
+static int eq_quote(eqapi *a, const char *codes, const char *indicators, const char *options, eqdata **out) {
+ return a->csqsnapshot(codes, indicators, options, out);
+}
 static int eq_release(eqapi *a, eqdata *d) { return a->release(d); }
 static int eq_stop(eqapi *a) { return a->stop(); }
 static void eq_unload(eqapi *a) { if (a->handle) dlclose(a->handle); memset(a, 0, sizeof(*a)); }
@@ -73,6 +77,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 	"unsafe"
 )
@@ -123,16 +128,27 @@ func Open(library, user, password string) (*Client, error) {
 // CSD is synchronous. SDK calls cannot be cancelled until the vendor exposes
 // a verified cancellation mechanism; callers must isolate long-running calls.
 func (c *Client) CSD(codes, indicators, from, to, options string) (cube Cube, err error) {
-	return c.query(false, codes, indicators, from, to, options)
+	return c.query(0, codes, indicators, from, to, options)
 }
 
 // CSS obtains a cross-sectional response. Its dates and dimensions are
 // retained as returned; the caller must validate the requested as-of semantics.
 func (c *Client) CSS(codes, indicators, options string) (Cube, error) {
-	return c.query(true, codes, indicators, "", "", options)
+	return c.query(1, codes, indicators, "", "", options)
 }
 
-func (c *Client) query(snapshot bool, codes, indicators, from, to, options string) (cube Cube, err error) {
+// QuoteSnapshot requests a synchronous market snapshot. ObservedAt is the
+// local completion time, not the exchange's event time; callers must request
+// and validate the vendor's date/time fields and freshness independently.
+func (c *Client) QuoteSnapshot(codes, indicators, options string) (Quote, error) {
+	cube, err := c.query(2, codes, indicators, "", "", options)
+	if err != nil {
+		return Quote{}, err
+	}
+	return Quote{Data: cube, ObservedAt: time.Now().UTC()}, nil
+}
+
+func (c *Client) query(mode int, codes, indicators, from, to, options string) (cube Cube, err error) {
 	nativeMu.Lock()
 	defer nativeMu.Unlock()
 	if c == nil || c.closed || !c.started || nativeCurrent != c {
@@ -143,7 +159,7 @@ func (c *Client) query(snapshot bool, codes, indicators, from, to, options strin
 			return Cube{}, errors.New("emquant: NUL in query")
 		}
 	}
-	if codes == "" || indicators == "" || (!snapshot && (from == "" || to == "")) {
+	if codes == "" || indicators == "" || (mode == 0 && (from == "" || to == "")) {
 		return Cube{}, errors.New("emquant: incomplete query")
 	}
 	a := C.CString(codes)
@@ -158,7 +174,9 @@ func (c *Client) query(snapshot bool, codes, indicators, from, to, options strin
 	defer C.free(unsafe.Pointer(f))
 	var data *C.eqdata
 	var rc C.int
-	if snapshot {
+	if mode == 2 {
+		rc = C.eq_quote(&c.api, a, b, f, &data)
+	} else if mode == 1 {
 		rc = C.eq_snapshot(&c.api, a, b, f, &data)
 	} else {
 		rc = C.eq_query(&c.api, a, b, d, e, f, &data)

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 )
 
@@ -70,6 +71,17 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	}
 	if _, err = c.CSS("ERROR", "X", ""); err == nil || !strings.Contains(err.Error(), "88") {
 		t.Fatalf("snapshot error: %v", err)
+	}
+	before := time.Now().UTC()
+	quote, err := c.QuoteSnapshot("A,B", "X,Y", "")
+	if err != nil || quote.ObservedAt.Before(before) || quote.ObservedAt.After(time.Now().UTC()) {
+		t.Fatalf("quote timing: %v", err)
+	}
+	if value, err = quote.Data.At(1, 0, 1); err != nil || value.Value != int64(6) {
+		t.Fatalf("quote value: %#v, %v", value, err)
+	}
+	if _, err = c.QuoteSnapshot("ERROR", "X", ""); err == nil || !strings.Contains(err.Error(), "88") {
+		t.Fatalf("quote error: %v", err)
 	}
 	if err = c.Close(); err != nil {
 		t.Fatal(err)
@@ -139,5 +151,24 @@ func TestLiveSDK(t *testing.T) {
 	}
 	if _, err := snapshot.At(1, 1, 0); err != nil {
 		t.Fatal(err)
+	}
+	quote, err := c.QuoteSnapshot("300059.SZ", "TIME,NOW,VOLUME", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quote.Data.Codes) != 1 || len(quote.Data.Indicators) != 3 || len(quote.Data.Dates) != 1 || quote.ObservedAt.IsZero() {
+		t.Fatal("unexpected quote response dimensions")
+	}
+	for i := range quote.Data.Indicators {
+		if _, err = quote.Data.At(0, i, 0); err != nil {
+			t.Fatal(err)
+		}
+		if strings.EqualFold(quote.Data.Indicators[i], "TIME") {
+			v, _ := quote.Data.At(0, i, 0)
+			t.Logf("vendor TIME type=%d value=%v; date axis=%s; observed=%s", v.Type, v.Value, quote.Data.Dates[0], quote.ObservedAt.Format(time.RFC3339))
+		}
+	}
+	if _, err := quote.EventTime(0, quote.ObservedAt, 7*24*time.Hour); err != nil {
+		t.Fatalf("quote event time: %v", err)
 	}
 }

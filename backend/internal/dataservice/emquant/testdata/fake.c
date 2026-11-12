@@ -29,3 +29,6 @@ int csd(const char *codes, const char *indicators, const char *from, const char 
 int css(const char *codes, const char *indicators, const char *options, void *out) {
  return csd(codes, indicators, "", "", options, out);
 }
+int csqsnapshot(const char *codes, const char *indicators, const char *options, void *out) {
+ return csd(codes, indicators, "", "", options, out);
+}
