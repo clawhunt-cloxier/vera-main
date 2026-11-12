@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0 # check-contract-compat diffs against the base revision
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
@@ -40,6 +42,9 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: make setup
       - run: make verify
+        env:
+          # PRs compare with the target base; pushes with the previous tip (empty on new branches -> merge-base with origin/dev).
+          CONTRACT_BASE_REF: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '' }}
       - name: Check Go formatting and static analysis
         working-directory: backend
         run: |
