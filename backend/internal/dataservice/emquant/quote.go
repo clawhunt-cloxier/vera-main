@@ -3,11 +3,72 @@ package emquant
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 )
 
 var ErrStaleQuote = errors.New("emquant: quote is stale or has an invalid timestamp")
+var ErrInvalidQuote = errors.New("emquant: invalid quote value")
+
+// LastPrice is a validated vendor observation, not a canonical dataset
+// record: currency, units, authorization and archive lineage are determined
+// by the eventual mapping and governance layer.
+type LastPrice struct {
+	Code       string
+	Value      string
+	EventAt    time.Time
+	ObservedAt time.Time
+}
+
+// LastPriceAt checks the requested security, NOW and TIME before exposing a
+// price. Missing, duplicate, non-numeric and non-positive prices fail closed.
+func (q Quote) LastPriceAt(code string, asOf time.Time, maxAge time.Duration) (LastPrice, error) {
+	if code == "" || strings.TrimSpace(code) != code {
+		return LastPrice{}, ErrInvalidQuote
+	}
+	codeIndex, nowIndex := -1, -1
+	for i, candidate := range q.Data.Codes {
+		if strings.EqualFold(candidate, code) {
+			if codeIndex >= 0 {
+				return LastPrice{}, fmt.Errorf("%w: duplicate security", ErrInvalidQuote)
+			}
+			codeIndex = i
+		}
+	}
+	for i, indicator := range q.Data.Indicators {
+		if strings.EqualFold(indicator, "NOW") {
+			if nowIndex >= 0 {
+				return LastPrice{}, fmt.Errorf("%w: duplicate NOW", ErrInvalidQuote)
+			}
+			nowIndex = i
+		}
+	}
+	if codeIndex < 0 || nowIndex < 0 {
+		return LastPrice{}, fmt.Errorf("%w: security or NOW missing", ErrInvalidQuote)
+	}
+	event, err := q.EventTime(codeIndex, asOf, maxAge)
+	if err != nil {
+		return LastPrice{}, err
+	}
+	cell, err := q.Data.At(codeIndex, nowIndex, 0)
+	if err != nil {
+		return LastPrice{}, fmt.Errorf("%w: %v", ErrInvalidQuote, err)
+	}
+	var value string
+	switch cell.Type {
+	case 10, 11:
+		n, ok := cell.Value.(float64)
+		if !ok || math.IsNaN(n) || math.IsInf(n, 0) || n <= 0 {
+			return LastPrice{}, ErrInvalidQuote
+		}
+		value = strconv.FormatFloat(n, 'f', -1, 64)
+	default:
+		return LastPrice{}, fmt.Errorf("%w: unsupported NOW type", ErrInvalidQuote)
+	}
+	return LastPrice{Code: q.Data.Codes[codeIndex], Value: value, EventAt: event, ObservedAt: q.ObservedAt.UTC()}, nil
+}
 
 // EventTime validates a quote against the research cutoff. Vendor TIME is
 // HHMMSS in China local time; this interpretation is limited to the observed

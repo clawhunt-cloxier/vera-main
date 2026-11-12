@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,14 @@ type ArchiveRef struct {
 	BodySHA256         string
 	BodyRef            string
 	ReceivedAt         time.Time
+}
+
+// ArchivedLastPrice binds a validated price to the exact archived SDK result.
+// Research still needs a unified cross-dataset snapshot and licensed mapping.
+type ArchivedLastPrice struct {
+	Price  LastPrice
+	Source ArchiveRef
+	Cutoff time.Time
 }
 
 // Fetcher isolates SDK access from archival. A caller can replace it with a
@@ -212,4 +221,23 @@ func (c Collector) CollectQuote(ctx context.Context, codes, indicators, options 
 		return Quote{}, ArchiveRef{}, err
 	}
 	return quote, ref, nil
+}
+
+// CollectLastPrice obtains one security's quote and requires archival and
+// freshness checks before returning it. Cutoff is chosen after observation;
+// the caller must coordinate it with the rest of its research snapshot.
+func (c Collector) CollectLastPrice(ctx context.Context, code string, maxAge time.Duration) (ArchivedLastPrice, error) {
+	if code == "" || strings.ContainsAny(code, ",\x00") || strings.TrimSpace(code) != code || maxAge <= 0 {
+		return ArchivedLastPrice{}, ErrInvalidQuote
+	}
+	quote, ref, err := c.CollectQuote(ctx, code, "TIME,NOW", "")
+	if err != nil {
+		return ArchivedLastPrice{}, err
+	}
+	cutoff := time.Now().UTC()
+	price, err := quote.LastPriceAt(code, cutoff, maxAge)
+	if err != nil {
+		return ArchivedLastPrice{}, err
+	}
+	return ArchivedLastPrice{Price: price, Source: ref, Cutoff: cutoff}, nil
 }

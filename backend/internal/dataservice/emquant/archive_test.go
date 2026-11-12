@@ -94,6 +94,30 @@ func TestCollectQuotePreservesObservationTime(t *testing.T) {
 	}
 }
 
+func TestCollectLastPriceRequiresArchiveAndFreshMatchingQuote(t *testing.T) {
+	now := time.Now().UTC()
+	local := now.In(time.FixedZone("CST", 8*60*60))
+	hhmmss := int64(local.Hour()*10000 + local.Minute()*100 + local.Second())
+	f := &testFetcher{quote: Quote{ObservedAt: now, Data: Cube{Codes: []string{"A.SH"}, Indicators: []string{"TIME", "NOW"}, Dates: []string{local.Format("2006-01-02")}, Values: []Cell{{Type: 6, Value: hhmmss}, {Type: 11, Value: 12.5}}}}}
+	s := &testRawStore{ref: "object://test/quote"}
+	c := Collector{Fetcher: f, Store: s}
+	result, err := c.CollectLastPrice(context.Background(), "A.SH", time.Minute)
+	if err != nil || result.Price.Value != "12.5" || result.Source.BodySHA256 != digest(s.body) || result.Cutoff.Before(now) {
+		t.Fatalf("result: %+v, %v", result, err)
+	}
+	if _, err = c.CollectLastPrice(context.Background(), "B.SH", time.Minute); !errors.Is(err, ErrInvalidQuote) {
+		t.Fatalf("mismatched code: %v", err)
+	}
+	s.err = errors.New("archive unavailable")
+	if result, err = c.CollectLastPrice(context.Background(), "A.SH", time.Minute); err == nil || result.Price.Value != "" {
+		t.Fatal("archive failure exposed price")
+	}
+	before := f.calls
+	if _, err = c.CollectLastPrice(context.Background(), "A.SH,B.SZ", time.Minute); !errors.Is(err, ErrInvalidQuote) || f.calls != before {
+		t.Fatal("invalid security reached SDK")
+	}
+}
+
 func TestDecodeArchiveRetainsTypesAndChecksIntegrity(t *testing.T) {
 	at := time.Date(2026, 11, 12, 5, 42, 4, 0, time.UTC)
 	cube := Cube{Codes: []string{"A"}, Indicators: []string{"TIME", "SIGNED", "UNSIGNED", "FLOAT", "TEXT", "NULL"}, Dates: []string{"2026-11-12"}, Values: []Cell{{Type: 6, Value: int64(134200)}, {Type: 8, Value: int64(9007199254740993)}, {Type: 9, Value: uint64(18446744073709551615)}, {Type: 11, Value: 1.25}, {Type: 13, Value: "交易"}, {Type: 0}}}

@@ -173,6 +173,9 @@ func TestLiveSDK(t *testing.T) {
 	if _, err := quote.EventTime(0, quote.ObservedAt, 7*24*time.Hour); err != nil {
 		t.Fatalf("quote event time: %v", err)
 	}
+	if _, err := quote.LastPriceAt("300059.SZ", quote.ObservedAt, 7*24*time.Hour); err != nil {
+		t.Fatalf("quote last price: %v", err)
+	}
 	replayed, received, err := DecodeArchive(store.body, ref.BodySHA256)
 	if err != nil || !received.Equal(quote.ObservedAt) || len(replayed.Indicators) != 3 {
 		t.Fatalf("live archive replay failed: %v", err)
@@ -201,19 +204,20 @@ func TestLiveArchiveS3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	quote, ref, err := (Collector{Fetcher: c, Store: store}).CollectQuote(context.Background(), "300059.SZ", "TIME,NOW,VOLUME", "")
+	result, err := (Collector{Fetcher: c, Store: store}).CollectLastPrice(context.Background(), "300059.SZ", 7*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := store.Get(context.Background(), ref.BodySHA256)
+	body, err := store.Get(context.Background(), result.Source.BodySHA256)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cube, observed, err := DecodeArchive(body, ref.BodySHA256)
-	if err != nil || !observed.Equal(quote.ObservedAt) {
+	cube, observed, err := DecodeArchive(body, result.Source.BodySHA256)
+	if err != nil || !observed.Equal(result.Price.ObservedAt) {
 		t.Fatalf("archive replay: %v", err)
 	}
-	if _, err = (Quote{Data: cube, ObservedAt: observed}).EventTime(0, observed, 7*24*time.Hour); err != nil {
+	price, err := (Quote{Data: cube, ObservedAt: observed}).LastPriceAt("300059.SZ", result.Cutoff, 7*24*time.Hour)
+	if err != nil || price.Value != result.Price.Value {
 		t.Fatal(err)
 	}
 }
