@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 	"unicode"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 )
 
 func TestOpenRejectsInvalidAndMissingLibrary(t *testing.T) {
@@ -154,9 +156,22 @@ func TestLiveSDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	calendarStore := &testRawStore{ref: "object://test/calendar"}
-	days, _, err := (Collector{Fetcher: c, Store: calendarStore}).CollectOpenDates(context.Background(), "CNSESH", "2026-11-02", "2026-11-06")
+	days, calendarRef, err := (Collector{Fetcher: c, Store: calendarStore}).CollectOpenDates(context.Background(), "CNSESH", "2026-11-02", "2026-11-06")
 	if err != nil || len(days) == 0 {
 		t.Fatalf("calendar query: %v", err)
+	}
+	records, err := MapOpenDates(calendarStore.body, calendarRef, "CNSESH", "2026-11-02", "2026-11-06")
+	if err != nil || len(records) != len(days) {
+		t.Fatalf("calendar mapping: %v", err)
+	}
+	catalog, err := dataservice.LoadCatalog("../../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if err := catalog.Validate(record.Record); err != nil {
+			t.Fatal(err)
+		}
 	}
 	store := &testRawStore{ref: "object://test/live"}
 	quote, ref, err := (Collector{Fetcher: c, Store: store}).CollectQuote(context.Background(), "300059.SZ", "TIME,NOW,VOLUME", "")

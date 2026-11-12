@@ -47,7 +47,7 @@ func TestCollectorArchivesBeforeReturning(t *testing.T) {
 		t.Fatal("request options leaked into archive")
 	}
 	var body archiveBody
-	if err := json.Unmarshal(s.body, &body); err != nil || body.Format != "emquant-sdk-decoded-v1" || body.ReceivedAt.IsZero() {
+	if err := json.Unmarshal(s.body, &body); err != nil || body.Format != "emquant-sdk-decoded-v2" || body.RequestFingerprint != ref.RequestFingerprint || body.ReceivedAt.IsZero() {
 		t.Fatalf("invalid archived body: %v", err)
 	}
 	_, ref2, err := (Collector{Fetcher: f, Store: s}).CollectCSD(context.Background(), "A", "X", "2026-11-12", "2026-11-12", "different-option")

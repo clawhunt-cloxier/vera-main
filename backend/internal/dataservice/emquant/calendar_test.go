@@ -2,8 +2,12 @@ package emquant
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 )
 
 func TestCollectOpenDatesChecksResponseAndPreservesArchive(t *testing.T) {
@@ -22,6 +26,31 @@ func TestCollectOpenDatesChecksResponseAndPreservesArchive(t *testing.T) {
 	end, _ := time.Parse("2006-01-02", "2026-11-15")
 	if _, err = openDates(cube, start, end); err != nil {
 		t.Fatal(err)
+	}
+	records, err := MapOpenDates(s.body, ref, "CNSESH", "2026-11-09", "2026-11-15")
+	if err != nil || len(records) != 2 {
+		t.Fatalf("mapping: %v", err)
+	}
+	catalog, err := dataservice.LoadCatalog("../../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, mapped := range records {
+		if err := catalog.Validate(mapped.Record); err != nil {
+			t.Fatal(err)
+		}
+		if mapped.Record.Payload["is_open"] != true || mapped.RawRef != ref.BodyRef || mapped.RawSHA256 != ref.BodySHA256 || mapped.RawLocator != fmt.Sprintf("$.data.Values[%d]", i) || !mapped.Record.AvailableAt.Equal(ref.ReceivedAt) {
+			t.Fatalf("invalid provenance: %+v", mapped)
+		}
+	}
+	if _, err = MapOpenDates(s.body, ref, "CNSESZ", "2026-11-09", "2026-11-15"); err == nil {
+		t.Fatal("mismatched market accepted")
+	}
+	forged := ref
+	req, _ := json.Marshal(request{Method: "tradedates", From: "2026-11-09", To: "2026-11-15", Options: "Market=CNSESZ,Period=1,Order=1"})
+	forged.RequestFingerprint = digest(req)
+	if _, err = MapOpenDates(s.body, forged, "CNSESZ", "2026-11-09", "2026-11-15"); err == nil {
+		t.Fatal("archive reused for another market")
 	}
 	calls := f.calls
 	if _, _, err = c.CollectOpenDates(context.Background(), "UNKNOWN", "2026-11-09", "2026-11-15"); err == nil || f.calls != calls {

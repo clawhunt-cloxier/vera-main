@@ -65,9 +65,10 @@ type request struct {
 }
 
 type archiveBody struct {
-	Format     string    `json:"format"`
-	ReceivedAt time.Time `json:"received_at"`
-	Data       Cube      `json:"data"`
+	Format             string    `json:"format"`
+	RequestFingerprint string    `json:"request_fingerprint,omitempty"`
+	ReceivedAt         time.Time `json:"received_at"`
+	Data               Cube      `json:"data"`
 }
 
 // DecodeArchive restores SDK value types and checks the content hash before
@@ -89,8 +90,14 @@ func DecodeArchive(body []byte, expectedHash string) (Cube, time.Time, error) {
 	if err := dec.Decode(new(any)); err != io.EOF {
 		return Cube{}, time.Time{}, errors.New("emquant: trailing archive content")
 	}
-	if raw.Format != "emquant-sdk-decoded-v1" || raw.ReceivedAt.IsZero() {
+	if (raw.Format != "emquant-sdk-decoded-v1" && raw.Format != "emquant-sdk-decoded-v2") || raw.ReceivedAt.IsZero() {
 		return Cube{}, time.Time{}, errors.New("emquant: unsupported archive format")
+	}
+	if raw.Format == "emquant-sdk-decoded-v2" {
+		h, err := hex.DecodeString(raw.RequestFingerprint)
+		if err != nil || len(h) != 32 || raw.RequestFingerprint != strings.ToLower(raw.RequestFingerprint) {
+			return Cube{}, time.Time{}, errors.New("emquant: invalid archived request fingerprint")
+		}
 	}
 	for i := range raw.Data.Values {
 		v := &raw.Data.Values[i]
@@ -165,7 +172,8 @@ func (c Collector) persist(ctx context.Context, req request, cube Cube, received
 	if err != nil {
 		return ArchiveRef{}, fmt.Errorf("emquant: fingerprint: %w", err)
 	}
-	body, err := json.Marshal(archiveBody{Format: "emquant-sdk-decoded-v1", ReceivedAt: received.UTC(), Data: cube})
+	fingerprint := digest(requestBody)
+	body, err := json.Marshal(archiveBody{Format: "emquant-sdk-decoded-v2", RequestFingerprint: fingerprint, ReceivedAt: received.UTC(), Data: cube})
 	if err != nil {
 		return ArchiveRef{}, fmt.Errorf("emquant: encode raw result: %w", err)
 	}
@@ -183,7 +191,7 @@ func (c Collector) persist(ctx context.Context, req request, cube Cube, received
 	if err := ctx.Err(); err != nil {
 		return ArchiveRef{}, err
 	}
-	return ArchiveRef{RequestFingerprint: digest(requestBody), BodySHA256: hash, BodyRef: ref, ReceivedAt: received.UTC()}, nil
+	return ArchiveRef{RequestFingerprint: fingerprint, BodySHA256: hash, BodyRef: ref, ReceivedAt: received.UTC()}, nil
 }
 
 // CollectCSD returns data only after the SDK-decoded response was archived.
