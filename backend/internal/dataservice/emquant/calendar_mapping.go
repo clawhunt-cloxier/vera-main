@@ -11,7 +11,8 @@ import (
 
 // MappedRecord keeps provenance alongside a canonical payload until the data
 // service has a persistent lineage model. It must not be flattened into the
-// current records table, which cannot retain these fields.
+// current records table, which cannot retain these fields. AvailableAt is a
+// lower bound; the eventual database writer must use its actual commit time.
 type MappedRecord struct {
 	Record         dataservice.Record
 	RawRef         string
@@ -27,7 +28,7 @@ func MapOpenDates(body []byte, ref ArchiveRef, market, from, to string) ([]Mappe
 	if market != "CNSESH" && market != "CNSESZ" {
 		return nil, errors.New("emquant: unsupported calendar market")
 	}
-	if ref.BodyRef == "" || ref.ReceivedAt.IsZero() {
+	if ref.BodyRef == "" || ref.ReceivedAt.IsZero() || ref.ArchivedAt.IsZero() || ref.ArchivedAt.Before(ref.ReceivedAt) {
 		return nil, errors.New("emquant: missing archive provenance")
 	}
 	start, err := time.Parse("2006-01-02", from)
@@ -62,7 +63,7 @@ func MapOpenDates(body []byte, ref ArchiveRef, market, from, to string) ([]Mappe
 		period, _ := time.Parse("2006-01-02", day)
 		out = append(out, MappedRecord{
 			Record: dataservice.Record{DatasetID: "ref.trading_calendar", RecordKey: day, Version: 1, Period: &period,
-				AvailableAt: observed.UTC(), Origin: "exchange", SourceTier: "L2", Basis: "Choice tradedates; market=" + market,
+				AvailableAt: ref.ArchivedAt.UTC(), Origin: "exchange", SourceTier: "L2", Basis: "Choice tradedates; market=" + market,
 				Payload: map[string]any{"trade_date": day, "is_open": true}},
 			RawRef: ref.BodyRef, RawSHA256: ref.BodySHA256, RawLocator: fmt.Sprintf("$.data.Values[%d]", i), MappingVersion: "emquant-tradedates-v1",
 		})

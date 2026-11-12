@@ -21,6 +21,8 @@
 - Go 组件新增沪深 `tradedates` 采集和归档；校验厂商日期轴与值一致、日期递增且位于请求区间内。真实账号查询历史区间通过；厂商手册建议不使用未来交易日。此方法只返回已确认的开市日期，不把未返回日期推断为休市，也不宣称历史覆盖完整；尚未写入 `ref.trading_calendar` 或用于新鲜度判定。
 - 新增交易日历映射：从已归档响应生成 `ref.trading_calendar` 的开市日记录，并携带原始引用、哈希、位置和映射版本；真实上交所样本通过目录校验。归档格式 v2 将请求指纹写入哈希覆盖的内容，防止仅替换引用中的请求指纹而把上海响应误标为深圳响应；旧 v1 仍可回放，但不能用于此映射，哈希本身不证明厂商真实性。映射结果尚不能写入当前 `records` 表：该表没有原始引用等血缘字段，且日历契约的粒度没有市场维度；不得丢弃这些信息强行入库。
 - 用户授权查询的 [Choice 量化接口公开 Python 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Python.html?_=637077181105957032) 可确认序列接口和请求参数，未找到 `VOLUME`、`AMOUNT`、`TURN`、`TAFACTOR`、`TRADESTATUS` 等单位或编码定义；本地 CHM 仅列指标名称及参数，不能据此猜测数值口径。
+- 对用户指定的[手册入口](https://quantapi.eastmoney.com/Manual/Index?from=web)追加核查：页面加载 Python API 手册；首页真实的[命令生成入口](https://quantapi.eastmoney.com/Cmd/ChoiceSerialSection?from=web)重定向至登录，登录页面脚本要求验证码。未尝试提交凭证或绕过验证码。公开资料和[命令生成介绍](https://quantapi.eastmoney.com/Cmd/ShowPromotionpage?from=web)仍未提供上述字段单位与枚举。
+- SDK 参数保护拒绝 `ShowBlank`、非零 `FillData` 和查询参数中的凭证，避免以填充值或沿用值冒充真实缺失数据；具体数据集仍须配置更严格的允许项与口径。归档引用记录本地归档完成时间；日历映射的 `available_at` 仅为归档完成时间下界，最终持久化必须以真实提交时间为准。
 - 新增采集归档接口：SDK 返回的类型化数据在返回给调用方前必须由注入的 `RawStore` 保存，并保留请求指纹、内容 SHA-256、引用和观察时点；归档回放核对哈希并保留 64 位整数。SDK 只暴露解码值，归档是 SDK 解码响应，不是厂商网络原始字节。
 - 新增 S3 兼容 `S3RawStore`：按内容哈希寻址，使用条件写防止覆盖，遇已存在对象时回读验哈希；读取限制大小并验哈希。使用本机临时 Garage 2.1.0 实例、独立测试凭证与桶，验证真实 SDK 行情 → S3 对象 → 回读 → 哈希与时间解析；另用合成数据验证对象存储进程重启后可回读。临时测试目录为 `/tmp/vera-garage`，不代表部署环境的持久卷或备份；测试服务已停止。尚未将对象存储配置、归档引用和采集接入应用或数据库。
 - 本轮运行 `PATH=<Go 1.27.3>/bin:$PATH make test-go`（`go test -race ./...`）全包通过；EMQuant 的 `CGO_ENABLED=0` 测试、`go vet`、`make check-docs` 通过。S3 本地服务测试和 SDK 联调为显式启用的独立测试，不由默认 Go 测试覆盖。

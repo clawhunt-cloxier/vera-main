@@ -28,6 +28,7 @@ type ArchiveRef struct {
 	BodySHA256         string
 	BodyRef            string
 	ReceivedAt         time.Time
+	ArchivedAt         time.Time
 }
 
 // ArchivedLastPrice binds a validated price to the exact archived SDK result.
@@ -191,7 +192,11 @@ func (c Collector) persist(ctx context.Context, req request, cube Cube, received
 	if err := ctx.Err(); err != nil {
 		return ArchiveRef{}, err
 	}
-	return ArchiveRef{RequestFingerprint: fingerprint, BodySHA256: hash, BodyRef: ref, ReceivedAt: received.UTC()}, nil
+	archivedAt := time.Now().UTC()
+	if received.After(archivedAt) {
+		return ArchiveRef{}, errors.New("emquant: observation time is after archive completion")
+	}
+	return ArchiveRef{RequestFingerprint: fingerprint, BodySHA256: hash, BodyRef: ref, ReceivedAt: received.UTC(), ArchivedAt: archivedAt}, nil
 }
 
 // CollectCSD returns data only after the SDK-decoded response was archived.
@@ -248,6 +253,9 @@ func (c Collector) CollectLastPrice(ctx context.Context, code string, maxAge tim
 		return ArchivedLastPrice{}, err
 	}
 	cutoff := time.Now().UTC()
+	if cutoff.Before(ref.ArchivedAt) {
+		return ArchivedLastPrice{}, errors.New("emquant: cutoff is before archive completion")
+	}
 	price, err := quote.LastPriceAt(code, cutoff, maxAge)
 	if err != nil {
 		return ArchivedLastPrice{}, err

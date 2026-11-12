@@ -65,6 +65,12 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	if _, err = c.CSD("ERROR", "X", "D1", "D2", ""); err == nil || !strings.Contains(err.Error(), "88") {
 		t.Fatalf("query error: %v", err)
 	}
+	if _, err = c.CSD("A", "X", "D1", "D2", "FILLDATA=1"); err == nil {
+		t.Fatal("carry-forward option accepted")
+	}
+	if _, err = c.CSS("A", "X", "SHOWBLANK=0"); err == nil {
+		t.Fatal("blank replacement option accepted")
+	}
 	snapshot, err := c.CSS("A,B", "X,Y", "")
 	if err != nil {
 		t.Fatal(err)

@@ -93,6 +93,10 @@ func TestCollectQuotePreservesObservationTime(t *testing.T) {
 	if _, _, err = (Collector{Fetcher: f, Store: s}).CollectQuote(context.Background(), "A", "TIME,NOW", ""); err == nil {
 		t.Fatal("missing observation time accepted")
 	}
+	f.quote.ObservedAt = time.Now().Add(time.Hour)
+	if quote, _, err := (Collector{Fetcher: f, Store: s}).CollectQuote(context.Background(), "A", "TIME,NOW", ""); err == nil || !quote.ObservedAt.IsZero() {
+		t.Fatal("future observation time accepted")
+	}
 }
 
 func TestCollectLastPriceRequiresArchiveAndFreshMatchingQuote(t *testing.T) {
@@ -103,7 +107,7 @@ func TestCollectLastPriceRequiresArchiveAndFreshMatchingQuote(t *testing.T) {
 	s := &testRawStore{ref: "object://test/quote"}
 	c := Collector{Fetcher: f, Store: s}
 	result, err := c.CollectLastPrice(context.Background(), "A.SH", time.Minute)
-	if err != nil || result.Price.Value != "12.5" || result.Source.BodySHA256 != digest(s.body) || result.Cutoff.Before(now) {
+	if err != nil || result.Price.Value != "12.5" || result.Source.BodySHA256 != digest(s.body) || result.Cutoff.Before(now) || result.Cutoff.Before(result.Source.ArchivedAt) {
 		t.Fatalf("result: %+v, %v", result, err)
 	}
 	if _, err = c.CollectLastPrice(context.Background(), "B.SH", time.Minute); !errors.Is(err, ErrInvalidQuote) {

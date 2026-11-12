@@ -39,7 +39,7 @@ func TestCollectOpenDatesChecksResponseAndPreservesArchive(t *testing.T) {
 		if err := catalog.Validate(mapped.Record); err != nil {
 			t.Fatal(err)
 		}
-		if mapped.Record.Payload["is_open"] != true || mapped.RawRef != ref.BodyRef || mapped.RawSHA256 != ref.BodySHA256 || mapped.RawLocator != fmt.Sprintf("$.data.Values[%d]", i) || !mapped.Record.AvailableAt.Equal(ref.ReceivedAt) {
+		if mapped.Record.Payload["is_open"] != true || mapped.RawRef != ref.BodyRef || mapped.RawSHA256 != ref.BodySHA256 || mapped.RawLocator != fmt.Sprintf("$.data.Values[%d]", i) || !mapped.Record.AvailableAt.Equal(ref.ArchivedAt) {
 			t.Fatalf("invalid provenance: %+v", mapped)
 		}
 	}
@@ -51,6 +51,11 @@ func TestCollectOpenDatesChecksResponseAndPreservesArchive(t *testing.T) {
 	forged.RequestFingerprint = digest(req)
 	if _, err = MapOpenDates(s.body, forged, "CNSESZ", "2026-11-09", "2026-11-15"); err == nil {
 		t.Fatal("archive reused for another market")
+	}
+	forged = ref
+	forged.ArchivedAt = ref.ReceivedAt.Add(-time.Second)
+	if _, err = MapOpenDates(s.body, forged, "CNSESH", "2026-11-09", "2026-11-15"); err == nil {
+		t.Fatal("archive before receipt accepted")
 	}
 	calls := f.calls
 	if _, _, err = c.CollectOpenDates(context.Background(), "UNKNOWN", "2026-11-09", "2026-11-15"); err == nil || f.calls != calls {
