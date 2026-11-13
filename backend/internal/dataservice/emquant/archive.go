@@ -124,50 +124,8 @@ func DecodeArchive(body []byte, expectedHash string) (Cube, time.Time, error) {
 			return Cube{}, time.Time{}, errors.New("emquant: invalid archived request fingerprint")
 		}
 	}
-	for i := range raw.Data.Values {
-		v := &raw.Data.Values[i]
-		switch v.Type {
-		case 0:
-			if v.Value != nil {
-				return Cube{}, time.Time{}, errors.New("emquant: malformed null")
-			}
-		case 1, 3, 4, 6, 8:
-			n, ok := v.Value.(json.Number)
-			if !ok {
-				return Cube{}, time.Time{}, errors.New("emquant: malformed signed value")
-			}
-			value, err := n.Int64()
-			if err != nil {
-				return Cube{}, time.Time{}, errors.New("emquant: invalid signed value")
-			}
-			v.Value = value
-		case 2, 5, 7, 9:
-			n, ok := v.Value.(json.Number)
-			if !ok {
-				return Cube{}, time.Time{}, errors.New("emquant: malformed unsigned value")
-			}
-			value, err := strconv.ParseUint(string(n), 10, 64)
-			if err != nil {
-				return Cube{}, time.Time{}, errors.New("emquant: invalid unsigned value")
-			}
-			v.Value = value
-		case 10, 11:
-			n, ok := v.Value.(json.Number)
-			if !ok {
-				return Cube{}, time.Time{}, errors.New("emquant: malformed floating value")
-			}
-			value, err := n.Float64()
-			if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
-				return Cube{}, time.Time{}, errors.New("emquant: invalid floating value")
-			}
-			v.Value = value
-		case 13, 14:
-			if _, ok := v.Value.(string); !ok {
-				return Cube{}, time.Time{}, errors.New("emquant: malformed string")
-			}
-		default:
-			return Cube{}, time.Time{}, errors.New("emquant: unsupported archived value type")
-		}
+	if err := restoreArchiveCells(raw.Data.Values); err != nil {
+		return Cube{}, time.Time{}, err
 	}
 	if len(raw.Data.Codes) > 0 && len(raw.Data.Indicators) > 0 && len(raw.Data.Dates) > 0 {
 		if _, err := raw.Data.At(0, 0, 0); err != nil {
@@ -177,6 +135,55 @@ func DecodeArchive(body []byte, expectedHash string) (Cube, time.Time, error) {
 		return Cube{}, time.Time{}, ErrShape
 	}
 	return raw.Data, raw.ReceivedAt, nil
+}
+
+func restoreArchiveCells(values []Cell) error {
+	for i := range values {
+		v := &values[i]
+		switch v.Type {
+		case 0:
+			if v.Value != nil {
+				return errors.New("emquant: malformed null")
+			}
+		case 1, 3, 4, 6, 8:
+			n, ok := v.Value.(json.Number)
+			if !ok {
+				return errors.New("emquant: malformed signed value")
+			}
+			value, err := n.Int64()
+			if err != nil {
+				return errors.New("emquant: invalid signed value")
+			}
+			v.Value = value
+		case 2, 5, 7, 9:
+			n, ok := v.Value.(json.Number)
+			if !ok {
+				return errors.New("emquant: malformed unsigned value")
+			}
+			value, err := strconv.ParseUint(string(n), 10, 64)
+			if err != nil {
+				return errors.New("emquant: invalid unsigned value")
+			}
+			v.Value = value
+		case 10, 11:
+			n, ok := v.Value.(json.Number)
+			if !ok {
+				return errors.New("emquant: malformed floating value")
+			}
+			value, err := n.Float64()
+			if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+				return errors.New("emquant: invalid floating value")
+			}
+			v.Value = value
+		case 13, 14:
+			if _, ok := v.Value.(string); !ok {
+				return errors.New("emquant: malformed string")
+			}
+		default:
+			return errors.New("emquant: unsupported archived value type")
+		}
+	}
+	return nil
 }
 
 func digest(body []byte) string {

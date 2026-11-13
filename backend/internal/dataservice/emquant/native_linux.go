@@ -15,6 +15,7 @@ typedef union { char c; _Bool b; short s; unsigned short us; int i; unsigned ui;
 typedef struct { int type; eqvalue value; eqchar text; } eqvariant;
 typedef struct { eqvariant *p; unsigned n; } eqvariants;
 typedef struct { eqchars codes, indicators, dates; eqvariants values; } eqdata;
+typedef struct { int rows, columns; eqchars indicators; eqvariants values; } eqtable;
 typedef struct { char user[255], password[255]; } eqlogin;
 typedef struct { int version, type, err, request, serial; eqdata *data; } eqmsg;
 typedef int (*eq_log_callback)(const char *);
@@ -29,6 +30,7 @@ typedef struct {
  int (*css)(const char *, const char *, const char *, eqdata **);
  int (*csqsnapshot)(const char *, const char *, const char *, eqdata **);
  int (*cfn)(const char *, const char *, int, const char *, eqdata **);
+ int (*cec)(const char *, const char *, eqtable **);
  int (*tradedates)(const char *, const char *, const char *, eqdata **);
  int (*release)(void *);
 } eqapi;
@@ -49,6 +51,7 @@ static int eq_open(eqapi *a, const char *path) {
  a->start = dlsym(a->handle, "start"); a->stop = dlsym(a->handle, "stop");
  a->csd = dlsym(a->handle, "csd"); a->css = dlsym(a->handle, "css"); a->csqsnapshot = dlsym(a->handle, "csqsnapshot"); a->tradedates = dlsym(a->handle, "tradedates"); a->release = dlsym(a->handle, "releasedata");
  a->cfn = dlsym(a->handle, "cfn");
+ a->cec = dlsym(a->handle, "cec");
  if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->csqsnapshot || !a->tradedates || !a->release) {
   dlclose(a->handle); memset(a, 0, sizeof(*a)); return -2;
  }
@@ -82,6 +85,11 @@ static int eq_news(eqapi *a, const char *codes, const char *content, int mode, c
  if (!a->cfn) return -4;
  return a->cfn(codes, content, mode, options, out);
 }
+static int eq_cec(eqapi *a, const char *codes, const char *options, eqtable **out) {
+ if (!a->cec) return -4;
+ return a->cec(codes, options, out);
+}
+static int eq_release_table(eqapi *a, eqtable *d) { return a->release(d); }
 static int eq_release(eqapi *a, eqdata *d) { return a->release(d); }
 static int eq_stop(eqapi *a) { return a->stop(); }
 static void eq_unload(eqapi *a) { if (a->handle) dlclose(a->handle); memset(a, 0, sizeof(*a)); }
@@ -196,6 +204,44 @@ func (c *Client) CFN(codes, content string, mode int, options string) (Cube, err
 	return c.query(4, codes, content, string(rune('0'+mode)), "", options)
 }
 
+// CheckStockCodes requests stock-code suffix candidates from CEC. It never
+// chooses among multiple candidates or asserts their current listing status.
+func (c *Client) CheckStockCodes(codes string) (table Table, err error) {
+	if err := validateStockCodeQuery(codes); err != nil {
+		return Table{}, err
+	}
+	nativeMu.Lock()
+	defer nativeMu.Unlock()
+	if c == nil || c.closed || !c.started || nativeCurrent != c {
+		return Table{}, errors.New("emquant: session closed")
+	}
+	if rc := C.eq_callback_error(); rc != 0 {
+		return Table{}, &SDKError{Operation: "connection callback", Code: int(rc)}
+	}
+	a := C.CString(codes)
+	defer C.free(unsafe.Pointer(a))
+	b := C.CString(stockCodeOptions)
+	defer C.free(unsafe.Pointer(b))
+	var data *C.eqtable
+	if rc := C.eq_cec(&c.api, a, b, &data); rc != 0 {
+		return Table{}, &SDKError{Operation: "code lookup", Code: int(rc)}
+	}
+	if data == nil {
+		return Table{}, errors.New("emquant: null code lookup response")
+	}
+	defer func() {
+		if rc := C.eq_release_table(&c.api, data); rc != 0 {
+			table = Table{}
+			err = &SDKError{Operation: "release", Code: int(rc)}
+		}
+	}()
+	table, err = decodeTable(data)
+	if rc := C.eq_callback_error(); rc != 0 {
+		return Table{}, &SDKError{Operation: "connection callback", Code: int(rc)}
+	}
+	return table, err
+}
+
 func (c *Client) query(mode int, codes, indicators, from, to, options string) (cube Cube, err error) {
 	nativeMu.Lock()
 	defer nativeMu.Unlock()
@@ -264,47 +310,43 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 	return cube, err
 }
 
-func decode(data *C.eqdata) (Cube, error) {
-	const limit = 1000000
-	readString := func(value C.eqchar) (string, error) {
-		if value.n == 0 || value.n > limit+1 || C.eq_terminated(value) == 0 {
-			return "", fmt.Errorf("%w: invalid SDK string length or terminator", ErrShape)
+const nativeValueLimit = 1000000
+
+func readNativeString(value C.eqchar) (string, error) {
+	if value.n == 0 || value.n > nativeValueLimit+1 || C.eq_terminated(value) == 0 {
+		return "", fmt.Errorf("%w: invalid SDK string length or terminator", ErrShape)
+	}
+	s := C.GoStringN(value.p, C.int(value.n-1))
+	if !utf8.ValidString(s) {
+		return "", fmt.Errorf("%w: invalid UTF-8", ErrShape)
+	}
+	return s, nil
+}
+
+func nativeStrings(a C.eqchars) ([]string, error) {
+	if a.n > nativeValueLimit || (a.n > 0 && a.p == nil) {
+		return nil, fmt.Errorf("%w: invalid string array", ErrShape)
+	}
+	out := make([]string, 0, int(a.n))
+	for _, x := range unsafe.Slice(a.p, int(a.n)) {
+		value, err := readNativeString(x)
+		if err != nil {
+			return nil, err
 		}
-		s := C.GoStringN(value.p, C.int(value.n-1))
-		if !utf8.ValidString(s) {
-			return "", fmt.Errorf("%w: invalid UTF-8", ErrShape)
-		}
-		return s, nil
+		out = append(out, value)
 	}
-	if data.codes.n > limit || data.indicators.n > limit || data.dates.n > limit || data.values.n > limit {
-		return Cube{}, fmt.Errorf("%w: response too large", ErrShape)
+	return out, nil
+}
+
+func nativeCells(a C.eqvariants) ([]Cell, error) {
+	if a.n > nativeValueLimit || (a.n > 0 && a.p == nil) {
+		return nil, fmt.Errorf("%w: invalid value array", ErrShape)
 	}
-	if (data.codes.n > 0 && data.codes.p == nil) || (data.indicators.n > 0 && data.indicators.p == nil) || (data.dates.n > 0 && data.dates.p == nil) || (data.values.n > 0 && data.values.p == nil) {
-		return Cube{}, fmt.Errorf("%w: null array", ErrShape)
+	if a.n == 0 {
+		return nil, nil
 	}
-	stringsOf := func(a C.eqchars) ([]string, error) {
-		out := make([]string, 0, int(a.n))
-		for _, x := range unsafe.Slice(a.p, int(a.n)) {
-			value, err := readString(x)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, value)
-		}
-		return out, nil
-	}
-	var c Cube
-	var err error
-	if c.Codes, err = stringsOf(data.codes); err != nil {
-		return Cube{}, err
-	}
-	if c.Indicators, err = stringsOf(data.indicators); err != nil {
-		return Cube{}, err
-	}
-	if c.Dates, err = stringsOf(data.dates); err != nil {
-		return Cube{}, err
-	}
-	for _, v := range unsafe.Slice(data.values.p, int(data.values.n)) {
+	out := make([]Cell, 0, int(a.n))
+	for _, v := range unsafe.Slice(a.p, int(a.n)) {
 		cell := Cell{Type: int(v._type)}
 		switch cell.Type {
 		case 0:
@@ -315,19 +357,58 @@ func decode(data *C.eqdata) (Cube, error) {
 		case 10, 11:
 			x := float64(C.eq_float(v))
 			if math.IsNaN(x) || math.IsInf(x, 0) {
-				return Cube{}, fmt.Errorf("%w: non-finite number", ErrShape)
+				return nil, fmt.Errorf("%w: non-finite number", ErrShape)
 			}
 			cell.Value = x
 		case 13, 14:
-			value, err := readString(v.text)
+			value, err := readNativeString(v.text)
 			if err != nil {
-				return Cube{}, err
+				return nil, err
 			}
 			cell.Value = value
 		default:
-			return Cube{}, fmt.Errorf("%w: unsupported variant type %d", ErrShape, cell.Type)
+			return nil, fmt.Errorf("%w: unsupported variant type %d", ErrShape, cell.Type)
 		}
-		c.Values = append(c.Values, cell)
+		out = append(out, cell)
+	}
+	return out, nil
+}
+
+func decodeTable(data *C.eqtable) (Table, error) {
+	if data.rows < 0 || data.columns < 0 || data.rows > nativeValueLimit || data.columns > nativeValueLimit || int64(data.rows)*int64(data.columns) > nativeValueLimit || uint32(data.columns) != uint32(data.indicators.n) || int64(data.rows)*int64(data.columns) != int64(data.values.n) {
+		return Table{}, fmt.Errorf("%w: invalid table dimensions", ErrShape)
+	}
+	columns, err := nativeStrings(data.indicators)
+	if err != nil {
+		return Table{}, err
+	}
+	values, err := nativeCells(data.values)
+	if err != nil {
+		return Table{}, err
+	}
+	return Table{Columns: columns, Rows: int(data.rows), Values: values}, nil
+}
+
+func decode(data *C.eqdata) (Cube, error) {
+	if data.codes.n > nativeValueLimit || data.indicators.n > nativeValueLimit || data.dates.n > nativeValueLimit || data.values.n > nativeValueLimit {
+		return Cube{}, fmt.Errorf("%w: response too large", ErrShape)
+	}
+	if (data.codes.n > 0 && data.codes.p == nil) || (data.indicators.n > 0 && data.indicators.p == nil) || (data.dates.n > 0 && data.dates.p == nil) || (data.values.n > 0 && data.values.p == nil) {
+		return Cube{}, fmt.Errorf("%w: null array", ErrShape)
+	}
+	var c Cube
+	var err error
+	if c.Codes, err = nativeStrings(data.codes); err != nil {
+		return Cube{}, err
+	}
+	if c.Indicators, err = nativeStrings(data.indicators); err != nil {
+		return Cube{}, err
+	}
+	if c.Dates, err = nativeStrings(data.dates); err != nil {
+		return Cube{}, err
+	}
+	if c.Values, err = nativeCells(data.values); err != nil {
+		return Cube{}, err
 	}
 	if len(c.Codes) > 0 && len(c.Indicators) > 0 && len(c.Dates) > 0 {
 		if _, err = c.At(0, 0, 0); err != nil {

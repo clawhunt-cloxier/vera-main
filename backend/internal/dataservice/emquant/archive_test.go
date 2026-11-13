@@ -14,6 +14,7 @@ type testFetcher struct {
 	quote Quote
 	err   error
 	calls int
+	table Table
 }
 
 func (f *testFetcher) CSD(_, _, _, _, _ string) (Cube, error)      { f.calls++; return f.cube, f.err }
@@ -23,6 +24,10 @@ func (f *testFetcher) CSS(_, _, _ string) (Cube, error)            { f.calls++; 
 func (f *testFetcher) CFN(_, _ string, _ int, _ string) (Cube, error) {
 	f.calls++
 	return f.cube, f.err
+}
+func (f *testFetcher) CheckStockCodes(_ string) (Table, error) {
+	f.calls++
+	return f.table, f.err
 }
 
 type testRawStore struct {
@@ -56,7 +61,8 @@ func TestCollectorDoesNotBypassAccountGate(t *testing.T) {
 	_, _, e3 := c.CollectCFN(ctx, "A", "regularreport", 2, "count=1")
 	_, _, e4 := c.CollectQuote(ctx, "A", "TIME,NOW", "")
 	_, _, e5 := c.CollectOpenDates(ctx, "CNSESH", "2026-11-01", "2026-11-02")
-	for _, err := range []error{e1, e2, e3, e4, e5} {
+	_, _, e6 := c.CollectStockCodeCandidates(ctx, "000001")
+	for _, err := range []error{e1, e2, e3, e4, e5, e6} {
 		if !errors.Is(err, ErrRateLimited) {
 			t.Fatalf("gate error not propagated: %v", err)
 		}

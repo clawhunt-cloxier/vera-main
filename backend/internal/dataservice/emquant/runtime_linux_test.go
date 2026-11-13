@@ -146,6 +146,18 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	if _, err := runtime.MapSecurityFromArchive(ctx, security.Source, "B.SZ"); err == nil {
 		t.Fatal("security archive accepted with the wrong security")
 	}
+	<-archived
+	candidates, codeRef, err := runtime.CollectStockCodeCandidates(ctx, "000001")
+	if err != nil || candidates.Rows != 1 {
+		t.Fatalf("code lookup archive: %v", err)
+	}
+	replayedCodes, err := runtime.ReadCodeTableArchive(ctx, codeRef, "000001")
+	if err != nil || len(replayedCodes.Values) != 2 || replayedCodes.Values[1].Value != "000001.SZ,000001.SH" {
+		t.Fatalf("code lookup replay: %v", err)
+	}
+	if _, err := runtime.ReadCodeTableArchive(ctx, codeRef, "000002"); err == nil {
+		t.Fatal("code archive accepted with the wrong query")
+	}
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}

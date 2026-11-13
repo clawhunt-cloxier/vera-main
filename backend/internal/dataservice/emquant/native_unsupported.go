@@ -30,4 +30,8 @@ func (*Client) CFN(_, _ string, _ int, _ string) (Cube, error) {
 	return Cube{}, errors.New("emquant: native SDK requires Linux and cgo")
 }
 
+func (*Client) CheckStockCodes(_ string) (Table, error) {
+	return Table{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
 func (*Client) Close() error { return nil }

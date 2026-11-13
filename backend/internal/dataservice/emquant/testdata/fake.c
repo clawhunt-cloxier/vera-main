@@ -5,6 +5,7 @@ typedef union { char c; _Bool b; short s; unsigned short us; int i; unsigned ui;
 typedef struct { int type; eqvalue value; eqchar text; } eqvariant;
 typedef struct { eqvariant *p; unsigned n; } eqvariants;
 typedef struct { eqchars codes, indicators, dates; eqvariants values; } eqdata;
+typedef struct { int rows, columns; eqchars indicators; eqvariants values; } eqtable;
 typedef struct { char user[255], password[255]; } eqlogin;
 typedef struct { int version, type, err, request, serial; eqdata *data; } eqmsg;
 typedef int (*eq_log_callback)(const char *);
@@ -41,6 +42,16 @@ int csqsnapshot(const char *codes, const char *indicators, const char *options, 
 int cfn(const char *codes, const char *content, int mode, const char *options, eqdata **out) {
  if (mode != 1 && mode != 2) return 99;
  return csd(codes, content, "", "", options, out);
+}
+int cec(const char *codes, const char *options, eqtable **out) {
+ (void)options;
+ static eqchar fields[] = {{"CODE",5},{"FULLCODES",10}};
+ static eqvariant values[] = {{.type=13,.text={"000001",7}},{.type=13,.text={"000001.SZ,000001.SH",20}}};
+ static eqtable data;
+ data = (eqtable){1,2,{fields,2},{values,2}};
+ if (!strcmp(codes, "999999")) data.values.n = 1;
+ *out = &data;
+ return 0;
 }
 int tradedates(const char *from, const char *to, const char *options, eqdata **out) {
  (void)to; (void)options;

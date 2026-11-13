@@ -21,6 +21,7 @@
 | `tradedates` | 官方手册列出上交所和深交所市场参数及日频查询 | 已验证上交所历史样本；只映射返回的开市日期，不推断缺失日期为休市 |
 | `HISSW2021`、`HISSW2021CODE` | 随附 2025 年指标手册将其列为可查历史的申万 2021 行业名称和代码，参数 `EndDate` 为截止日期、`ClassiFication=1/2/3` 为一级／二级／三级 | 已按每级请求分别归档并校验来源；尚未用真实账号测试这些字段，也未确认生效区间、修订历史和权限，不能直接生成完整 `ref.industry` |
 | `NAME`、`LISTDATE`、`DELISTDATE` | 随附 2025 年沪深股票指标手册分别列为股票简称、首发上市日期和摘牌日期 | 已实现部分观察值归档回放；真实账号返回类型与覆盖尚未验证，简称未证明历史有效，空摘牌日不表示当前正常上市 |
+| `cec` 代码校验与补全 | [官方手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Matlab.html)说明补全模式可能返回多个后缀；`SecuType=1` 为股票、`SecuMarket=1` 为沪深 | 新增六位数字代码的沪深候选查询和表格归档，不自动选取候选；真实账号权限、返回形状及北交所覆盖尚未验证，不等于实体目录 |
 | CSD/CSS 请求 | 官方手册说明单次最多 64 项指标、函数每分钟不超过 700 次 | 已限制指标数量；新增共享限流与超限冷却组件，但生产数据库迁移、账户绑定和实际冷却配置仍未接入 |
 
 厂商的[Python 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Python.html)和 [Linux C++ 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_CPP_Linux.pdf)定义 API、参数和内存释放；字段口径以具体数据产品及版本为准。用户提供的终端口径应在正式数据产品登记中记录来源与确认人，不把上述概括当作完整合同原文。
@@ -46,13 +47,15 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 
 `OpenRuntime` 的归档回读会核对对象引用与内容寻址位置、对象哈希、请求指纹和接收时间；行情、交易日历、两项财务字段、单级行业及部分证券资料观察值可从对象存储回读后映射。交易日历仍须保留市场维度及实际数据库提交时间，财务字段仍不能推断公告版本和披露时刻，行业观察值也不证明有效期或历史修订。哈希只证明内容一致，不能证明厂商来源或授权，引用及归档完成时间仍须通过数据服务的持久化登记和许可规则核验。
 
+代码候选使用独立的表格归档格式，保留所有返回行和原始字段；回放要求请求代码、指纹、对象引用与哈希一致。该调用不接收用户自由文本，也不会把有歧义的候选静默选择为研究对象。结果仍需经实体目录的市场、身份、版本与许可规则核验。
+
 财务部分字段映射保留证券、**请求的**报告期和报表类型、两个金额值、空值及字段级归档位置；负利润和零值原样保留。报告期是请求参数，响应本身尚不能证明数值对应的公告版本、披露时间或 PIT 正确性，也不是完整财务报表，因此不能直接写入研究快照或作为完整财报使用。
 
 已按官方头文件新增 CFN 公告／资讯元数据调用与归档准备，模拟动态库覆盖模式、上游错误、归档失败和请求指纹；当前尚未用真实账户验证该接口的权限、响应形状或字段映射。厂商返回的 URL 和文本是不可信数据，不得执行其中的指令，也不得以返回的 URL 绕过已登记数据源进行任意抓取。元数据不等于公告正文。
 
 共享限流准备组件使用 PostgreSQL 会话锁和持久状态，将同一账号各类 SDK 调用串行化，调用结束后等待配置的最小间隔；下限不快于 700 次/分钟，未知的账号或快照限额必须另行配置为更严格值，不能把该下限当作实际配额。收到已确认的厂商限频错误时，组件将另行配置的冷却时间持久化供所有进程遵守；它不自动重试，也不猜测实际账号所需冷却时间。限流状态写入失败、无法取得数据库连接、或发现上一次请求可能仍在执行时，均拒绝新请求；不能仅凭锁释放判断 SDK 调用已经结束。采集器可以注入该限流器，但当前默认未注入，也未接入应用。需要 T014/T012 协商正式迁移创建 `emquant_rate_state(scope text PRIMARY KEY, in_flight boolean NOT NULL, next_allowed timestamptz NOT NULL)`，并确保同一厂商账号的所有进程及外部应用共享相同的非秘密 scope 且禁止绕过；否则不能宣称已实现账号级保护。未解决的 in-flight 状态必须先确认全部旧 SDK 进程已终止，并按已验证的账号冷却要求恢复；不能盲目清除。自动恢复机制、部署和真实账号限额仍未验证。
 
-开发验证：在 `backend` 执行 `go test -race ./internal/dataservice/emquant`；默认测试使用合成样本。`TestLiveSDK` 和 `TestLiveArchiveS3` 只在显式设置 `EMQUANT_INTEGRATION=1` 及相应环境后运行，使用真实账号会消耗厂商额度，后者会向指定 S3 桶写真实数据。`TestLiveCFN`、`TestLiveIndustry` 和 `TestLiveSecurity` 分别还要求 `EMQUANT_LIVE_CFN=1`、`EMQUANT_LIVE_INDUSTRY=1` 或 `EMQUANT_LIVE_SECURITY=1`；当前尚未运行。`TestLiveRuntime` 还要求 `EMQUANT_LIVE_RUNTIME=1`、明确的测试 S3 端点和桶，以及 `EMQUANT_TEST_MIN_INTERVAL`、`EMQUANT_TEST_RATE_COOLDOWN`；测试数据库是独立的，只能使用未被其他应用使用的账号，不能代替共享生产限流。该测试也尚未运行。真实配置只由 secret 管理注入，不提交测试录制结果。
+开发验证：在 `backend` 执行 `go test -race ./internal/dataservice/emquant`；默认测试使用合成样本。`TestLiveSDK` 和 `TestLiveArchiveS3` 只在显式设置 `EMQUANT_INTEGRATION=1` 及相应环境后运行，使用真实账号会消耗厂商额度，后者会向指定 S3 桶写真实数据。`TestLiveCFN`、`TestLiveIndustry`、`TestLiveSecurity` 和 `TestLiveCodeLookup` 还分别要求 `EMQUANT_LIVE_CFN=1`、`EMQUANT_LIVE_INDUSTRY=1`、`EMQUANT_LIVE_SECURITY=1`、`EMQUANT_LIVE_CEC=1`；当前尚未运行。`TestLiveRuntime` 还要求 `EMQUANT_LIVE_RUNTIME=1`、明确的测试 S3 端点和桶，以及 `EMQUANT_TEST_MIN_INTERVAL`、`EMQUANT_TEST_RATE_COOLDOWN`；测试数据库是独立的，只能使用未被其他应用使用的账号，不能代替共享生产限流。该测试也尚未运行。真实配置只由 secret 管理注入，不提交测试录制结果。
 
 组合单元的自动化测试使用模拟 SDK、测试 HTTP 对象端点与真实临时 PostgreSQL；它证明启动门禁和归档调用的配合，不证明真实账号权限、厂商数据的业务含义或实际部署可用。限流故障测试在模拟厂商调用持续执行时真实终止 PostgreSQL 会话，确认新会话拒绝调用且保留 in-flight 状态；它不覆盖数据库整体恢复、跨主机网络分区或真实厂商断线。生产迁移、对象桶权限、账号级配额和应用生命周期仍须单独验证。
 

@@ -24,6 +24,14 @@ type Cube struct {
 	Values     []Cell
 }
 
+// Table is a vendor-provided row-major response. A row is not automatically a
+// uniquely resolved security, and its field semantics must be validated.
+type Table struct {
+	Columns []string
+	Rows    int
+	Values  []Cell
+}
+
 // Quote carries the unnormalized SDK response and the local observation time.
 // Neither this timestamp nor a successful call proves real-time freshness.
 type Quote struct {
