@@ -41,6 +41,8 @@ type Raw struct {
 	FinishReason  string `json:"finish_reason"`
 	ObservedModel string `json:"model"`
 	Usage         Usage  `json:"usage"`
+	// Replayed marks a response served from a cassette: no vendor was called, so nothing is charged.
+	Replayed bool `json:"-"`
 }
 
 // Call is what an adapter receives.
@@ -61,14 +63,44 @@ type Adapter interface {
 // Profile configures one purpose (writer / verifier / router).
 type Profile struct {
 	Name        string
-	Adapter     string
+	Adapter     string // openai | record | replay | sim
 	BaseURL     string
 	ModelID     string
 	APIKey      string
 	PriceTable  string
 	Temperature float64
-	ExtraBody   map[string]any // vendor-specific request fields, e.g. thinking switches
-	Timeout     time.Duration
+	// Thinking is "", "enabled" or "disabled". "" sends nothing (vendor default); otherwise the request carries
+	// {"thinking":{"type":Thinking}}. An explicit "thinking" key in ExtraBody wins.
+	Thinking  string
+	ExtraBody map[string]any // vendor-specific request fields
+	Timeout   time.Duration  // per HTTP request; 0 means 90s
+	// MaxOutput caps every call's output tokens on this profile; 0 keeps the per-call limit.
+	MaxOutput int
+	// Concurrency limits in-flight calls on this profile (in addition to the platform limit); 0 means no extra limit.
+	Concurrency int
+}
+
+// EffectiveMaxOutput applies the profile cap to a call's requested output limit.
+func (p Profile) EffectiveMaxOutput(requested int) int {
+	if p.MaxOutput > 0 && (requested <= 0 || p.MaxOutput < requested) {
+		return p.MaxOutput
+	}
+	return requested
+}
+
+// body builds the chat/completions request body. Gateway-owned keys are set last so ExtraBody cannot override them.
+func (p Profile) body(msgs []Message, maxOut int) map[string]any {
+	body := map[string]any{}
+	if p.Thinking != "" {
+		body["thinking"] = map[string]string{"type": p.Thinking}
+	}
+	for k, v := range p.ExtraBody {
+		body[k] = v
+	}
+	body["model"], body["messages"], body["stream"] = p.ModelID, msgs, false
+	body["response_format"] = map[string]string{"type": "json_object"}
+	body["max_tokens"], body["temperature"] = maxOut, p.Temperature
+	return body
 }
 
 // Error classes drive retry policy.
@@ -89,12 +121,7 @@ type OpenAI struct{ HTTP *http.Client }
 func (OpenAI) Name() string { return "openai" }
 
 func (a OpenAI) Do(ctx context.Context, c Call) (Raw, error) {
-	body := map[string]any{"model": c.Profile.ModelID, "messages": c.Messages, "response_format": map[string]string{"type": "json_object"},
-		"max_tokens": c.MaxOutput, "temperature": c.Profile.Temperature, "stream": false}
-	for k, v := range c.Profile.ExtraBody {
-		body[k] = v
-	}
-	b, _ := json.Marshal(body)
+	b, _ := json.Marshal(c.Profile.body(c.Messages, c.MaxOutput))
 	timeout := c.Profile.Timeout
 	if timeout == 0 {
 		timeout = 90 * time.Second
@@ -147,6 +174,7 @@ func (a OpenAI) Do(ctx context.Context, c Call) (Raw, error) {
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(rb, &out); err != nil || len(out.Choices) == 0 {
+		// The vendor answered (and may bill usage) but the body is unusable; not retried as transient.
 		return Raw{}, &Error{Msg: "unparseable model response"}
 	}
 	u := out.Usage.Usage
@@ -191,7 +219,13 @@ type Replay struct {
 	Record Adapter // when set, misses are forwarded and recorded (development only)
 }
 
-func (Replay) Name() string { return "replay" }
+// Name is "record" when misses are forwarded to a vendor (billable), "replay" otherwise.
+func (r Replay) Name() string {
+	if r.Record != nil {
+		return "record"
+	}
+	return "replay"
+}
 
 func (r Replay) path(hash string) string { return filepath.Join(r.Dir, hash[:2], hash+".json") }
 
@@ -202,6 +236,7 @@ func (r Replay) Do(ctx context.Context, c Call) (Raw, error) {
 		if err := json.Unmarshal(b, &raw); err != nil {
 			return Raw{}, &Error{Msg: "corrupt cassette " + c.Hash}
 		}
+		raw.Replayed = true
 		return raw, nil
 	}
 	if r.Record == nil {
@@ -211,17 +246,25 @@ func (r Replay) Do(ctx context.Context, c Call) (Raw, error) {
 	if err != nil {
 		return raw, err
 	}
-	if err := os.MkdirAll(filepath.Dir(r.path(c.Hash)), 0o755); err == nil {
-		out, _ := json.MarshalIndent(raw, "", "  ")
-		_ = os.WriteFile(r.path(c.Hash), out, 0o644)
+	// Only complete answers are worth replaying; truncated output would replay a failure forever.
+	if raw.FinishReason == "stop" && strings.TrimSpace(raw.Content) != "" {
+		if err := os.MkdirAll(filepath.Dir(r.path(c.Hash)), 0o755); err == nil {
+			out, _ := json.MarshalIndent(raw, "", "  ")
+			tmp := r.path(c.Hash) + ".tmp"
+			if os.WriteFile(tmp, out, 0o644) == nil {
+				_ = os.Rename(tmp, r.path(c.Hash))
+			}
+		}
 	}
 	return raw, nil
 }
 
 // RequestHash identifies a request independent of attempt; it keys replay cassettes and call reuse.
+// Everything sent to the vendor that can change the answer (thinking, temperature, extra body) is included.
 func RequestHash(p Profile, msgs []Message, maxOut int, schemaID string) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00%d\x00%s\x00", p.Name, p.ModelID, maxOut, schemaID)
+	extra, _ := json.Marshal(p.ExtraBody) // map keys are sorted, so this is stable
+	fmt.Fprintf(h, "%s\x00%s\x00%d\x00%s\x00%s\x00%g\x00%s\x00", p.Name, p.ModelID, maxOut, schemaID, p.Thinking, p.Temperature, extra)
 	for _, m := range msgs {
 		fmt.Fprintf(h, "%s\x00%s\x00", m.Role, m.Content)
 	}

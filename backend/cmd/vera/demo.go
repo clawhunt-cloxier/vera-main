@@ -72,7 +72,7 @@ func demo(ctx context.Context) error {
 			fmt.Println("  " + c)
 		}
 	}
-	rc, err := a.Engine.NewRiver(a.Pool, true, c.WorkerConcurrency, a.Watch.Register)
+	rc, err := a.Engine.NewRiver(a.Pool, true, c.WorkerConcurrency, a.Watch.Register, a.Engine.Gateway.Register)
 	if err != nil {
 		return err
 	}

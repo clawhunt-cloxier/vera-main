@@ -81,7 +81,9 @@ type Gateway struct {
 	Policy     *policy.Policy
 	DailyLimit decimal.Decimal
 	sem        chan struct{}
+	profSem    map[string]chan struct{}
 	sleep      func(time.Duration)
+	now        func() time.Time
 }
 
 func NewGateway(pool *pgxpool.Pool, profiles map[string]Profile, adapters map[string]Adapter, prices *PriceTable,
@@ -90,8 +92,37 @@ func NewGateway(pool *pgxpool.Pool, profiles map[string]Profile, adapters map[st
 	if n <= 0 {
 		n = 8
 	}
+	ps := map[string]chan struct{}{}
+	for name, p := range profiles {
+		if p.Concurrency > 0 {
+			ps[name] = make(chan struct{}, p.Concurrency)
+		}
+	}
 	return &Gateway{Pool: pool, Profiles: profiles, Adapters: adapters, Prices: prices, Schemas: schemas, Policy: pol,
-		DailyLimit: daily, sem: make(chan struct{}, n), sleep: time.Sleep}
+		DailyLimit: daily, sem: make(chan struct{}, n), profSem: ps, sleep: time.Sleep, now: time.Now}
+}
+
+// billable reports whether an adapter may reach a paid vendor.
+func billable(adapter string) bool { return adapter == "openai" || adapter == "record" }
+
+// acquire takes the platform slot and the profile slot (if the profile has a limit).
+func (g *Gateway) acquire(ctx context.Context, profile string) (release func(), err error) {
+	select {
+	case g.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	ps := g.profSem[profile]
+	if ps == nil {
+		return func() { <-g.sem }, nil
+	}
+	select {
+	case ps <- struct{}{}:
+		return func() { <-ps; <-g.sem }, nil
+	case <-ctx.Done():
+		<-g.sem
+		return nil, ctx.Err()
+	}
 }
 
 // FormatError means the model output failed JSON/Schema validation after repairs.
@@ -111,6 +142,7 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 	}
 	schema := g.Schemas[r.Schema]
 	msgs := r.Messages
+	r.MaxOutput = prof.EffectiveMaxOutput(r.MaxOutput)
 	if out, meta, ok := g.reuse(ctx, r, RequestHash(prof, msgs, r.MaxOutput, r.Schema), schema); ok {
 		return out, meta, nil
 	}
@@ -122,14 +154,13 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 		if err != nil {
 			return nil, Meta{}, err
 		}
-		select {
-		case g.sem <- struct{}{}:
-		case <-ctx.Done():
+		release, err := g.acquire(ctx, prof.Name)
+		if err != nil {
 			g.finish(context.WithoutCancel(ctx), callID, "FAILED", nil, Usage{}, decimal.Zero, "", "cancelled before send")
-			return nil, Meta{}, ctx.Err()
+			return nil, Meta{}, err
 		}
 		raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Simulate: r.Simulate, Hash: hash})
-		<-g.sem
+		release()
 		if err != nil {
 			var me *Error
 			errors.As(err, &me)
@@ -151,8 +182,8 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			return nil, Meta{}, lastErr
 		}
 		cost := decimal.Zero
-		if ad.Name() == "openai" {
-			if cost, err = g.Prices.Cost(prof.ModelID, time.Now(), raw.Usage); err != nil {
+		if billable(ad.Name()) && !raw.Replayed {
+			if cost, err = g.Prices.Cost(prof.ModelID, g.now(), raw.Usage); err != nil {
 				slog.ErrorContext(ctx, "pricing failed; charging reservation", "err", err)
 				cost = decimal.NewFromInt(-1)
 			}
@@ -219,7 +250,7 @@ func (g *Gateway) reuse(ctx context.Context, r Request, hash string, schema *jso
 func (g *Gateway) reserve(ctx context.Context, r Request, p Profile, adapter, hash string, attempt int, msgs []Message) (uuid.UUID, error) {
 	in := EstimateTokens(msgs)
 	reserve := decimal.Zero
-	if adapter == "openai" {
+	if billable(adapter) {
 		var err error
 		if reserve, err = g.Prices.Reserve(p.ModelID, in, r.MaxOutput); err != nil {
 			return uuid.Nil, err
@@ -291,4 +322,27 @@ func (g *Gateway) finish(ctx context.Context, id uuid.UUID, status string, raw *
 	if err != nil {
 		slog.ErrorContext(ctx, "model call ledger update failed", "call", id, "err", err)
 	}
+}
+
+// UnknownReleaseAfter is how long an UNKNOWN call keeps its reservation charged (HARNESS §9).
+const UnknownReleaseAfter = 24 * time.Hour
+
+// ReleaseUnknown stops charging reservations of UNKNOWN calls sent before cutoff: they become RECONCILED with
+// cost 0 and a note. A later vendor bill showing a charge must be recorded with `vera admin usage reconcile`.
+// It runs outside workspace scope (platform job) and returns the released call IDs.
+func (g *Gateway) ReleaseUnknown(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error) {
+	rows, err := g.Pool.Query(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=0, finished_at=coalesce(finished_at, now()),
+		error=left(coalesce(error,'') || ' [auto-released: no reconciliation within 24h]', 1000)
+		WHERE status='UNKNOWN' AND sent_at < $1 RETURNING id`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) > 0 {
+		slog.WarnContext(ctx, "released UNKNOWN model call reservations", "count", len(ids))
+	}
+	return ids, nil
 }

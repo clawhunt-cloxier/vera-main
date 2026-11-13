@@ -235,10 +235,10 @@ type CompletionRequest struct {
 
 - Profile 配置：`base_url`、`model_id`、`api_key_ref`、`price_table_version`、`thinking`、`temperature`、`max_output`、`timeout`、`concurrency`。没有价格表的 profile 不允许真实调用。
 - 记录：请求哈希、响应中的模型版本、`prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、输出与思考 token、时延、费用（按调用时刻所处的高峰或非高峰价）。
-- 超时：单次 HTTP 90 秒；网络错误、429、5xx 最多重试 2 次，指数退避并遵守 Retry-After；4xx 不重试。
-- 并发：平台级信号量（默认 32），按用户轮询分配，单任务最多同时 6 个调用。
-- 预算：调用前按 `MaxOutput` 与输入 token 预留费用，返回后按实际 usage 核销。请求已发出但结果未知（超时、连接中断）时，按最大值计费，直到对账或 24 小时后释放。
-- 录制回放：开发和 CI 可使用 `replay` 适配器，按请求哈希返回录制的响应；production 模式禁止启用。
+- 超时：单次 HTTP 默认 90 秒，可用 `MODEL_<PROFILE>_TIMEOUT_SECONDS` 覆盖；网络错误、429、5xx 最多重试 2 次，指数退避并遵守 Retry-After；4xx 不重试。
+- 并发：平台级信号量（默认 32），另可用 `MODEL_<PROFILE>_CONCURRENCY` 限制单个 profile。按用户轮询分配与单任务最多 6 个并发调用尚未实现，见 T017 交接。
+- 预算：调用前按生效的 `MaxOutput`（profile 上限与调用请求的较小值）与输入 token 预留费用，返回后按实际 usage 核销。请求已发出但结果未知（超时、连接中断）时，按最大值计费；worker 每小时把超过 24 小时仍为 UNKNOWN 的调用释放为 RECONCILED、费用记 0，之后若厂商账单显示收费，用 `vera admin usage reconcile` 补记。
+- 录制回放：`replay` 按请求哈希返回已录制响应，缺失即失败；`record` 缺失时转发到真实厂商并落盘（仅 development，production 拒绝），命中不收费。请求哈希包含 thinking、temperature 与 extra body，避免不同配置串用同一录制。
 
 ## 10. 状态机
 
