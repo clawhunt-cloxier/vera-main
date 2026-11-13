@@ -4,6 +4,7 @@ package emquant
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +63,9 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	if _, err = c.CSD("BADUTF", "X", "D1", "D2", ""); err == nil {
 		t.Fatal("accepted invalid UTF-8")
 	}
+	if _, err = c.CSD("BADLENGTH", "X", "D1", "D2", ""); err == nil {
+		t.Fatal("accepted invalid SDK string length")
+	}
 	if _, err = c.CSD("ERROR", "X", "D1", "D2", ""); err == nil || !strings.Contains(err.Error(), "88") {
 		t.Fatalf("query error: %v", err)
 	}
@@ -91,6 +95,12 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	}
 	if _, err = c.QuoteSnapshot("ERROR", "X", ""); err == nil || !strings.Contains(err.Error(), "88") {
 		t.Fatalf("quote error: %v", err)
+	}
+	if data, err := c.CSD("DISCONNECT", "X", "D1", "D2", ""); !errors.Is(err, ErrUnavailable) || len(data.Values) != 0 {
+		t.Fatalf("disconnect callback returned data: %v", err)
+	}
+	if _, err := c.CSD("A", "X", "D1", "D2", ""); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("subsequent call ignored disconnect: %v", err)
 	}
 	if err = c.Close(); err != nil {
 		t.Fatal(err)

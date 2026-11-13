@@ -35,6 +35,12 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      # gocritic inspects cgo-generated wrappers as if they were source at
+      # these locations, producing false duplicate-expression/error reports.
+      - linters:
+          - gocritic
+        path: internal/dataservice/emquant/native_linux\.go
+        text: "(dupSubExpr|uncheckedInlineErr)"
       - linters:
           - errcheck
           - gosec

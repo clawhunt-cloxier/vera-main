@@ -6,6 +6,7 @@ package emquant
 #cgo LDFLAGS: -ldl
 #include <dlfcn.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 typedef struct { char *p; unsigned n; } eqchar;
@@ -15,20 +16,29 @@ typedef struct { int type; eqvalue value; eqchar text; } eqvariant;
 typedef struct { eqvariant *p; unsigned n; } eqvariants;
 typedef struct { eqchars codes, indicators, dates; eqvariants values; } eqdata;
 typedef struct { char user[255], password[255]; } eqlogin;
+typedef struct { int version, type, err, request, serial; eqdata *data; } eqmsg;
+typedef int (*eq_log_callback)(const char *);
+typedef int (*eq_data_callback)(const eqmsg *, void *);
 typedef struct {
  void *handle;
- int (*setdir)(const char *);
- int (*setcallback)(void *);
- int (*start)(void *, const char *, void *);
+ void (*setdir)(const char *);
+ int (*setcallback)(eq_data_callback);
+ int (*start)(eqlogin *, const char *, eq_log_callback);
  int (*stop)(void);
- int (*csd)(const char *, const char *, const char *, const char *, const char *, void *);
- int (*css)(const char *, const char *, const char *, void *);
- int (*csqsnapshot)(const char *, const char *, const char *, void *);
- int (*tradedates)(const char *, const char *, const char *, void *);
+ int (*csd)(const char *, const char *, const char *, const char *, const char *, eqdata **);
+ int (*css)(const char *, const char *, const char *, eqdata **);
+ int (*csqsnapshot)(const char *, const char *, const char *, eqdata **);
+ int (*tradedates)(const char *, const char *, const char *, eqdata **);
  int (*release)(void *);
 } eqapi;
 static int log_cb(const char *message) { (void)message; return 1; }
-static int event_cb(void *message, void *user) { (void)message; (void)user; return 1; }
+static _Atomic int callback_error;
+static int event_cb(const eqmsg *message, void *user) {
+ (void)user;
+ if (message && (message->type == 0 || message->type == 3) && message->err != 0) atomic_store(&callback_error, message->err);
+ return 1;
+}
+static int eq_callback_error(void) { return atomic_load(&callback_error); }
 static int eq_open(eqapi *a, const char *path) {
  memset(a, 0, sizeof(*a));
  a->handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
@@ -46,9 +56,10 @@ static int eq_start(eqapi *a, const char *dir, const char *user, const char *pas
  eqlogin login = {0};
  if (strlen(user) >= sizeof(login.user) || strlen(password) >= sizeof(login.password)) return -3;
  memcpy(login.user, user, strlen(user)); memcpy(login.password, password, strlen(password));
- // The vendor wrapper does not interpret the return values of these setters.
- a->setdir(dir); a->setcallback((void*)event_cb);
- int rc = a->start(&login, "LANGUAGEVERSION=503,ForceLogin=0,RecordLoginInfo=0", (void*)log_cb);
+ atomic_store(&callback_error, 0);
+ a->setdir(dir);
+ int rc = a->setcallback(event_cb);
+ if (rc == 0) rc = a->start(&login, "LANGUAGEVERSION=503,ForceLogin=0,RecordLoginInfo=0", log_cb);
  volatile char *p = (volatile char*)&login;
  for (size_t i = 0; i < sizeof(login); i++) p[i] = 0;
  return rc;
@@ -71,6 +82,7 @@ static void eq_unload(eqapi *a) { if (a->handle) dlclose(a->handle); memset(a, 0
 static long long eq_signed(eqvariant v) { switch(v.type) { case 1: return v.value.c; case 3: return v.value.b; case 4: return v.value.s; case 6: return v.value.i; case 8: return v.value.ll; default: return 0; } }
 static unsigned long long eq_unsigned(eqvariant v) { switch(v.type) { case 2: return (unsigned char)v.value.c; case 5: return v.value.us; case 7: return v.value.ui; case 9: return v.value.ull; default: return 0; } }
 static double eq_float(eqvariant v) { return v.type == 10 ? v.value.f : v.value.d; }
+static int eq_terminated(eqchar s) { return s.p && s.n && s.p[s.n-1] == '\0' && memchr(s.p, '\0', s.n-1) == NULL; }
 */
 import "C"
 
@@ -124,6 +136,17 @@ func Open(library, user, password string) (*Client, error) {
 		C.eq_unload(&c.api)
 		return nil, &SDKError{Operation: "login", Code: int(rc)}
 	}
+	if rc := C.eq_callback_error(); rc != 0 {
+		if stopRC := C.eq_stop(&c.api); stopRC != 0 {
+			// The SDK might still be running; keep the library resident and
+			// block new sessions until the process is restarted.
+			c.started = true
+			nativeCurrent = c
+			return nil, errors.Join(&SDKError{Operation: "connection callback", Code: int(rc)}, &SDKError{Operation: "stop", Code: int(stopRC)})
+		}
+		C.eq_unload(&c.api)
+		return nil, &SDKError{Operation: "connection callback", Code: int(rc)}
+	}
 	c.started = true
 	nativeCurrent = c
 	return c, nil
@@ -164,6 +187,9 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 	if c == nil || c.closed || !c.started || nativeCurrent != c {
 		return Cube{}, errors.New("emquant: session closed")
 	}
+	if rc := C.eq_callback_error(); rc != 0 {
+		return Cube{}, &SDKError{Operation: "connection callback", Code: int(rc)}
+	}
 	for _, s := range []string{codes, indicators, from, to, options} {
 		if strings.ContainsRune(s, 0) {
 			return Cube{}, errors.New("emquant: NUL in query")
@@ -192,13 +218,14 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 	defer C.free(unsafe.Pointer(f))
 	var data *C.eqdata
 	var rc C.int
-	if mode == 3 {
+	switch mode {
+	case 3:
 		rc = C.eq_calendar(&c.api, d, e, f, &data)
-	} else if mode == 2 {
+	case 2:
 		rc = C.eq_quote(&c.api, a, b, f, &data)
-	} else if mode == 1 {
+	case 1:
 		rc = C.eq_snapshot(&c.api, a, b, f, &data)
-	} else {
+	default:
 		rc = C.eq_query(&c.api, a, b, d, e, f, &data)
 	}
 	if rc != 0 {
@@ -213,20 +240,20 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 			err = &SDKError{Operation: "release", Code: int(rc)}
 		}
 	}()
-	return decode(data)
+	cube, err = decode(data)
+	if rc := C.eq_callback_error(); rc != 0 {
+		return Cube{}, &SDKError{Operation: "connection callback", Code: int(rc)}
+	}
+	return cube, err
 }
 
 func decode(data *C.eqdata) (Cube, error) {
 	const limit = 1000000
-	readString := func(p *C.char) (string, error) {
-		if p == nil {
-			return "", fmt.Errorf("%w: null string", ErrShape)
+	readString := func(value C.eqchar) (string, error) {
+		if value.n == 0 || value.n > limit+1 || C.eq_terminated(value) == 0 {
+			return "", fmt.Errorf("%w: invalid SDK string length or terminator", ErrShape)
 		}
-		n := C.strnlen(p, limit+1)
-		if n > limit {
-			return "", fmt.Errorf("%w: string too long", ErrShape)
-		}
-		s := C.GoStringN(p, C.int(n))
+		s := C.GoStringN(value.p, C.int(value.n-1))
 		if !utf8.ValidString(s) {
 			return "", fmt.Errorf("%w: invalid UTF-8", ErrShape)
 		}
@@ -241,7 +268,7 @@ func decode(data *C.eqdata) (Cube, error) {
 	stringsOf := func(a C.eqchars) ([]string, error) {
 		out := make([]string, 0, int(a.n))
 		for _, x := range unsafe.Slice(a.p, int(a.n)) {
-			value, err := readString(x.p)
+			value, err := readString(x)
 			if err != nil {
 				return nil, err
 			}
@@ -275,15 +302,11 @@ func decode(data *C.eqdata) (Cube, error) {
 			}
 			cell.Value = x
 		case 13, 14:
-			if v.text.p != nil {
-				value, err := readString(v.text.p)
-				if err != nil {
-					return Cube{}, err
-				}
-				cell.Value = value
-			} else {
-				cell.Value = ""
+			value, err := readString(v.text)
+			if err != nil {
+				return Cube{}, err
 			}
+			cell.Value = value
 		default:
 			return Cube{}, fmt.Errorf("%w: unsupported variant type %d", ErrShape, cell.Type)
 		}

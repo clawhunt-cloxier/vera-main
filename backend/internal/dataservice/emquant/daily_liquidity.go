@@ -132,14 +132,15 @@ func mapDailyLiquidity(c Cube, ref ArchiveRef, code string, start, end time.Time
 			if err != nil || n.IsNegative() {
 				return nil, fmt.Errorf("%w: invalid %s", ErrShape, name)
 			}
-			if name == "VOLUME" {
+			switch name {
+			case "VOLUME":
 				if !n.Equal(n.Truncate(0)) || (cell.Type == 10 && n.GreaterThanOrEqual(decimal.NewFromInt(16777216))) || (cell.Type == 11 && n.GreaterThanOrEqual(decimal.NewFromInt(9007199254740992))) {
 					return nil, fmt.Errorf("%w: invalid volume precision", ErrShape)
 				}
 				row.VolumeShares = n.String()
-			} else if name == "AMOUNT" {
+			case "AMOUNT":
 				row.AmountCNY = n.String()
-			} else {
+			default:
 				v := n.Shift(-2).String()
 				row.TurnoverRatio = &v
 			}

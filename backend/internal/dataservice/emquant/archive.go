@@ -329,7 +329,7 @@ func (c Collector) CollectOpenDates(ctx context.Context, market, from, to string
 	if err != nil || end.Before(start) || end.Sub(start) > 3660*24*time.Hour {
 		return nil, ArchiveRef{}, errors.New("emquant: invalid calendar end")
 	}
-	if err = ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, ArchiveRef{}, err
 	}
 	options := "Market=" + market + ",Period=1,Order=1"

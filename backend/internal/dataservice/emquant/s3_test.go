@@ -1,6 +1,7 @@
 package emquant
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -55,7 +56,7 @@ func TestS3RawStoreConditionalWriteAndIntegrity(t *testing.T) {
 			}
 			_, _ = w.Write(body)
 		default:
-			http.Error(w, "unexpected method", 405)
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
 		}
 	}))
 	defer server.Close()
@@ -73,7 +74,7 @@ func TestS3RawStoreConditionalWriteAndIntegrity(t *testing.T) {
 		t.Fatalf("idempotent put: %v", err)
 	}
 	got, err := store.Get(context.Background(), hash)
-	if err != nil || string(got) != string(body) {
+	if err != nil || !bytes.Equal(got, body) {
 		t.Fatalf("get: %v", err)
 	}
 	mu.Lock()
@@ -119,7 +120,7 @@ func TestS3Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := store.Get(context.Background(), hash)
-	if err != nil || string(got) != string(body) {
+	if err != nil || !bytes.Equal(got, body) {
 		t.Fatalf("round-trip: %v", err)
 	}
 }
