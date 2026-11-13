@@ -38,6 +38,10 @@ int css(const char *codes, const char *indicators, const char *options, eqdata *
 int csqsnapshot(const char *codes, const char *indicators, const char *options, eqdata **out) {
  return csd(codes, indicators, "", "", options, out);
 }
+int cfn(const char *codes, const char *content, int mode, const char *options, eqdata **out) {
+ if (mode != 1 && mode != 2) return 99;
+ return csd(codes, content, "", "", options, out);
+}
 int tradedates(const char *from, const char *to, const char *options, eqdata **out) {
  (void)to; (void)options;
  if (!strcmp(from, "ERROR")) return 88;

@@ -20,6 +20,10 @@ func (f *testFetcher) CSD(_, _, _, _, _ string) (Cube, error)      { f.calls++; 
 func (f *testFetcher) QuoteSnapshot(_, _, _ string) (Quote, error) { f.calls++; return f.quote, f.err }
 func (f *testFetcher) TradeDates(_, _, _ string) (Cube, error)     { f.calls++; return f.cube, f.err }
 func (f *testFetcher) CSS(_, _, _ string) (Cube, error)            { f.calls++; return f.cube, f.err }
+func (f *testFetcher) CFN(_, _ string, _ int, _ string) (Cube, error) {
+	f.calls++
+	return f.cube, f.err
+}
 
 type testRawStore struct {
 	hash  string
@@ -101,6 +105,28 @@ func TestCollectCSSArchivesAndRejectsFillOptions(t *testing.T) {
 	s.err = errors.New("store unavailable")
 	if cube, _, err = c.CollectCSS(context.Background(), "A", "X", "ReportDate=20251231,Type=1"); err == nil || len(cube.Values) != 0 {
 		t.Fatal("failed archive exposed data")
+	}
+}
+
+func TestCollectCFNArchivesAndBindsRequestMode(t *testing.T) {
+	f := &testFetcher{cube: Cube{Codes: []string{"A"}, Indicators: []string{"INFOCODE"}, Dates: []string{"2026-11-12"}, Values: []Cell{{Type: 13, Value: "synthetic"}}}}
+	s := &testRawStore{ref: "object://test/cfn"}
+	c := Collector{Fetcher: f, Store: s}
+	cube, first, err := c.CollectCFN(context.Background(), "A", "regularreport", 1, "starttime=20261101,endtime=20261112")
+	if err != nil || len(cube.Values) != 1 || first.BodySHA256 != digest(s.body) {
+		t.Fatalf("CFN archive: %v", err)
+	}
+	_, second, err := c.CollectCFN(context.Background(), "A", "regularreport", 2, "starttime=20261101,endtime=20261112")
+	if err != nil || first.RequestFingerprint == second.RequestFingerprint {
+		t.Fatal("news mode not bound to archive fingerprint")
+	}
+	before := f.calls
+	if _, _, err = c.CollectCFN(context.Background(), "A", "regularreport", 3, ""); err == nil || f.calls != before {
+		t.Fatal("invalid mode reached fetcher")
+	}
+	s.err = errors.New("store unavailable")
+	if cube, _, err = c.CollectCFN(context.Background(), "A", "regularreport", 2, "count=10"); err == nil || len(cube.Values) != 0 {
+		t.Fatal("failed archive exposed news metadata")
 	}
 }
 

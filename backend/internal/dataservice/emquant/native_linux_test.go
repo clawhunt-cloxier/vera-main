@@ -96,6 +96,19 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	if _, err = c.QuoteSnapshot("ERROR", "X", ""); err == nil || !strings.Contains(err.Error(), "88") {
 		t.Fatalf("quote error: %v", err)
 	}
+	news, err := c.CFN("A,B", "regularreport", 2, "count=10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, err = news.At(1, 0, 1); err != nil || value.Value != int64(6) {
+		t.Fatalf("news: %#v, %v", value, err)
+	}
+	if _, err = c.CFN("A", "regularreport", 3, "count=10"); err == nil {
+		t.Fatal("invalid news mode accepted")
+	}
+	if _, err = c.CFN("ERROR", "regularreport", 2, "count=10"); err == nil || !strings.Contains(err.Error(), "88") {
+		t.Fatalf("news error: %v", err)
+	}
 	if data, err := c.CSD("DISCONNECT", "X", "D1", "D2", ""); !errors.Is(err, ErrUnavailable) || len(data.Values) != 0 {
 		t.Fatalf("disconnect callback returned data: %v", err)
 	}
@@ -114,6 +127,34 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	var zero Client
 	if err = zero.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestLiveCFN is separate because account permission and response shape for
+// announcements have not been verified. It never logs response contents.
+func TestLiveCFN(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_CFN") != "1" {
+		t.Skip("live vendor CFN test not requested")
+	}
+	c, err := Open(os.Getenv("EMQUANT_LIBRARY"), os.Getenv("EMQUANT_USER"), os.Getenv("EMQUANT_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	store := &testRawStore{ref: "object://test/cfn-live"}
+	cube, ref, err := (Collector{Fetcher: c, Store: store}).CollectCFN(context.Background(), "300059.SZ", "regularreport", 2, "count=5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cube.Codes) == 0 || len(cube.Indicators) == 0 || len(cube.Values) == 0 || ref.BodySHA256 != digest(store.body) {
+		t.Fatal("unexpected or empty CFN response")
+	}
+	if _, _, err := DecodeArchive(store.body, ref.BodySHA256); err != nil {
+		t.Fatalf("CFN archive replay: %v", err)
 	}
 }
 

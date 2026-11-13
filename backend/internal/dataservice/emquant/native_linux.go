@@ -28,6 +28,7 @@ typedef struct {
  int (*csd)(const char *, const char *, const char *, const char *, const char *, eqdata **);
  int (*css)(const char *, const char *, const char *, eqdata **);
  int (*csqsnapshot)(const char *, const char *, const char *, eqdata **);
+ int (*cfn)(const char *, const char *, int, const char *, eqdata **);
  int (*tradedates)(const char *, const char *, const char *, eqdata **);
  int (*release)(void *);
 } eqapi;
@@ -47,6 +48,7 @@ static int eq_open(eqapi *a, const char *path) {
  a->setcallback = dlsym(a->handle, "setcallback");
  a->start = dlsym(a->handle, "start"); a->stop = dlsym(a->handle, "stop");
  a->csd = dlsym(a->handle, "csd"); a->css = dlsym(a->handle, "css"); a->csqsnapshot = dlsym(a->handle, "csqsnapshot"); a->tradedates = dlsym(a->handle, "tradedates"); a->release = dlsym(a->handle, "releasedata");
+ a->cfn = dlsym(a->handle, "cfn");
  if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->csqsnapshot || !a->tradedates || !a->release) {
   dlclose(a->handle); memset(a, 0, sizeof(*a)); return -2;
  }
@@ -75,6 +77,10 @@ static int eq_quote(eqapi *a, const char *codes, const char *indicators, const c
 }
 static int eq_calendar(eqapi *a, const char *from, const char *to, const char *options, eqdata **out) {
  return a->tradedates(from, to, options, out);
+}
+static int eq_news(eqapi *a, const char *codes, const char *content, int mode, const char *options, eqdata **out) {
+ if (!a->cfn) return -4;
+ return a->cfn(codes, content, mode, options, out);
 }
 static int eq_release(eqapi *a, eqdata *d) { return a->release(d); }
 static int eq_stop(eqapi *a) { return a->stop(); }
@@ -181,6 +187,15 @@ func (c *Client) TradeDates(from, to, options string) (Cube, error) {
 	return c.query(3, "", "", from, to, options)
 }
 
+// CFN fetches untrusted news or announcement metadata. The result must be
+// archived and its source times and entitlements validated before use.
+func (c *Client) CFN(codes, content string, mode int, options string) (Cube, error) {
+	if mode != 1 && mode != 2 {
+		return Cube{}, errors.New("emquant: invalid news mode")
+	}
+	return c.query(4, codes, content, string(rune('0'+mode)), "", options)
+}
+
 func (c *Client) query(mode int, codes, indicators, from, to, options string) (cube Cube, err error) {
 	nativeMu.Lock()
 	defer nativeMu.Unlock()
@@ -225,6 +240,8 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 		rc = C.eq_quote(&c.api, a, b, f, &data)
 	case 1:
 		rc = C.eq_snapshot(&c.api, a, b, f, &data)
+	case 4:
+		rc = C.eq_news(&c.api, a, b, C.int(from[0]-'0'), f, &data)
 	default:
 		rc = C.eq_query(&c.api, a, b, d, e, f, &data)
 	}

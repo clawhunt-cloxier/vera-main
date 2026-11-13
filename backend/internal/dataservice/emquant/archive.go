@@ -56,6 +56,11 @@ type CrossSectionFetcher interface {
 	CSS(codes, indicators, options string) (Cube, error)
 }
 
+// NewsFetcher returns vendor metadata, not independently verified filings.
+type NewsFetcher interface {
+	CFN(codes, content string, mode int, options string) (Cube, error)
+}
+
 type Collector struct {
 	Fetcher Fetcher
 	Store   RawStore
@@ -68,6 +73,7 @@ type request struct {
 	From       string `json:"from,omitempty"`
 	To         string `json:"to,omitempty"`
 	Options    string `json:"options,omitempty"`
+	Mode       int    `json:"mode,omitempty"`
 }
 
 type archiveBody struct {
@@ -255,6 +261,36 @@ func (c Collector) CollectCSS(ctx context.Context, codes, indicators, options st
 		return Cube{}, ArchiveRef{}, err
 	}
 	ref, err := c.persist(ctx, request{Method: "css", Codes: codes, Indicators: indicators, Options: options}, cube, time.Now())
+	if err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	return cube, ref, nil
+}
+
+// CollectCFN archives metadata before returning it. The vendor's display date
+// is not an exact filing timestamp, and returned URLs are untrusted data.
+func (c Collector) CollectCFN(ctx context.Context, codes, content string, mode int, options string) (Cube, ArchiveRef, error) {
+	f, ok := c.Fetcher.(NewsFetcher)
+	if !ok || c.Store == nil {
+		return Cube{}, ArchiveRef{}, errors.New("emquant: news fetcher and raw store are required")
+	}
+	if err := ctx.Err(); err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	if codes == "" || (mode != 1 && mode != 2) {
+		return Cube{}, ArchiveRef{}, errors.New("emquant: invalid news request")
+	}
+	if err := validateIndicators(content); err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	if err := validateOptions(options); err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	cube, err := f.CFN(codes, content, mode, options)
+	if err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	ref, err := c.persist(ctx, request{Method: "cfn", Codes: codes, Indicators: content, Mode: mode, Options: options}, cube, time.Now())
 	if err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}

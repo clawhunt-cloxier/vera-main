@@ -32,6 +32,7 @@
 
 - 用户要求将暂未找到的口径写入手册并继续接入，新增 [EMQuant 接入手册](../EMQUANT_INTEGRATION.md)，区分已验证功能、用户提供的终端口径与未确认事项。生产接入、真实数据报告和端到端验收仍未完成。
 - 追加查阅[官方 MATLAB 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Matlab.html)：CFN 公告的 `datetime` 是展示日期，部分盘后公告可能展示为下一交易日；`eitime` 对公告只提供 2017-01-01 之后的日期。两者不能推断盘中准确披露时刻或证明财务版本 PIT。
+- 按官方 C++ 头文件增加可选 `cfn` 符号、模式校验、同步解码及归档，并把查询模式纳入请求指纹；缺失符号、厂商失败或归档失败时不返回数据。模拟动态库、归档失败与禁用 cgo 的测试通过。当前进程没有账号环境，真实 `TestLiveCFN` 尚未运行，因此权限、响应形状、信息编码及数据集映射均未验证；返回 URL 不授权任意抓取，接口元数据不等于公告正文。
 - 从厂商下载中心取得 Linux C++ SDK：所含 x86-64 动态库 SHA-256 与用户 Python SDK 动态库一致。对照厂商头文件修正 `setserverlistdir` 的 `void` 返回类型及函数指针签名，并按头文件的含末尾 NUL 长度验证字符串。临时 C++ 静态断言验证了手工镜像结构的大小、偏移和部分函数类型；这不是针对 Go cgo 声明的自动 ABI 证明，也不保证其他 SDK 版本兼容。
 - 注册主回调并对连接/错误回调中的非零错误码保守失效；模拟断连测试通过。回调错误的完整含义、重连与停止失败后的恢复仍待厂商确认；停止失败时保留动态库并阻止新会话，依赖进程重启。
 - 修正后 `go test -race ./internal/dataservice/emquant`、`CGO_ENABLED=0 go test ./internal/dataservice/emquant`、`go vet ./internal/dataservice/emquant` 和真实库 `TestLiveSDK` 通过；凭证仅通过临时进程环境输入。CI 曾因代码检查和 cgo 生成代码误报失败；本轮修正代码并对该文件的两类误报作限定排除，后续以新提交的 CI 结果为准。

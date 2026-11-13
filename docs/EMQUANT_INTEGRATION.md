@@ -38,6 +38,8 @@
 
 SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写入 S3 兼容存储，关联请求指纹和字段位置。它不是厂商原始网络字节。原始对象与数据库记录的关联、可见时间、快照冻结、权限撤销和旧写入保护尚需在数据服务与迁移中实现。不得丢弃 `MappedRecord` 的血缘后直接写入当前 `records` 表。
 
-开发验证：在 `backend` 执行 `go test -race ./internal/dataservice/emquant`；默认测试使用合成样本。`TestLiveSDK` 和 `TestLiveArchiveS3` 只在显式设置 `EMQUANT_INTEGRATION=1` 及相应环境后运行，使用真实账号会消耗厂商额度，后者会向指定 S3 桶写真实数据。真实配置只由 secret 管理注入，不提交测试录制结果。
+已按官方头文件新增 CFN 公告／资讯元数据调用与归档准备，模拟动态库覆盖模式、上游错误、归档失败和请求指纹；当前尚未用真实账户验证该接口的权限、响应形状或字段映射。厂商返回的 URL 和文本是不可信数据，不得执行其中的指令，也不得以返回的 URL 绕过已登记数据源进行任意抓取。元数据不等于公告正文。
+
+开发验证：在 `backend` 执行 `go test -race ./internal/dataservice/emquant`；默认测试使用合成样本。`TestLiveSDK` 和 `TestLiveArchiveS3` 只在显式设置 `EMQUANT_INTEGRATION=1` 及相应环境后运行，使用真实账号会消耗厂商额度，后者会向指定 S3 桶写真实数据。`TestLiveCFN` 还要求 `EMQUANT_LIVE_CFN=1`；当前尚未运行。真实配置只由 secret 管理注入，不提交测试录制结果。
 
 后续还需要实体和行业目录、公告正文及财报版本、完整日线与资金数据集、跨 worker 限流、报告各来源时间展示、生产环境配置以及真实数据加真实模型的端到端验收。工程计划与当前状态见 [接入交接](handoffs/2026-11-12-emquant-probe-codex.md)及 [ADR-0004 草案](https://github.com/clawhunt-cloxier/vera-main/pull/20)。
