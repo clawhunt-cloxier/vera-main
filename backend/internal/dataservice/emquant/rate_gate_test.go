@@ -19,7 +19,7 @@ func TestPostgreSQLRateGateSerializesAndRecovers(t *testing.T) {
 	if _, err := pool.Exec(ctx, `CREATE TABLE emquant_rate_state (scope text PRIMARY KEY, in_flight boolean NOT NULL, next_allowed timestamptz NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	gate := PostgreSQLRateGate{Pool: pool, Scope: "synthetic-account", MinInterval: 90 * time.Millisecond}
+	gate := PostgreSQLRateGate{Pool: pool, Scope: "synthetic-account", MinInterval: 90 * time.Millisecond, RateLimitCooldown: 200 * time.Millisecond}
 	var mu sync.Mutex
 	var active atomic.Int32
 	var starts []time.Time
@@ -52,6 +52,18 @@ func TestPostgreSQLRateGateSerializesAndRecovers(t *testing.T) {
 	if len(starts) != 3 || starts[1].Sub(starts[0]) < 80*time.Millisecond || starts[2].Sub(starts[1]) < 80*time.Millisecond {
 		t.Fatal("account calls did not respect the shared interval")
 	}
+	if err := gate.Do(ctx, func() error { return &SDKError{Operation: "query", Code: 10000016} }); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("vendor rate error not propagated: %v", err)
+	}
+	// A fresh gate instance must observe the persisted cooldown as well.
+	second := PostgreSQLRateGate{Pool: pool, Scope: gate.Scope, MinInterval: gate.MinInterval, RateLimitCooldown: gate.RateLimitCooldown}
+	start := time.Now()
+	if err := second.Do(ctx, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) < 180*time.Millisecond {
+		t.Fatal("vendor rate-limit cooldown was not shared")
+	}
 	// Simulates the persistent state left when a process died during a call.
 	if _, err := pool.Exec(ctx, `UPDATE emquant_rate_state SET in_flight=true, next_allowed=clock_timestamp()-interval '1 hour' WHERE scope=$1`, gate.Scope); err != nil {
 		t.Fatal(err)
@@ -74,7 +86,7 @@ func TestPostgreSQLRateGateSerializesAndRecovers(t *testing.T) {
 func TestPostgreSQLRateGateRequiresStateTable(t *testing.T) {
 	pool := dbtest.New(t)
 	called := false
-	gate := PostgreSQLRateGate{Pool: pool, Scope: "synthetic-account", MinInterval: time.Second}
+	gate := PostgreSQLRateGate{Pool: pool, Scope: "synthetic-account", MinInterval: time.Second, RateLimitCooldown: time.Second}
 	if err := gate.Do(context.Background(), func() error { called = true; return nil }); err == nil || called {
 		t.Fatal("missing persistent state allowed vendor call")
 	}

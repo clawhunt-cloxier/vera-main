@@ -23,9 +23,10 @@ type RateGate interface {
 // or silently bypassed by this component. A stricter verified account limit
 // must be configured when the product or account requires it.
 type PostgreSQLRateGate struct {
-	Pool        *pgxpool.Pool
-	Scope       string
-	MinInterval time.Duration
+	Pool              *pgxpool.Pool
+	Scope             string
+	MinInterval       time.Duration
+	RateLimitCooldown time.Duration
 }
 
 var ErrRateGateRecovery = errors.New("emquant: rate gate has an unresolved in-flight request")
@@ -37,7 +38,7 @@ var ErrRateGateRecovery = errors.New("emquant: rate gate has an unresolved in-fl
 // callers that never enter the function do not contact the vendor.
 func (g PostgreSQLRateGate) Do(ctx context.Context, call func() error) (result error) {
 	const minInterval = (time.Minute + 699) / 700
-	if g.Pool == nil || g.Scope == "" || strings.TrimSpace(g.Scope) != g.Scope || len(g.Scope) > 128 || g.MinInterval < minInterval || g.MinInterval > 24*time.Hour || call == nil {
+	if g.Pool == nil || g.Scope == "" || strings.TrimSpace(g.Scope) != g.Scope || len(g.Scope) > 128 || g.MinInterval < minInterval || g.MinInterval > 24*time.Hour || g.RateLimitCooldown < g.MinInterval || g.RateLimitCooldown > 24*time.Hour || call == nil {
 		return errors.New("emquant: invalid account rate gate configuration")
 	}
 	intervalMicros := (g.MinInterval.Nanoseconds() + 999) / 1000
@@ -55,7 +56,11 @@ func (g PostgreSQLRateGate) Do(ctx context.Context, call func() error) (result e
 		defer cancel()
 		destroy := !locked
 		if inFlight {
-			tag, e := conn.Exec(cleanup, `UPDATE emquant_rate_state SET in_flight=false, next_allowed=clock_timestamp()+$2::bigint*interval '1 microsecond' WHERE scope=$1`, g.Scope, intervalMicros)
+			cooldownMicros := intervalMicros
+			if errors.Is(result, ErrRateLimited) {
+				cooldownMicros = (g.RateLimitCooldown.Nanoseconds() + 999) / 1000
+			}
+			tag, e := conn.Exec(cleanup, `UPDATE emquant_rate_state SET in_flight=false, next_allowed=clock_timestamp()+$2::bigint*interval '1 microsecond' WHERE scope=$1`, g.Scope, cooldownMicros)
 			if e == nil && tag.RowsAffected() != 1 {
 				e = errors.New("missing rate state")
 			}
