@@ -34,8 +34,8 @@ flowchart TB
 
 - `vera-api`：会话、计划、任务命令、报告与证据读取、自选股、反馈。不调用厂商接口；只在一句话解析时调用模型（见 §5）。
 - `vera-worker`：执行 River 作业，包括研究任务、数据刷新、自选股快照和费用对账。研究任务与定时作业使用不同的队列和并发上限。
-- `vera-harness`：开发者 CLI，提供 replay、eval 和数据适配器测试。
-- `vera-admin`：管理 CLI（邀请、用户、配额、厂商、费用、紧急停止），见 [OPERATIONS](docs/OPERATIONS.md)。
+- `vera harness`：开发者 CLI，提供 replay、eval 和数据适配器测试。
+- `vera admin`：管理 CLI（邀请、用户、配额、厂商、费用、紧急停止），见 [OPERATIONS](docs/OPERATIONS.md)。
 
 当前测试环境为 MVP 形态：单容器 `vera demo`（内嵌 PostgreSQL）加宿主机 nginx，见 [DEPLOYMENT](docs/DEPLOYMENT.md)；以下为目标形态。部署方式为单机 Docker Compose，包含 caddy（静态文件与 TLS）、api、worker、postgres、对象存储、keycloak，全部自建（ADR-0003 D11）。代码目录与编码约定见 [CONVENTIONS](docs/CONVENTIONS.md)。业务库与对象存储使用持久卷。
 

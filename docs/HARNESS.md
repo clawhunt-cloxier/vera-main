@@ -310,8 +310,8 @@ DELIVERING 只能由交付步骤在一个事务中完成：锁任务行，校验
 ## 11. 观测与回放
 
 - 每个任务有运行追踪：步骤时间线、每次模型调用的输入哈希、输出、usage、费用、被删除结论及原因。追踪对用户不可见，开发者通过内部页面或 CLI 查看。
-- `vera-harness replay --task <id>`：用冻结的快照、事实表和录制的模型响应重放任务，用于回归测试和定位问题。
-- `vera-harness eval --suite <name>`：在评测集上运行技能（真实模型或录制），输出结论存活率、数字溯源失败率、章节失效率、成本和时延，见 [TESTING](../TESTING.md)。
+- `vera harness replay --task <id>`：用原任务的技能、对象、参数与数据截止时点重跑，对比结论数量与结果类型；加 `--dry-run` 只打印步骤台账、模型调用与被删除的结论（等同 `vera admin task inspect`），不重跑、不调用模型。
+- `vera harness eval --suite <name>`：在评测集上运行技能（真实模型或录制），输出结论存活率、数字溯源失败率、章节失效率、成本和时延，见 [TESTING](../TESTING.md)。
 
 ## 12. 多 Agent 研讨的预留
 
