@@ -300,13 +300,15 @@ DELIVERING 只能由交付步骤在一个事务中完成：锁任务行，校验
 
 ### 10.2 步骤
 
-任务内每个可重试单元是一个步骤（`task_steps`）：`collect`、`compute`、`write:<section>`、`verify:<section>`、`summary`、`render`、`deliver`。
+任务内每个可重试单元是一个步骤（`task_steps`）：`collect`、`compute`、`write:<section>`、`verify:<section>`、`summary`、`verify:summary`、`render`、`deliver`。
 
 步骤状态：PENDING → RUNNING → SUCCEEDED | FAILED | SKIPPED。唯一键 `(task_id, epoch, step_key, input_hash)`。
 
-- 步骤开始时以条件更新领取（`status=PENDING` 或租约过期），写入租约到期时间。
+- 步骤开始时以条件更新领取（`status` 为 PENDING/FAILED/SKIPPED，或 RUNNING 且租约过期），`attempt` 加一并写入租约到期时间 `lease_until`（默认 2 分钟）；执行中每 30 秒续租。租约未过期的步骤不会被第二个 Worker 执行，该次运行返回“步骤忙”，River 作业延后重试（不消耗重试次数）。
+- 结果只在 `attempt` 仍匹配时写入（防护令牌）：租约过期被接管的 Worker 恢复后不能覆盖结果，改用接管者已保存的结果。
 - 步骤成功时保存输出引用与哈希；重复执行同一步骤（Worker 重启、River 重投）先读已有结果，不再调用模型。
 - 模型调用在步骤内部，通过 `model_calls` 表记录每次尝试；已有成功的调用记录时直接复用。
+- 核心要点（S1）由模型从已核验结论改写；逐字引用单条结论的要点无需再核，其余要点由核验器（`verify:summary`）逐条判断，只保留 supported；核验不可用或保留不足 3 条时，改用逐字引用已核验结论的确定性摘要。
 - 前端进度来自步骤列表：显示章节名称和状态，不显示百分比，不显示模型思维内容。
 
 ### 10.3 River 作业

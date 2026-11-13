@@ -42,7 +42,7 @@ type Engine struct {
 	RealResearch bool
 }
 
-const PromptVersion = "1.0.0"
+const PromptVersion = "1.1.0"
 
 // Terminal and active statuses.
 var terminal = []string{"COMPLETED", "ABSTAINED", "BUDGET_EXHAUSTED", "CANCELLED", "BLOCKED", "FAILED"}
@@ -372,7 +372,7 @@ func (e *Engine) insertSteps(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID,
 		}
 		steps = append(steps, st{"write:" + s.ID, "撰写 " + s.ID + " " + s.Title, status}, st{"verify:" + s.ID, "核验 " + s.ID + " " + s.Title, status})
 	}
-	steps = append(steps, st{"summary", "生成核心要点", "PENDING"}, st{"render", "组装报告", "PENDING"}, st{"deliver", "交付", "PENDING"})
+	steps = append(steps, st{"summary", "生成核心要点", "PENDING"}, st{"verify:summary", "核验核心要点", "PENDING"}, st{"render", "组装报告", "PENDING"}, st{"deliver", "交付", "PENDING"})
 	for _, s := range steps {
 		if _, err := tx.Exec(ctx, `INSERT INTO task_steps(workspace_id,task_id,epoch,step_key,label,status) VALUES($1,$2,$3,$4,$5,$6)
 			ON CONFLICT (task_id,epoch,step_key) DO NOTHING`, ws, task, epoch, s.key, s.label, s.status); err != nil {
@@ -439,47 +439,114 @@ func (e *Engine) transition(ctx context.Context, t *taskRow, from []string, to s
 	})
 }
 
-// step runs fn once per (task, epoch, key); a succeeded step returns its stored output (River redelivery is safe).
-func step[T any](ctx context.Context, e *Engine, t *taskRow, key string, fn func() (T, error)) (T, error) {
-	var out T
+// ErrStepBusy means another worker holds the lease of a step this run needs; the run should be retried later.
+var ErrStepBusy = errors.New("step is running in another worker")
+
+// Step lease timing (HARNESS §10.2). Variables so tests can change them.
+var (
+	stepLease     = 2 * time.Minute
+	stepHeartbeat = 30 * time.Second
+)
+
+// readStep returns a succeeded step's stored output.
+func readStep[T any](ctx context.Context, e *Engine, t *taskRow, key string) (out T, done bool, err error) {
 	var status string
 	var stored []byte
-	err := db.InWorkspace(ctx, e.Pool, t.Workspace, func(tx pgx.Tx) error {
+	err = db.InWorkspace(ctx, e.Pool, t.Workspace, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT status, output FROM task_steps WHERE task_id=$1 AND epoch=$2 AND step_key=$3`, t.ID, t.Epoch, key).Scan(&status, &stored)
 	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, false, nil
+	}
+	if err != nil || status != "SUCCEEDED" || stored == nil {
+		return out, false, err
+	}
+	err = json.Unmarshal(stored, &out)
+	return out, true, err
+}
+
+// step runs fn once per (task, epoch, key); a succeeded step returns its stored output (River redelivery is safe).
+// A worker claims the step with a lease (attempt + lease_until), renews it while fn runs, and writes the result only
+// while it still holds that attempt. A step leased by a live worker yields ErrStepBusy; a step whose lease expired
+// (crashed worker) is taken over. If the lease was lost meanwhile, the other worker's stored result wins.
+func step[T any](ctx context.Context, e *Engine, t *taskRow, key string, fn func() (T, error)) (T, error) {
+	if out, done, err := readStep[T](ctx, e, t, key); done || err != nil {
 		return out, err
 	}
-	if status == "SUCCEEDED" && stored != nil {
-		err = json.Unmarshal(stored, &out)
-		return out, err
-	}
+	var zero T
 	if err := e.stillCurrent(ctx, t); err != nil {
-		return out, err
+		return zero, err
 	}
-	_ = db.InWorkspace(ctx, e.Pool, t.Workspace, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO task_steps(workspace_id,task_id,epoch,step_key,label,status,started_at) VALUES($1,$2,$3,$4,$4,'RUNNING',now())
-			ON CONFLICT (task_id,epoch,step_key) DO UPDATE SET status='RUNNING', started_at=now(), error=NULL`, t.Workspace, t.ID, t.Epoch, key)
-		return err
+	var attempt int
+	leaseMs := stepLease.Milliseconds()
+	err := db.InWorkspace(ctx, e.Pool, t.Workspace, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO task_steps(workspace_id,task_id,epoch,step_key,label,status,started_at,attempt,lease_until)
+			VALUES($1,$2,$3,$4,$4,'RUNNING',now(),1,now() + $5 * interval '1 millisecond')
+			ON CONFLICT (task_id,epoch,step_key) DO UPDATE SET status='RUNNING', started_at=now(), error=NULL, finished_at=NULL,
+				attempt=task_steps.attempt+1, lease_until=excluded.lease_until
+			WHERE task_steps.status IN ('PENDING','FAILED','SKIPPED')
+			   OR (task_steps.status='RUNNING' AND (task_steps.lease_until IS NULL OR task_steps.lease_until < now()))
+			RETURNING attempt`, t.Workspace, t.ID, t.Epoch, key, leaseMs).Scan(&attempt)
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		if out, done, err := readStep[T](ctx, e, t, key); done || err != nil {
+			return out, err
+		}
+		return zero, ErrStepBusy
+	}
+	if err != nil {
+		return zero, err
+	}
+	hbCtx, stopHB := context.WithCancel(context.WithoutCancel(ctx))
+	every := stepHeartbeat
+	go func() {
+		tick := time.NewTicker(every)
+		defer tick.Stop()
+		for {
+			select {
+			case <-hbCtx.Done():
+				return
+			case <-tick.C:
+				_ = db.InWorkspace(hbCtx, e.Pool, t.Workspace, func(tx pgx.Tx) error {
+					_, err := tx.Exec(hbCtx, `UPDATE task_steps SET lease_until=now() + $5 * interval '1 millisecond'
+						WHERE task_id=$1 AND epoch=$2 AND step_key=$3 AND attempt=$4 AND status='RUNNING'`, t.ID, t.Epoch, key, attempt, leaseMs)
+					return err
+				})
+			}
+		}
+	}()
 	out, ferr := fn()
+	stopHB()
 	final := context.WithoutCancel(ctx)
 	if ferr != nil {
 		_ = db.InWorkspace(final, e.Pool, t.Workspace, func(tx pgx.Tx) error {
-			_, err := tx.Exec(final, `UPDATE task_steps SET status='FAILED', error=$4, finished_at=now() WHERE task_id=$1 AND epoch=$2 AND step_key=$3`,
-				t.ID, t.Epoch, key, ferr.Error())
+			_, err := tx.Exec(final, `UPDATE task_steps SET status='FAILED', error=$5, finished_at=now(), lease_until=NULL
+				WHERE task_id=$1 AND epoch=$2 AND step_key=$3 AND attempt=$4 AND status='RUNNING'`, t.ID, t.Epoch, key, attempt, ferr.Error())
 			return err
 		})
 		return out, ferr
 	}
 	b, _ := json.Marshal(out)
 	h := sha256.Sum256(b)
+	var held bool
 	err = db.InWorkspace(final, e.Pool, t.Workspace, func(tx pgx.Tx) error {
-		_, err := tx.Exec(final, `UPDATE task_steps SET status='SUCCEEDED', output=$4, output_hash=$5, finished_at=now() WHERE task_id=$1 AND epoch=$2 AND step_key=$3`,
-			t.ID, t.Epoch, key, b, hex.EncodeToString(h[:]))
+		tag, err := tx.Exec(final, `UPDATE task_steps SET status='SUCCEEDED', output=$5, output_hash=$6, finished_at=now(), lease_until=NULL
+			WHERE task_id=$1 AND epoch=$2 AND step_key=$3 AND attempt=$4 AND status='RUNNING'`, t.ID, t.Epoch, key, attempt, b, hex.EncodeToString(h[:]))
+		held = err == nil && tag.RowsAffected() == 1
 		return err
 	})
-	return out, err
+	if err != nil {
+		return zero, err
+	}
+	if !held {
+		// Lease lost: another worker took the step over. Use its result if it finished, otherwise let it finish.
+		slog.WarnContext(ctx, "step lease lost; discarding result", "task", t.ID, "step", key, "attempt", attempt)
+		if stored, done, err := readStep[T](final, e, t, key); done || err != nil {
+			return stored, err
+		}
+		return zero, ErrStepBusy
+	}
+	return out, nil
 }
 
 func (e *Engine) skipStep(ctx context.Context, t *taskRow, key, reason string) {
@@ -684,6 +751,13 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 			r, err := e.runSection(ctx, t, sk, subject, sheet, s)
 			mu.Lock()
 			defer mu.Unlock()
+			if err != nil && errors.Is(err, ErrStepBusy) {
+				// Another worker is running this section: retry the whole run later, never omit the section for it.
+				if firstErr == nil {
+					firstErr = err
+				}
+				err, r = nil, SectionResult{ID: s.ID, Status: "omitted"}
+			}
 			if err != nil {
 				if errors.Is(err, errStale) || (!s.Required && !errors.Is(err, context.Canceled)) {
 					r = SectionResult{ID: s.ID, Status: "omitted", Note: "本章节未能完成：" + shortErr(err)}

@@ -25,6 +25,11 @@ func (w *runWorker) Timeout(*river.Job[RunArgs]) time.Duration { return 20 * tim
 
 func (w *runWorker) Work(ctx context.Context, j *river.Job[RunArgs]) error {
 	err := w.e.Run(ctx, j.Args.Workspace, j.Args.TaskID, j.Args.Epoch)
+	if errors.Is(err, ErrStepBusy) {
+		// Another worker holds a step lease (River redelivery while the first run is alive). Snoozing does not
+		// consume an attempt; the lease expires if that worker died.
+		return river.JobSnooze(15 * time.Second)
+	}
 	if err != nil && j.Attempt >= j.MaxAttempts {
 		slog.ErrorContext(ctx, "research run exhausted retries", "task", j.Args.TaskID, "err", err)
 		t, lerr := w.e.loadTask(ctx, j.Args.Workspace, j.Args.TaskID)
