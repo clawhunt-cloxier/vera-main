@@ -33,6 +33,43 @@ type testRawStore struct {
 	calls int
 }
 
+type rejectGate struct{}
+
+func (rejectGate) Do(context.Context, func() error) error { return ErrRateLimited }
+
+type failedFinishGate struct{}
+
+func (failedFinishGate) Do(_ context.Context, call func() error) error {
+	if err := call(); err != nil {
+		return err
+	}
+	return errors.New("gate state update failed")
+}
+
+func TestCollectorDoesNotBypassAccountGate(t *testing.T) {
+	f := &testFetcher{}
+	s := &testRawStore{ref: "object://test"}
+	c := Collector{Fetcher: f, Store: s, Gate: rejectGate{}}
+	ctx := context.Background()
+	_, _, e1 := c.CollectCSD(ctx, "A", "X", "2026-11-01", "2026-11-02", "")
+	_, _, e2 := c.CollectCSS(ctx, "A", "X", "")
+	_, _, e3 := c.CollectCFN(ctx, "A", "regularreport", 2, "count=1")
+	_, _, e4 := c.CollectQuote(ctx, "A", "TIME,NOW", "")
+	_, _, e5 := c.CollectOpenDates(ctx, "CNSESH", "2026-11-01", "2026-11-02")
+	for _, err := range []error{e1, e2, e3, e4, e5} {
+		if !errors.Is(err, ErrRateLimited) {
+			t.Fatalf("gate error not propagated: %v", err)
+		}
+	}
+	if f.calls != 0 || s.calls != 0 {
+		t.Fatal("gate failure reached the vendor or archive")
+	}
+	c.Gate = failedFinishGate{}
+	if cube, _, err := c.CollectCSD(ctx, "A", "X", "2026-11-01", "2026-11-02", ""); err == nil || len(cube.Values) != 0 || f.calls != 1 || s.calls != 0 {
+		t.Fatal("gate completion failure exposed or archived a vendor result")
+	}
+}
+
 func (s *testRawStore) Put(_ context.Context, hash string, body []byte) (string, error) {
 	s.calls++
 	s.hash = hash

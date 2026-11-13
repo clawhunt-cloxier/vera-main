@@ -64,6 +64,19 @@ type NewsFetcher interface {
 type Collector struct {
 	Fetcher Fetcher
 	Store   RawStore
+	// Gate may be nil for isolated tests. Production registration must require
+	// a working account-wide gate and prevent direct SDK calls that bypass it.
+	Gate RateGate
+}
+
+func (c Collector) callVendor(ctx context.Context, call func() error) error {
+	if c.Gate != nil {
+		return c.Gate.Do(ctx, call)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return call()
 }
 
 type request struct {
@@ -225,7 +238,12 @@ func (c Collector) CollectCSD(ctx context.Context, codes, indicators, from, to, 
 	if err := validateOptions(options); err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
-	cube, err := c.Fetcher.CSD(codes, indicators, from, to, options)
+	var cube Cube
+	err := c.callVendor(ctx, func() error {
+		var e error
+		cube, e = c.Fetcher.CSD(codes, indicators, from, to, options)
+		return e
+	})
 	if err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
@@ -256,7 +274,12 @@ func (c Collector) CollectCSS(ctx context.Context, codes, indicators, options st
 	if err := validateOptions(options); err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
-	cube, err := f.CSS(codes, indicators, options)
+	var cube Cube
+	err := c.callVendor(ctx, func() error {
+		var e error
+		cube, e = f.CSS(codes, indicators, options)
+		return e
+	})
 	if err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
@@ -286,7 +309,12 @@ func (c Collector) CollectCFN(ctx context.Context, codes, content string, mode i
 	if err := validateOptions(options); err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
-	cube, err := f.CFN(codes, content, mode, options)
+	var cube Cube
+	err := c.callVendor(ctx, func() error {
+		var e error
+		cube, e = f.CFN(codes, content, mode, options)
+		return e
+	})
 	if err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
@@ -311,7 +339,12 @@ func (c Collector) CollectQuote(ctx context.Context, codes, indicators, options 
 	if err := validateOptions(options); err != nil {
 		return Quote{}, ArchiveRef{}, err
 	}
-	quote, err := c.Fetcher.QuoteSnapshot(codes, indicators, options)
+	var quote Quote
+	err := c.callVendor(ctx, func() error {
+		var e error
+		quote, e = c.Fetcher.QuoteSnapshot(codes, indicators, options)
+		return e
+	})
 	if err != nil {
 		return Quote{}, ArchiveRef{}, err
 	}
@@ -369,7 +402,12 @@ func (c Collector) CollectOpenDates(ctx context.Context, market, from, to string
 		return nil, ArchiveRef{}, err
 	}
 	options := "Market=" + market + ",Period=1,Order=1"
-	cube, err := f.TradeDates(from, to, options)
+	var cube Cube
+	err = c.callVendor(ctx, func() error {
+		var e error
+		cube, e = f.TradeDates(from, to, options)
+		return e
+	})
 	if err != nil {
 		return nil, ArchiveRef{}, err
 	}
