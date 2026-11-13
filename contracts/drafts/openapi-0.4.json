@@ -1,0 +1,3116 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Vera P0 API",
+    "version": "0.4.0-draft",
+    "description": "Draft target including ADR-0004 intraday cutoffs; current implementation does not yet implement this version."
+  },
+  "security": [
+    {
+      "session": []
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "health",
+        "summary": "health",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "service"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "ready",
+        "summary": "ready",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "reason"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getMe",
+        "summary": "getMe",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateMe",
+        "summary": "Update the experience label (never grants permissions)",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/entities": {
+      "get": {
+        "operationId": "searchEntities",
+        "summary": "searchEntities",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Entity"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "$ref": "#/components/schemas/SubjectKind"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/research-tasks": {
+      "post": {
+        "operationId": "createTask",
+        "summary": "createTask",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTask"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listTasks",
+        "summary": "listTasks",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Task"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skill_id",
+            "schema": {
+              "$ref": "#/components/schemas/SkillId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "QUEUED",
+                "COLLECTING",
+                "ANALYZING",
+                "ASSEMBLING",
+                "DELIVERING",
+                "CANCEL_REQUESTED",
+                "COMPLETED",
+                "ABSTAINED",
+                "BUDGET_EXHAUSTED",
+                "CANCELLED",
+                "BLOCKED",
+                "FAILED"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/research-tasks/{id}": {
+      "get": {
+        "operationId": "getTask",
+        "summary": "getTask",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/research-tasks/{id}/cancel": {
+      "post": {
+        "operationId": "cancelTask",
+        "summary": "cancelTask",
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cancel"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports/{id}/versions/{version}": {
+      "get": {
+        "operationId": "getReport",
+        "summary": "getReport",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Report"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/evidence/{id}": {
+      "get": {
+        "operationId": "getEvidence",
+        "summary": "getEvidence",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Evidence"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/calculations/{id}": {
+      "get": {
+        "operationId": "getCalculation",
+        "summary": "getCalculation",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calculation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/reports/{id}/versions/{version}/feedback": {
+      "post": {
+        "operationId": "submitFeedback",
+        "summary": "submitFeedback",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Feedback"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "get": {
+        "operationId": "login",
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "OIDC redirect; state/nonce/PKCE verified"
+          },
+          "400": {
+            "description": "Invalid authentication flow"
+          }
+        }
+      }
+    },
+    "/auth/callback": {
+      "get": {
+        "operationId": "callback",
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "OIDC redirect; state/nonce/PKCE verified"
+          },
+          "400": {
+            "description": "Invalid authentication flow"
+          }
+        },
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session destroyed"
+          },
+          "403": {
+            "description": "Invalid CSRF"
+          }
+        }
+      }
+    },
+    "/api/v1/skills": {
+      "get": {
+        "operationId": "listSkills",
+        "summary": "listSkills",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Skill"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/research-plans": {
+      "post": {
+        "operationId": "createPlan",
+        "summary": "createPlan",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlan"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/research-plans/{id}": {
+      "get": {
+        "operationId": "getPlan",
+        "summary": "getPlan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchPlan"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports": {
+      "get": {
+        "operationId": "listReports",
+        "summary": "listReports",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skill_id",
+            "schema": {
+              "$ref": "#/components/schemas/SkillId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReportSummary"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watchlist": {
+      "get": {
+        "operationId": "listWatchlist",
+        "summary": "listWatchlist",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WatchItem"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addWatchItem",
+        "summary": "addWatchItem",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchItemInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchItem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watchlist/{item_id}": {
+      "patch": {
+        "operationId": "updateWatchItem",
+        "summary": "updateWatchItem",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchItemPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchItem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeWatchItem",
+        "summary": "removeWatchItem",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports/{id}/versions/{version}/series/{series_id}": {
+      "get": {
+        "operationId": "getReportSeries",
+        "summary": "getReportSeries",
+        "description": "Frozen chart data from the report's dataset snapshot; never live data.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "series_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,40}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartSeries"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding": {
+      "post": {
+        "operationId": "redeemInvite",
+        "summary": "Redeem an invite and create the private workspace (idempotent per user)",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports/{id}/versions/{version}/pdf": {
+      "get": {
+        "operationId": "exportReportPdf",
+        "summary": "exportReportPdf",
+        "description": "Server-side typeset PDF of a delivered report version (A4, embedded fonts). Content is the same frozen document as getReport.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF file",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "vera_session"
+      }
+    },
+    "schemas": {
+      "CreateTask": {
+        "description": "Confirms a server-side research plan. Skill, subject, params and data scope come from the plan, never from this request.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "disabled_sections": {
+            "type": "array",
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^S[0-9X]{1,2}$"
+            }
+          }
+        },
+        "required": [
+          "plan_id",
+          "plan_hash",
+          "disabled_sections"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "details": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable"
+            ]
+          }
+        },
+        "required": [
+          "request_id",
+          "error"
+        ]
+      },
+      "ReportRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ]
+      },
+      "Task": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skill_id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "status": {
+            "enum": [
+              "QUEUED",
+              "COLLECTING",
+              "ANALYZING",
+              "ASSEMBLING",
+              "DELIVERING",
+              "CANCEL_REQUESTED",
+              "COMPLETED",
+              "ABSTAINED",
+              "BUDGET_EXHAUSTED",
+              "CANCELLED",
+              "BLOCKED",
+              "FAILED"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fixed cutoff for fixed_legacy; preview time, not the frozen cutoff, for collect_latest tasks."
+          },
+          "snapshot_as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Frozen cutoff for collect_latest; null until frozen and immutable afterwards."
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskStep"
+            }
+          },
+          "report_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot_mode": {
+            "enum": [
+              "collect_latest",
+              "fixed_legacy"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "skill_id",
+          "subject",
+          "status",
+          "revision",
+          "created_at",
+          "deadline",
+          "as_of",
+          "steps",
+          "report_ref",
+          "reason_code",
+          "reason_message",
+          "snapshot_mode",
+          "snapshot_as_of"
+        ]
+      },
+      "Entity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SubjectKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "venue": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "listed",
+              "suspended",
+              "st",
+              "delisting",
+              "delisted",
+              "active"
+            ]
+          },
+          "classification": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Industry taxonomy and version, e.g. SW2021 L2"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "skill_id": {
+                  "$ref": "#/components/schemas/SkillId"
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "skill_id",
+                "available",
+                "reason"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "symbol",
+          "venue",
+          "status",
+          "classification",
+          "skills"
+        ]
+      },
+      "Me": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "null until an invite is redeemed"
+          },
+          "csrf_token": {
+            "type": "string"
+          },
+          "persona": {
+            "enum": [
+              "fund_manager",
+              "analyst",
+              "individual",
+              "unspecified"
+            ]
+          },
+          "quota": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "active_remaining": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "queued_remaining": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "daily_remaining": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "deep_research_daily_remaining": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "active_remaining",
+              "queued_remaining",
+              "daily_remaining",
+              "deep_research_daily_remaining"
+            ],
+            "description": "All zero before onboarding"
+          },
+          "onboarded": {
+            "type": "boolean"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "description": "deployment uses demo data or simulated models; the UI shows a fixed banner"
+          },
+          "display_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "csrf_token",
+          "display_name",
+          "onboarded",
+          "persona",
+          "quota",
+          "synthetic",
+          "user_id",
+          "workspace_id"
+        ]
+      },
+      "Cancel": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "expected_revision"
+        ]
+      },
+      "FeedbackInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "useful",
+              "confusing",
+              "incorrect",
+              "other"
+            ]
+          },
+          "comment": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "claim_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "Feedback": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "created_at"
+        ]
+      },
+      "Claim": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "fact",
+              "computed",
+              "inference",
+              "attributed",
+              "scenario"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "calculation_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "scenario": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "trigger": {
+                    "type": "string"
+                  },
+                  "watch": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "invalidation": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "watch",
+                  "invalidation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ref",
+          "kind",
+          "text",
+          "evidence_refs",
+          "calculation_refs",
+          "scenario"
+        ]
+      },
+      "Evidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "exchange",
+              "company_filing",
+              "regulator",
+              "vendor_derived",
+              "media",
+              "broker",
+              "computed"
+            ]
+          },
+          "source_tier": {
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "basis": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "event_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Verified source event time; unknown is null."
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Time received by the system; unknown is null."
+          },
+          "latency_mode": {
+            "enum": [
+              "real_time",
+              "delayed",
+              "unknown",
+              null
+            ]
+          },
+          "locator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "excerpt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "dataset_id",
+          "provider",
+          "origin",
+          "source_tier",
+          "title",
+          "label",
+          "value",
+          "unit",
+          "basis",
+          "period",
+          "published_at",
+          "available_at",
+          "locator",
+          "excerpt",
+          "content_hash"
+        ]
+      },
+      "Calculation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "formula_id": {
+            "type": "string"
+          },
+          "formula_version": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "evidence_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "evidence_id",
+                "value",
+                "unit"
+              ]
+            }
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "applicability": {
+            "enum": [
+              "APPLICABLE",
+              "NOT_APPLICABLE",
+              "MISSING_INPUT",
+              "CONFLICT"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "formula_id",
+          "formula_version",
+          "inputs",
+          "result",
+          "unit",
+          "applicability"
+        ]
+      },
+      "Report": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "skill_id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "skill_version": {
+            "type": "string"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data_as_of": {
+            "type": "string",
+            "description": "e.g. 2026-11-05 close"
+          },
+          "snapshot_as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Frozen cutoff for collect_latest reports."
+          },
+          "source_freshness": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceFreshness"
+            },
+            "description": "Per-source data times and limitations; required for collect_latest reports."
+          },
+          "result_kind": {
+            "enum": [
+              "full",
+              "limited"
+            ]
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "ai_generated": {
+            "const": true
+          },
+          "summary_claim_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Section"
+            }
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "provider": {
+                  "type": "string"
+                },
+                "dataset_id": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "provider",
+                "dataset_id",
+                "updated_at"
+              ]
+            }
+          },
+          "disclaimer": {
+            "type": "string"
+          },
+          "delivered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "snapshot_mode": {
+            "enum": [
+              "collect_latest",
+              "fixed_legacy"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "task_id",
+          "title",
+          "skill_id",
+          "skill_version",
+          "subject",
+          "as_of",
+          "data_as_of",
+          "result_kind",
+          "synthetic",
+          "ai_generated",
+          "summary_claim_refs",
+          "sections",
+          "claims",
+          "limitations",
+          "sources",
+          "disclaimer",
+          "delivered_at",
+          "snapshot_mode"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "snapshot_mode": {
+                  "const": "collect_latest"
+                }
+              },
+              "required": [
+                "snapshot_mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "snapshot_as_of",
+                "source_freshness"
+              ]
+            }
+          }
+        ]
+      },
+      "SkillId": {
+        "enum": [
+          "deep_research",
+          "stock_analysis",
+          "capital_flow"
+        ]
+      },
+      "SubjectKind": {
+        "enum": [
+          "stock",
+          "industry",
+          "market"
+        ]
+      },
+      "Skill": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "version": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "subject_kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubjectKind"
+            }
+          },
+          "params_schema": {
+            "type": "object"
+          },
+          "available": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "title",
+          "subject_kinds",
+          "params_schema",
+          "available"
+        ]
+      },
+      "CreatePlan": {
+        "description": "Either free text or a structured skill+subject request. Free text is untrusted input used only for parsing.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 500,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "skill_id": {
+                "enum": [
+                  "deep_research",
+                  "stock_analysis",
+                  "capital_flow"
+                ]
+              },
+              "subject_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "params": {
+                "type": "object",
+                "description": "Validated server-side against the skill's params_schema from GET /api/v1/skills."
+              }
+            },
+            "required": [
+              "skill_id",
+              "subject_id",
+              "params"
+            ]
+          }
+        ]
+      },
+      "PlanSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^S[0-9X]{1,2}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "availability": {
+            "enum": [
+              "available",
+              "limited",
+              "unavailable"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "required",
+          "availability",
+          "reason"
+        ]
+      },
+      "SourceFreshness": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "event_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "period": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "latency_mode": {
+            "enum": [
+              "real_time",
+              "delayed",
+              "unknown"
+            ]
+          },
+          "status": {
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable",
+              "unknown"
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "available_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "provider",
+          "event_at",
+          "published_at",
+          "received_at",
+          "period",
+          "latency_mode",
+          "status",
+          "note",
+          "available_at"
+        ]
+      },
+      "ResearchPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_hash": {
+            "type": "string"
+          },
+          "skill_id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "skill_version": {
+            "type": "string"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "params": {
+            "type": "object"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Preview time for collect_latest; fixed cutoff only for fixed_legacy."
+          },
+          "snapshot_mode": {
+            "enum": [
+              "collect_latest",
+              "fixed_legacy"
+            ],
+            "description": "Bound into the plan hash; required in the 0.4 representation."
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanSection"
+            }
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimate": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "p95_seconds": {
+                "type": "integer"
+              },
+              "quota_cost": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "p95_seconds",
+              "quota_cost"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "plan_hash",
+          "skill_id",
+          "skill_version",
+          "subject",
+          "params",
+          "as_of",
+          "sections",
+          "executable",
+          "reason_code",
+          "estimate",
+          "expires_at",
+          "snapshot_mode"
+        ]
+      },
+      "PlanResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "plan",
+              "choose",
+              "unsupported"
+            ]
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "skill_id": {
+                  "$ref": "#/components/schemas/SkillId"
+                },
+                "subject": {
+                  "$ref": "#/components/schemas/Entity"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "skill_id",
+                "subject",
+                "label"
+              ]
+            }
+          },
+          "unsupported_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "plan",
+          "candidates",
+          "unsupported_reason",
+          "suggestions"
+        ]
+      },
+      "TaskStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "SUCCEEDED",
+              "FAILED",
+              "SKIPPED"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "status"
+        ]
+      },
+      "Section": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "limited",
+              "omitted"
+            ]
+          },
+          "claim_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "columns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "evidence_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              },
+              "required": [
+                "title",
+                "columns",
+                "rows",
+                "evidence_refs"
+              ]
+            }
+          },
+          "charts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "series_id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9_]{1,40}$"
+                },
+                "kind": {
+                  "enum": [
+                    "line",
+                    "bar",
+                    "area",
+                    "candlestick"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "series_id",
+                "kind",
+                "title"
+              ]
+            }
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "claim_refs",
+          "tables",
+          "charts",
+          "note"
+        ]
+      },
+      "ReportSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "skill_id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "result_kind": {
+            "enum": [
+              "full",
+              "limited"
+            ]
+          },
+          "delivered_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "title",
+          "skill_id",
+          "subject",
+          "result_kind",
+          "delivered_at"
+        ]
+      },
+      "WatchAlert": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "price_above",
+              "price_below",
+              "daily_change",
+              "margin_change",
+              "new_filing"
+            ]
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "threshold",
+          "enabled"
+        ]
+      },
+      "WatchItemInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10
+            }
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "alerts": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/WatchAlert"
+            }
+          }
+        },
+        "required": [
+          "entity_id"
+        ]
+      },
+      "WatchItemPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tags": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10
+            }
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "alerts": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/WatchAlert"
+            }
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "expected_version"
+        ]
+      },
+      "WatchItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "entity": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WatchAlert"
+            }
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "trade_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "close": {
+                    "type": "string",
+                    "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+                  },
+                  "change_pct": {
+                    "type": "string",
+                    "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+                  },
+                  "since_added_pct": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pe_ttm": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "margin_balance_change_5d": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "triggered": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "trade_date",
+                  "close",
+                  "change_pct",
+                  "since_added_pct",
+                  "pe_ttm",
+                  "margin_balance_change_5d",
+                  "triggered"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "entity",
+          "tags",
+          "note",
+          "alerts",
+          "added_at",
+          "snapshot",
+          "last_report"
+        ]
+      },
+      "ChartSeries": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "series_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "line",
+              "bar",
+              "area",
+              "candlestick"
+            ]
+          },
+          "x": {
+            "enum": [
+              "trade_date",
+              "report_period"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "points": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    ],
+                    "items": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "minItems": 2
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "points"
+              ]
+            }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "series_id",
+          "title",
+          "kind",
+          "x",
+          "unit",
+          "series",
+          "evidence_refs",
+          "note"
+        ]
+      },
+      "OnboardingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "invite_code": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 64
+          },
+          "persona": {
+            "enum": [
+              "fund_manager",
+              "analyst",
+              "individual",
+              "unspecified"
+            ]
+          }
+        },
+        "required": [
+          "invite_code",
+          "persona"
+        ]
+      },
+      "MePatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "persona": {
+            "enum": [
+              "fund_manager",
+              "analyst",
+              "individual",
+              "unspecified"
+            ]
+          }
+        },
+        "required": [
+          "persona"
+        ]
+      }
+    }
+  }
+}

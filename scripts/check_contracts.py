@@ -10,6 +10,23 @@ root = Path(__file__).resolve().parents[1]
 api = json.loads((root/'contracts/openapi.json').read_text())
 validate_spec(api)
 schemas = api['components']['schemas']
+draft = json.loads((root/'contracts/drafts/openapi-0.4.json').read_text())
+validate_spec(draft)
+draft_schemas = draft['components']['schemas']
+assert 'snapshot_mode' not in schemas['ResearchPlan']['properties']
+assert 'snapshot_mode' in draft_schemas['ResearchPlan']['required']
+assert {'snapshot_mode', 'snapshot_as_of'} <= set(draft_schemas['Task']['required'])
+assert 'available_at' in draft_schemas['SourceFreshness']['required']
+report_rule = Draft202012Validator({
+    'type': 'object',
+    'properties': {'snapshot_mode': draft_schemas['Report']['properties']['snapshot_mode']},
+    'required': ['snapshot_mode'],
+    'allOf': draft_schemas['Report']['allOf'],
+})
+assert list(report_rule.iter_errors({'snapshot_mode': 'collect_latest'}))
+assert not list(report_rule.iter_errors({'snapshot_mode': 'collect_latest', 'snapshot_as_of': 'example', 'source_freshness': []}))
+assert not list(report_rule.iter_errors({'snapshot_mode': 'fixed_legacy'}))
+assert 'application/vnd.vera.v0.4+json' in draft['paths']['/api/v1/research-plans']['post']['responses']['200']['content']
 
 
 def load(name):

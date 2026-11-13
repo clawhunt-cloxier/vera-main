@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Vera P0 API",
-    "version": "0.4.0-draft",
-    "description": "Draft target including ADR-0004 intraday cutoffs; current implementation does not yet implement this version."
+    "version": "0.3.0",
+    "description": "Implementation target per ADR-0003. Only health/readiness implemented."
   },
   "security": [
     {
@@ -1488,13 +1488,7 @@
           },
           "as_of": {
             "type": "string",
-            "format": "date-time",
-            "description": "Fixed cutoff for fixed_legacy; preview time, not the frozen cutoff, for collect_latest tasks."
-          },
-          "snapshot_as_of": {
-            "type": ["string", "null"],
-            "format": "date-time",
-            "description": "Frozen cutoff for collect_latest; null until frozen and immutable afterwards."
+            "format": "date-time"
           },
           "steps": {
             "type": "array",
@@ -1905,19 +1899,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "event_at": {
-            "type": ["string", "null"],
-            "format": "date-time",
-            "description": "Verified source event time; unknown is null."
-          },
-          "received_at": {
-            "type": ["string", "null"],
-            "format": "date-time",
-            "description": "Time received by the system; unknown is null."
-          },
-          "latency_mode": {
-            "enum": ["real_time", "delayed", "unknown", null]
-          },
           "locator": {
             "type": [
               "string",
@@ -2058,16 +2039,6 @@
           "data_as_of": {
             "type": "string",
             "description": "e.g. 2026-11-05 close"
-          },
-          "snapshot_as_of": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Frozen cutoff for collect_latest reports."
-          },
-          "source_freshness": {
-            "type": "array",
-            "items": {"$ref": "#/components/schemas/SourceFreshness"},
-            "description": "Per-source data times and limitations; required for collect_latest reports."
           },
           "result_kind": {
             "enum": [
@@ -2290,22 +2261,6 @@
           "reason"
         ]
       },
-      "SourceFreshness": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "dataset_id": {"type": "string"},
-          "provider": {"type": "string"},
-          "event_at": {"type": ["string", "null"], "format": "date-time"},
-          "published_at": {"type": ["string", "null"], "format": "date-time"},
-          "received_at": {"type": ["string", "null"], "format": "date-time"},
-          "period": {"type": ["string", "null"]},
-          "latency_mode": {"enum": ["real_time", "delayed", "unknown"]},
-          "status": {"enum": ["fresh", "stale", "unavailable", "unknown"]},
-          "note": {"type": "string"}
-        },
-        "required": ["dataset_id", "provider", "event_at", "published_at", "received_at", "period", "latency_mode", "status", "note"]
-      },
       "ResearchPlan": {
         "type": "object",
         "additionalProperties": false,
@@ -2331,12 +2286,7 @@
           },
           "as_of": {
             "type": "string",
-            "format": "date-time",
-            "description": "Preview time for collect_latest; fixed cutoff only for fixed_legacy."
-          },
-          "snapshot_mode": {
-            "enum": ["collect_latest", "fixed_legacy"],
-            "description": "Bound into plan hash; optional only for legacy clients."
+            "format": "date-time"
           },
           "sections": {
             "type": "array",
