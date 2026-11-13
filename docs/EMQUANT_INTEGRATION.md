@@ -6,6 +6,7 @@
 
 - 项目采用 Go，Linux 原生绑定在 `backend/internal/dataservice/emquant`，通过 cgo 动态加载厂商库；不把 SDK 二进制、账号、密码、授权文件或登录日志提交仓库。账号密钥应由运行环境的 secret 机制传入，不放在命令行、日志、镜像或前端。
 - 厂商库及同目录的服务器配置必须由部署方按授权独立提供，SDK 会写入运行目录，应使用可写的隔离副本。组件当前只提供库接口，生产配置、进程管理和应用注册尚未实现。
+- `OpenRuntime` 将原生 SDK、S3 兼容归档和 PostgreSQL 共享限流器组合为一个采集单元；缺少限流状态表时登录不会执行。该单元没有注册到研究服务，不生成可直接用于报告的统一记录。账号、密码从部署密钥机制传入；不要打印配置或错误上下文中的敏感值。
 - 官方 Linux C++ SDK 的 `EmQuantAPI.h` 可从[厂商下载中心](https://quantapi.eastmoney.com/Download?from=web)获取。2026-11-13 下载的 x86-64 动态库与用户提供的 Python 包内同架构动态库 SHA-256 一致；这不保证未来版本 ABI 一致。
 - 用户已确认允许数据持久化、向用户展示及第三方模型处理；应用仍须登记具体数据产品和字段权限，再启用对应生产用途。
 
@@ -46,6 +47,8 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 
 共享限流准备组件使用 PostgreSQL 会话锁和持久状态，将同一账号各类 SDK 调用串行化，调用结束后等待配置的最小间隔；下限不快于 700 次/分钟，未知的账号或快照限额必须另行配置为更严格值，不能把该下限当作实际配额。收到已确认的厂商限频错误时，组件将另行配置的冷却时间持久化供所有进程遵守；它不自动重试，也不猜测实际账号所需冷却时间。限流状态写入失败、无法取得数据库连接、或发现上一次请求可能仍在执行时，均拒绝新请求；不能仅凭锁释放判断 SDK 调用已经结束。采集器可以注入该限流器，但当前默认未注入，也未接入应用。需要 T014/T012 协商正式迁移创建 `emquant_rate_state(scope text PRIMARY KEY, in_flight boolean NOT NULL, next_allowed timestamptz NOT NULL)`，并确保同一厂商账号的所有进程及外部应用共享相同的非秘密 scope 且禁止绕过；否则不能宣称已实现账号级保护。未解决的 in-flight 状态必须先确认全部旧 SDK 进程已终止，并按已验证的账号冷却要求恢复；不能盲目清除。自动恢复机制、部署和真实账号限额仍未验证。
 
-开发验证：在 `backend` 执行 `go test -race ./internal/dataservice/emquant`；默认测试使用合成样本。`TestLiveSDK` 和 `TestLiveArchiveS3` 只在显式设置 `EMQUANT_INTEGRATION=1` 及相应环境后运行，使用真实账号会消耗厂商额度，后者会向指定 S3 桶写真实数据。`TestLiveCFN` 还要求 `EMQUANT_LIVE_CFN=1`；当前尚未运行。真实配置只由 secret 管理注入，不提交测试录制结果。
+开发验证：在 `backend` 执行 `go test -race ./internal/dataservice/emquant`；默认测试使用合成样本。`TestLiveSDK` 和 `TestLiveArchiveS3` 只在显式设置 `EMQUANT_INTEGRATION=1` 及相应环境后运行，使用真实账号会消耗厂商额度，后者会向指定 S3 桶写真实数据。`TestLiveCFN` 还要求 `EMQUANT_LIVE_CFN=1`；当前尚未运行。`TestLiveRuntime` 还要求 `EMQUANT_LIVE_RUNTIME=1`、明确的测试 S3 端点和桶，以及 `EMQUANT_TEST_MIN_INTERVAL`、`EMQUANT_TEST_RATE_COOLDOWN`；测试数据库是独立的，只能使用未被其他应用使用的账号，不能代替共享生产限流。该测试也尚未运行。真实配置只由 secret 管理注入，不提交测试录制结果。
+
+组合单元的自动化测试使用模拟 SDK、测试 HTTP 对象端点与真实临时 PostgreSQL；它证明启动门禁和归档调用的配合，不证明真实账号权限、厂商数据的业务含义或实际部署可用。生产迁移、对象桶权限、账号级配额和应用生命周期仍须单独验证。
 
 后续还需要实体和行业目录、公告正文及财报版本、完整日线与资金数据集、跨 worker 限流、报告各来源时间展示、生产环境配置以及真实数据加真实模型的端到端验收。工程计划与当前状态见 [接入交接](handoffs/2026-11-12-emquant-probe-codex.md)及 [ADR-0004 草案](https://github.com/clawhunt-cloxier/vera-main/pull/20)。
