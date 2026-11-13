@@ -131,6 +131,20 @@ func (r *Runtime) MapStatementFromArchive(ctx context.Context, ref ArchiveRef, c
 	return mapStatementFields(cube, ref, code, period, statementType)
 }
 
+// MapIndustryFromArchive recovers one requested level. It does not establish
+// effective intervals, complete hierarchy or historical publication semantics.
+func (r *Runtime) MapIndustryFromArchive(ctx context.Context, ref ArchiveRef, code, asOf string, level int) (IndustryObservation, error) {
+	body, err := r.ReadArchive(ctx, ref)
+	if err != nil {
+		return IndustryObservation{}, err
+	}
+	cube, _, err := DecodeArchive(body, ref.BodySHA256)
+	if err != nil {
+		return IndustryObservation{}, err
+	}
+	return mapIndustryLevel(cube, ref, code, asOf, level)
+}
+
 // CollectQuote returns a source archive and unnormalized observation. It does
 // not certify that the vendor field is real time or ready for a report.
 func (r *Runtime) CollectQuote(ctx context.Context, codes, indicators, options string) (Quote, ArchiveRef, error) {
@@ -168,6 +182,13 @@ func (r *Runtime) CollectStatementFields(ctx context.Context, code, period strin
 		return StatementFields{}, errors.New("emquant: runtime unavailable")
 	}
 	return r.collector.CollectStatementFields(ctx, code, period, statementType)
+}
+
+func (r *Runtime) CollectIndustryLevel(ctx context.Context, code, asOf string, level int) (IndustryObservation, error) {
+	if r == nil || r.client == nil {
+		return IndustryObservation{}, errors.New("emquant: runtime unavailable")
+	}
+	return r.collector.CollectIndustryLevel(ctx, code, asOf, level)
 }
 
 func (r *Runtime) CollectCFN(ctx context.Context, codes, content string, mode int, options string) (Cube, ArchiveRef, error) {

@@ -120,6 +120,19 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	if _, err := runtime.MapStatementFromArchive(ctx, statementRef, "A.SH", "2025-09-30", 1); err == nil {
 		t.Fatal("statement archive accepted with the wrong report period")
 	}
+	<-archived
+	industryFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"HISSW2021", "HISSW2021CODE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "模拟行业"}, {Type: 13, Value: "synthetic-code"}}}}
+	industry, err := (Collector{Fetcher: industryFetcher, Store: runtime.store}).CollectIndustryLevel(ctx, "A.SH", "2025-12-31", 2)
+	if err != nil {
+		t.Fatalf("industry archive: %v", err)
+	}
+	replayedIndustry, err := runtime.MapIndustryFromArchive(ctx, industry.Source, "A.SH", "2025-12-31", 2)
+	if err != nil || replayedIndustry.IndustryCode != "synthetic-code" || replayedIndustry.IndustryName != "模拟行业" {
+		t.Fatalf("industry archive mapping: %v", err)
+	}
+	if _, err := runtime.MapIndustryFromArchive(ctx, industry.Source, "A.SH", "2025-12-31", 1); err == nil {
+		t.Fatal("industry archive accepted with the wrong level")
+	}
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}

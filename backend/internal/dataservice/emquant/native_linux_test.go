@@ -130,6 +130,31 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	}
 }
 
+// TestLiveIndustry is separate because product coverage and response shape
+// have not been verified. It never logs response contents.
+func TestLiveIndustry(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_INDUSTRY") != "1" {
+		t.Skip("live vendor industry test not requested")
+	}
+	c, err := Open(os.Getenv("EMQUANT_LIBRARY"), os.Getenv("EMQUANT_USER"), os.Getenv("EMQUANT_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	store := &testRawStore{ref: "object://test/industry-live"}
+	result, err := (Collector{Fetcher: c, Store: store}).CollectIndustryLevel(context.Background(), "300059.SZ", "2026-11-02", 2)
+	if err != nil || result.IndustryName == "" || result.IndustryCode == "" {
+		t.Fatalf("industry response: %v", err)
+	}
+	if _, _, err := DecodeArchive(store.body, result.Source.BodySHA256); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestLiveCFN is separate because account permission and response shape for
 // announcements have not been verified. It never logs response contents.
 func TestLiveCFN(t *testing.T) {
