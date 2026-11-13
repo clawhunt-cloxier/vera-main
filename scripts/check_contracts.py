@@ -26,6 +26,16 @@ report_rule = Draft202012Validator({
 assert list(report_rule.iter_errors({'snapshot_mode': 'collect_latest'}))
 assert not list(report_rule.iter_errors({'snapshot_mode': 'collect_latest', 'snapshot_as_of': 'example', 'source_freshness': []}))
 assert not list(report_rule.iter_errors({'snapshot_mode': 'fixed_legacy'}))
+freshness = Draft202012Validator(draft_schemas['SourceFreshness'], format_checker=FormatChecker())
+source = {'dataset_id': 'mkt.intraday_quote', 'provider': 'example', 'event_at': None, 'published_at': None,
+          'received_at': None, 'available_at': None, 'period': None, 'latency_mode': 'unknown',
+          'status': 'unknown', 'note': 'synthetic test'}
+assert not list(freshness.iter_errors(source))
+assert list(freshness.iter_errors({**source, 'latency_mode': 'real_time'}))
+assert not list(freshness.iter_errors({**source, 'latency_mode': 'real_time',
+                                     'event_at': '2026-06-30T05:01:55Z',
+                                     'received_at': '2026-06-30T05:01:56Z',
+                                     'available_at': '2026-06-30T05:01:57Z'}))
 assert 'application/vnd.vera.v0.4+json' in draft['paths']['/api/v1/research-plans']['post']['responses']['200']['content']
 
 

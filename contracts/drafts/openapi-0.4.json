@@ -2415,6 +2415,36 @@
           "status",
           "note",
           "available_at"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "latency_mode": {
+                  "const": "real_time"
+                }
+              },
+              "required": [
+                "latency_mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "event_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "received_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "available_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
         ]
       },
       "ResearchPlan": {
