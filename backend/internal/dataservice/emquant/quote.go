@@ -63,7 +63,11 @@ func (q Quote) LastPriceAt(code string, asOf time.Time, maxAge time.Duration) (L
 		if !ok || math.IsNaN(n) || math.IsInf(n, 0) || n <= 0 {
 			return LastPrice{}, ErrInvalidQuote
 		}
-		value = strconv.FormatFloat(n, 'f', -1, 64)
+		bits := 64
+		if cell.Type == 10 {
+			bits = 32
+		}
+		value = strconv.FormatFloat(n, 'f', -1, bits)
 	default:
 		return LastPrice{}, fmt.Errorf("%w: unsupported NOW type", ErrInvalidQuote)
 	}

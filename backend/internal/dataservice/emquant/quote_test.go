@@ -70,3 +70,12 @@ func TestQuoteRejectsMissingAndAmbiguousTime(t *testing.T) {
 		t.Fatalf("duplicate TIME: %v", err)
 	}
 }
+
+func TestLastPriceUsesSDKFloatPrecision(t *testing.T) {
+	at := time.Date(2026, 11, 12, 5, 42, 4, 0, time.UTC)
+	q := Quote{ObservedAt: at, Data: Cube{Codes: []string{"A"}, Indicators: []string{"TIME", "NOW"}, Dates: []string{"2026-11-12"}, Values: []Cell{{Type: 6, Value: int64(134200)}, {Type: 10, Value: float64(float32(10.1))}}}}
+	price, err := q.LastPriceAt("A", at, time.Minute)
+	if err != nil || price.Value != "10.1" {
+		t.Fatalf("float32 price: %s, %v", price.Value, err)
+	}
+}
