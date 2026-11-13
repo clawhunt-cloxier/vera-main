@@ -91,3 +91,60 @@ func TestPostgreSQLRateGateRequiresStateTable(t *testing.T) {
 		t.Fatal("missing persistent state allowed vendor call")
 	}
 }
+
+// The database session can disappear while a synchronous native SDK call is
+// still executing. A newly acquired lock must not be treated as proof that the
+// old call stopped: its committed in-flight marker must fence the new worker.
+func TestPostgreSQLRateGateSessionLossWhileCallRuns(t *testing.T) {
+	pool := dbtest.New(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if _, err := pool.Exec(ctx, `CREATE TABLE emquant_rate_state (scope text PRIMARY KEY, in_flight boolean NOT NULL, next_allowed timestamptz NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	gate := PostgreSQLRateGate{Pool: pool, Scope: "synthetic-session-loss", MinInterval: 90 * time.Millisecond, RateLimitCooldown: 200 * time.Millisecond}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan error, 1)
+	var releaseOnce sync.Once
+	go func() {
+		finished <- gate.Do(ctx, func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	defer releaseOnce.Do(func() { close(release) })
+	select {
+	case <-entered:
+	case err := <-finished:
+		t.Fatalf("first call did not start: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var pid int
+	if err := pool.QueryRow(ctx, `SELECT l.pid FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid WHERE l.locktype='advisory' AND l.granted AND a.datname=current_database()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	var terminated bool
+	if err := pool.QueryRow(ctx, `SELECT pg_terminate_backend($1)`, pid).Scan(&terminated); err != nil || !terminated {
+		t.Fatalf("terminate gate session: %v", err)
+	}
+	called := false
+	if err := gate.Do(ctx, func() error { called = true; return nil }); !errors.Is(err, ErrRateGateRecovery) || called {
+		t.Fatalf("lost session allowed another vendor call: %v", err)
+	}
+	var inFlight bool
+	if err := pool.QueryRow(ctx, `SELECT in_flight FROM emquant_rate_state WHERE scope=$1`, gate.Scope).Scan(&inFlight); err != nil || !inFlight {
+		t.Fatalf("lost session did not retain fencing state: %v", err)
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-finished:
+		if err == nil {
+			t.Fatal("lost session reported success")
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}

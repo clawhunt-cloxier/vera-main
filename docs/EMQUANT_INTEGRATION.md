@@ -49,6 +49,6 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 
 开发验证：在 `backend` 执行 `go test -race ./internal/dataservice/emquant`；默认测试使用合成样本。`TestLiveSDK` 和 `TestLiveArchiveS3` 只在显式设置 `EMQUANT_INTEGRATION=1` 及相应环境后运行，使用真实账号会消耗厂商额度，后者会向指定 S3 桶写真实数据。`TestLiveCFN` 还要求 `EMQUANT_LIVE_CFN=1`；当前尚未运行。`TestLiveRuntime` 还要求 `EMQUANT_LIVE_RUNTIME=1`、明确的测试 S3 端点和桶，以及 `EMQUANT_TEST_MIN_INTERVAL`、`EMQUANT_TEST_RATE_COOLDOWN`；测试数据库是独立的，只能使用未被其他应用使用的账号，不能代替共享生产限流。该测试也尚未运行。真实配置只由 secret 管理注入，不提交测试录制结果。
 
-组合单元的自动化测试使用模拟 SDK、测试 HTTP 对象端点与真实临时 PostgreSQL；它证明启动门禁和归档调用的配合，不证明真实账号权限、厂商数据的业务含义或实际部署可用。生产迁移、对象桶权限、账号级配额和应用生命周期仍须单独验证。
+组合单元的自动化测试使用模拟 SDK、测试 HTTP 对象端点与真实临时 PostgreSQL；它证明启动门禁和归档调用的配合，不证明真实账号权限、厂商数据的业务含义或实际部署可用。限流故障测试在模拟厂商调用持续执行时真实终止 PostgreSQL 会话，确认新会话拒绝调用且保留 in-flight 状态；它不覆盖数据库整体恢复、跨主机网络分区或真实厂商断线。生产迁移、对象桶权限、账号级配额和应用生命周期仍须单独验证。
 
 后续还需要实体和行业目录、公告正文及财报版本、完整日线与资金数据集、跨 worker 限流、报告各来源时间展示、生产环境配置以及真实数据加真实模型的端到端验收。工程计划与当前状态见 [接入交接](handoffs/2026-11-12-emquant-probe-codex.md)及 [ADR-0004 草案](https://github.com/clawhunt-cloxier/vera-main/pull/20)。
