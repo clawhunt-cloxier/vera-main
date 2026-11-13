@@ -96,6 +96,30 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	if _, err := runtime.ReadArchive(ctx, ref); err == nil {
 		t.Fatal("corrupt stored object accepted")
 	}
+	days, calendarRef, err := runtime.CollectOpenDates(ctx, "CNSESH", "2026-11-09", "2026-11-10")
+	if err != nil || len(days) != 2 {
+		t.Fatalf("calendar collection: %v", err)
+	}
+	<-archived
+	records, err := runtime.MapCalendarFromArchive(ctx, calendarRef, "CNSESH", "2026-11-09", "2026-11-10")
+	if err != nil || len(records) != 2 || records[0].RawSHA256 != calendarRef.BodySHA256 || records[0].Record.RecordKey != "2026-11-09" {
+		t.Fatalf("calendar archive mapping: %v", err)
+	}
+	if _, err := runtime.MapCalendarFromArchive(ctx, calendarRef, "CNSESZ", "2026-11-09", "2026-11-10"); err == nil {
+		t.Fatal("calendar archive accepted with the wrong market")
+	}
+	statementFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"IncomeStatement_9", "IncomeStatement_61"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 11, Value: 1000.0}, {Type: 11, Value: -20.0}}}}
+	_, statementRef, err := (Collector{Fetcher: statementFetcher, Store: runtime.store}).CollectCSS(ctx, "A.SH", statementIndicators, "ReportDate=20251231,Type=1")
+	if err != nil {
+		t.Fatalf("statement archive: %v", err)
+	}
+	fields, err := runtime.MapStatementFromArchive(ctx, statementRef, "A.SH", "2025-12-31", 1)
+	if err != nil || fields.RevenueCNY == nil || *fields.RevenueCNY != "1000" || fields.NetProfitCNY == nil || *fields.NetProfitCNY != "-20" {
+		t.Fatalf("statement archive mapping: %v", err)
+	}
+	if _, err := runtime.MapStatementFromArchive(ctx, statementRef, "A.SH", "2025-09-30", 1); err == nil {
+		t.Fatal("statement archive accepted with the wrong report period")
+	}
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}

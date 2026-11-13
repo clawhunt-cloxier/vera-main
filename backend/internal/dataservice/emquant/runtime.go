@@ -105,6 +105,32 @@ func (r *Runtime) MapQuoteFromArchive(ctx context.Context, ref ArchiveRef, code 
 	return MapArchivedQuote(body, ref, code, cutoff, policy)
 }
 
+// MapCalendarFromArchive maps only the vendor's returned open dates. The
+// resulting records retain archive lineage and still require the data service
+// to publish them with a market-aware key and an actual database commit time.
+func (r *Runtime) MapCalendarFromArchive(ctx context.Context, ref ArchiveRef, market, from, to string) ([]MappedRecord, error) {
+	body, err := r.ReadArchive(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return MapOpenDates(body, ref, market, from, to)
+}
+
+// MapStatementFromArchive recovers only the two observed monetary fields for
+// the requested period and statement type. It does not establish a filing date,
+// revision, historical point-in-time correctness, or complete fin.statement.
+func (r *Runtime) MapStatementFromArchive(ctx context.Context, ref ArchiveRef, code, period string, statementType int) (StatementFields, error) {
+	body, err := r.ReadArchive(ctx, ref)
+	if err != nil {
+		return StatementFields{}, err
+	}
+	cube, _, err := DecodeArchive(body, ref.BodySHA256)
+	if err != nil {
+		return StatementFields{}, err
+	}
+	return mapStatementFields(cube, ref, code, period, statementType)
+}
+
 // CollectQuote returns a source archive and unnormalized observation. It does
 // not certify that the vendor field is real time or ready for a report.
 func (r *Runtime) CollectQuote(ctx context.Context, codes, indicators, options string) (Quote, ArchiveRef, error) {
