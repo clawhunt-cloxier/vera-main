@@ -167,6 +167,12 @@ type Query struct {
 const recordCols = `r.id, r.dataset_id, r.entity_id, r.record_key, r.record_version, r.period, r.published_at,
 		r.available_at, r.provider_id, r.origin, r.source_tier, coalesce(r.basis,''), r.payload, r.content_hash`
 
+// Financial facts require a known disclosure time. Other sources may not have
+// one, but when supplied it must never be later than the snapshot cutoff.
+const visibleAtCutoff = `r.available_at <= $2
+		AND (r.published_at IS NULL OR r.published_at <= $2)
+		AND (r.dataset_id NOT IN ('fin.statement','fin.segment') OR r.published_at IS NOT NULL)`
+
 func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
 	var r StoredRecord
 	err := row.Scan(&r.ID, &r.DatasetID, &r.EntityID, &r.RecordKey, &r.Version, &r.Period, &r.PublishedAt, &r.AvailableAt,
@@ -177,7 +183,7 @@ func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
 func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
 	sql := `SELECT DISTINCT ON (r.dataset_id, r.logical_key) ` + recordCols + `
 		FROM records r JOIN providers p ON p.id = r.provider_id AND p.enabled
-		WHERE r.dataset_id = ANY($1) AND r.available_at <= $2
+		WHERE r.dataset_id = ANY($1) AND ` + visibleAtCutoff + `
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
 		AND (NOT $6::bool OR p.allow_model_processing)
 		ORDER BY r.dataset_id, r.logical_key, r.record_version DESC`
@@ -212,7 +218,7 @@ func sortRecords(out []StoredRecord) {
 // Coverage reports which datasets have at least one record per entity as of asOf (capability check for plans).
 func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Time) (map[uuid.UUID]map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT r.entity_id, r.dataset_id FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.entity_id = ANY($1) AND r.available_at <= $2 AND p.allow_model_processing`, entities, asOf)
+		WHERE r.entity_id = ANY($1) AND `+visibleAtCutoff+` AND p.allow_model_processing`, entities, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -236,18 +242,20 @@ func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Ti
 func (s *Store) HasGlobal(ctx context.Context, dataset string, asOf time.Time) (bool, error) {
 	var ok bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND r.available_at <= $2 AND p.allow_model_processing)`, dataset, asOf).Scan(&ok)
+		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND `+visibleAtCutoff+` AND p.allow_model_processing)`, dataset, asOf).Scan(&ok)
 	return ok, err
 }
 
-// Snapshot loads the frozen record set.
+// Snapshot loads a frozen research record set, rechecking its cutoff and the
+// provider's current permission for model processing.
 func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredRecord, error) {
 	var asOf time.Time
 	var ids []uuid.UUID
 	if err := s.pool.QueryRow(ctx, `SELECT as_of, record_ids FROM snapshots WHERE hash=$1`, hash).Scan(&asOf, &ids); err != nil {
 		return asOf, nil, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r WHERE r.id = ANY($1)`, ids)
+	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id
+		WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`, ids, asOf)
 	if err != nil {
 		return asOf, nil, err
 	}
@@ -262,19 +270,71 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 	return asOf, out, nil
 }
 
-// Freeze stores the exact record set used by a task and returns its hash.
+// Freeze stores an eligible record set for model research and returns its hash.
 func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (string, error) {
+	// PostgreSQL timestamptz stores microseconds; hash the same instant that
+	// will be persisted rather than discarding subsecond precision or hashing
+	// nanoseconds the database cannot retain.
+	asOf = asOf.UTC().Truncate(time.Microsecond)
 	sorted := slices.Clone(ids)
 	slices.SortFunc(sorted, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
 	sorted = slices.Compact(sorted)
-	h := sha256.New()
-	h.Write([]byte(asOf.UTC().Format(time.RFC3339)))
-	for _, id := range sorted {
-		h.Write(id[:])
+	hash := snapshotDigest(asOf, sorted, time.RFC3339Nano, "vera.snapshot.v2\x00")
+	legacyHash := snapshotDigest(asOf, sorted, time.RFC3339, "")
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT r.id FROM records r JOIN providers p ON p.id=r.provider_id
+			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing FOR SHARE OF r,p`, sorted, asOf)
+		if err != nil {
+			return err
+		}
+		var count int
+		for rows.Next() {
+			count++
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if count != len(sorted) {
+			return fmt.Errorf("snapshot contains missing, temporally ineligible, or currently unpermitted records")
+		}
+		// Preserve a previously frozen legacy snapshot only when its stored
+		// cutoff and exact IDs match; the old hash omitted fractional seconds.
+		var matches bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM snapshots WHERE hash=$1 AND as_of=$2 AND record_ids=$3)`, legacyHash, asOf, sorted).Scan(&matches); err != nil {
+			return err
+		}
+		if matches {
+			hash = legacyHash
+			return nil
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO snapshots(hash,as_of,record_ids) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, hash, asOf, sorted)
+		if err != nil || tag.RowsAffected() == 1 {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM snapshots WHERE hash=$1 AND as_of=$2 AND record_ids=$3)`, hash, asOf, sorted).Scan(&matches); err != nil {
+			return err
+		}
+		if !matches {
+			return fmt.Errorf("snapshot hash conflicts with stored content")
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
-	hash := hex.EncodeToString(h.Sum(nil))
-	_, err := s.pool.Exec(ctx, `INSERT INTO snapshots(hash,as_of,record_ids) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, hash, asOf, sorted)
-	return hash, err
+	return hash, nil
+}
+
+func snapshotDigest(asOf time.Time, sorted []uuid.UUID, layout, domain string) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(domain))
+	_, _ = h.Write([]byte(asOf.UTC().Format(layout)))
+	for _, id := range sorted {
+		_, _ = h.Write(id[:])
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Get loads specific records (evidence lookup).
