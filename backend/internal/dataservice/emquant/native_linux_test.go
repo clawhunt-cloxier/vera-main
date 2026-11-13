@@ -216,6 +216,10 @@ func TestLiveSDK(t *testing.T) {
 	if _, _, err := DecodeArchive(statementStore.body, statementRef.BodySHA256); err != nil {
 		t.Fatal(err)
 	}
+	fields, err := mapStatementFields(snapshot, statementRef, "300059.SZ", "2025-12-31", 1)
+	if err != nil || fields.RevenueCNY == nil || fields.NetProfitCNY == nil {
+		t.Fatalf("statement mapping shape: %v", err)
+	}
 	calendarStore := &testRawStore{ref: "object://test/calendar"}
 	days, calendarRef, err := (Collector{Fetcher: c, Store: calendarStore}).CollectOpenDates(context.Background(), "CNSESH", "2026-11-02", "2026-11-06")
 	if err != nil || len(days) == 0 {
