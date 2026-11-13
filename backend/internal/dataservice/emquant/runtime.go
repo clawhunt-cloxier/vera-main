@@ -2,6 +2,7 @@ package emquant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -37,6 +38,7 @@ func (RuntimeConfig) GoString() string { return "emquant.RuntimeConfig{redacted}
 type Runtime struct {
 	client    *Client
 	collector Collector
+	store     *S3RawStore
 }
 
 // OpenRuntime requires real SDK, S3-compatible archive and persistent rate
@@ -61,7 +63,46 @@ func OpenRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 		}
 		return nil, fmt.Errorf("emquant: open runtime: %w", err)
 	}
-	return &Runtime{client: client, collector: Collector{Fetcher: client, Store: store, Gate: gate}}, nil
+	return &Runtime{client: client, collector: Collector{Fetcher: client, Store: store, Gate: gate}, store: store}, nil
+}
+
+// ReadArchive reads back the exact object addressed by the source reference,
+// checks its hash, format, request binding and observation time, then returns
+// its decoded bytes for deterministic mapping. The data service still needs
+// to authenticate the reference and its publication time against its registry;
+// a hash by itself is not proof of vendor origin or permission.
+func (r *Runtime) ReadArchive(ctx context.Context, ref ArchiveRef) ([]byte, error) {
+	if r == nil || r.store == nil || ref.ReceivedAt.IsZero() || ref.ArchivedAt.IsZero() || ref.ArchivedAt.Before(ref.ReceivedAt) {
+		return nil, errors.New("emquant: missing archive provenance")
+	}
+	key, err := r.store.key(ref.BodySHA256)
+	if err != nil || ref.BodyRef != "s3://"+r.store.bucket+"/"+key {
+		return nil, errors.New("emquant: archive location mismatch")
+	}
+	body, err := r.store.Get(ctx, ref.BodySHA256)
+	if err != nil {
+		return nil, err
+	}
+	_, observed, err := DecodeArchive(body, ref.BodySHA256)
+	if err != nil {
+		return nil, err
+	}
+	var envelope archiveBody
+	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Format != "emquant-sdk-decoded-v2" || envelope.RequestFingerprint != ref.RequestFingerprint || !observed.Equal(ref.ReceivedAt) {
+		return nil, errors.New("emquant: archive provenance mismatch")
+	}
+	return body, nil
+}
+
+// MapQuoteFromArchive rereads the archived response before applying a caller's
+// proposed mapping policy. Policy references must be independently validated
+// by the data service before any result may be published or called real time.
+func (r *Runtime) MapQuoteFromArchive(ctx context.Context, ref ArchiveRef, code string, cutoff time.Time, policy QuoteMappingPolicy) (MappedQuote, error) {
+	body, err := r.ReadArchive(ctx, ref)
+	if err != nil {
+		return MappedQuote{}, err
+	}
+	return MapArchivedQuote(body, ref, code, cutoff, policy)
 }
 
 // CollectQuote returns a source archive and unnormalized observation. It does

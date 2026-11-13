@@ -3,6 +3,7 @@
 package emquant
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,7 +28,15 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 		t.Fatalf("compile fake library: %v: %s", err, output)
 	}
 	archived := make(chan []byte, 1)
+	var mu sync.Mutex
+	var object []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			mu.Lock()
+			defer mu.Unlock()
+			_, _ = w.Write(object)
+			return
+		}
 		if r.Method != http.MethodPut || r.Header.Get("If-None-Match") != "*" {
 			http.Error(w, "unexpected request", http.StatusBadRequest)
 			return
@@ -36,6 +46,9 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		mu.Lock()
+		object = append([]byte(nil), body...)
+		mu.Unlock()
 		archived <- body
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -63,6 +76,25 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	body := <-archived
 	if replay, _, err := DecodeArchive(body, ref.BodySHA256); err != nil || len(replay.Values) != 8 {
 		t.Fatalf("runtime archive replay: %v", err)
+	}
+	if replay, err := runtime.ReadArchive(ctx, ref); err != nil || !bytes.Equal(replay, body) {
+		t.Fatalf("runtime object read: %v", err)
+	}
+	bad := ref
+	bad.BodyRef = "s3://test-bucket/wrong-object"
+	if _, err := runtime.ReadArchive(ctx, bad); err == nil {
+		t.Fatal("wrong object reference accepted")
+	}
+	bad = ref
+	bad.RequestFingerprint = strings.Repeat("0", 64)
+	if _, err := runtime.ReadArchive(ctx, bad); err == nil {
+		t.Fatal("wrong request fingerprint accepted")
+	}
+	mu.Lock()
+	object = []byte("corrupt")
+	mu.Unlock()
+	if _, err := runtime.ReadArchive(ctx, ref); err == nil {
+		t.Fatal("corrupt stored object accepted")
 	}
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
