@@ -636,6 +636,7 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 		s := facts.NewSheet(t.ID, t.Epoch)
 		bl := &builder{S: s, B: b, basis: e.Basis}
 		sk.Compute(bl, t.Params)
+		s.Finalize()
 		if s.Suspicious > 0 {
 			s.Limit(fmt.Sprintf("有 %d 段原文或新闻含疑似指令或评级内容，已标记为可疑并排除在写作材料之外。", s.Suspicious))
 		}
