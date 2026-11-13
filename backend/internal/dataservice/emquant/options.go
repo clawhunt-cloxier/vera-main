@@ -5,6 +5,23 @@ import (
 	"strings"
 )
 
+// The SDK documents a maximum of 64 indicators per CSD/CSS and quote call.
+func validateIndicators(indicators string) error {
+	parts := strings.Split(indicators, ",")
+	if len(parts) > 64 {
+		return errors.New("emquant: too many indicators")
+	}
+	seen := make(map[string]bool, len(parts))
+	for _, part := range parts {
+		name := strings.ToUpper(strings.TrimSpace(part))
+		if name == "" || strings.ContainsAny(name, "\x00\r\n;=") || seen[name] {
+			return errors.New("emquant: invalid or duplicate indicator")
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
 // validateOptions rejects SDK modes that turn missing observations into
 // synthetic values, and prevents passing credentials as query options.
 // Further per-dataset allowlists and methodology checks belong to mappings.

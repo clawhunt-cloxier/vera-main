@@ -125,16 +125,13 @@ func TestLiveSDK(t *testing.T) {
 	if _, err := Open(os.Getenv("EMQUANT_LIBRARY"), "x", "y"); err == nil {
 		t.Fatal("second session was accepted")
 	}
-	cube, err := c.CSD("300059.SZ", "CLOSE", "2026-11-02", "2026-11-02", "")
+	liquidityStore := &testRawStore{ref: "object://test/daily"}
+	liquidity, err := (Collector{Fetcher: c, Store: liquidityStore}).CollectDailyLiquidity(context.Background(), "300059.SZ", "2026-11-02", "2026-11-02")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cube.Codes) != 1 || len(cube.Indicators) != 1 || len(cube.Dates) != 1 {
-		t.Fatal("unexpected result dimensions")
-	}
-	value, err := cube.At(0, 0, 0)
-	if err != nil || value.Type != 11 {
-		t.Fatalf("unexpected cell type %d, error %v", value.Type, err)
+	if len(liquidity) != 1 || liquidity[0].VolumeShares == "" || liquidity[0].AmountCNY == "" || liquidity[0].TurnoverRatio == nil {
+		t.Fatal("unexpected daily liquidity response")
 	}
 	status, err := c.CSD("300059.SZ", "TRADESTATUS", "2026-11-02", "2026-11-02", "Period=1")
 	if err != nil {
@@ -151,14 +148,21 @@ func TestLiveSDK(t *testing.T) {
 	if !strings.ContainsFunc(text, func(r rune) bool { return unicode.Is(unicode.Han, r) }) {
 		t.Fatal("status response did not contain Chinese text")
 	}
-	snapshot, err := c.CSS("300059.SZ,000002.SZ", "OPEN,CLOSE", "TradeDate=20261102,AdjustFlag=1")
+	statementStore := &testRawStore{ref: "object://test/statement"}
+	snapshot, statementRef, err := (Collector{Fetcher: c, Store: statementStore}).CollectCSS(context.Background(), "300059.SZ", "IncomeStatement_9,IncomeStatement_61", "ReportDate=20251231,Type=1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Codes) != 2 || len(snapshot.Indicators) != 2 || len(snapshot.Dates) != 1 {
+	if len(snapshot.Codes) != 1 || len(snapshot.Indicators) != 2 || len(snapshot.Dates) != 1 {
 		t.Fatal("unexpected CSS dimensions")
 	}
-	if _, err := snapshot.At(1, 1, 0); err != nil {
+	for i := range snapshot.Indicators {
+		cell, err := snapshot.At(0, i, 0)
+		if err != nil || (cell.Type != 10 && cell.Type != 11) {
+			t.Fatalf("statement field %d has unsupported type %d: %v", i, cell.Type, err)
+		}
+	}
+	if _, _, err := DecodeArchive(statementStore.body, statementRef.BodySHA256); err != nil {
 		t.Fatal(err)
 	}
 	calendarStore := &testRawStore{ref: "object://test/calendar"}

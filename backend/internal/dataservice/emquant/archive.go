@@ -51,6 +51,11 @@ type CalendarFetcher interface {
 	TradeDates(from, to, options string) (Cube, error)
 }
 
+// CrossSectionFetcher exposes report-period and cross-sectional queries.
+type CrossSectionFetcher interface {
+	CSS(codes, indicators, options string) (Cube, error)
+}
+
 type Collector struct {
 	Fetcher Fetcher
 	Store   RawStore
@@ -208,11 +213,48 @@ func (c Collector) CollectCSD(ctx context.Context, codes, indicators, from, to, 
 	if err := ctx.Err(); err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
+	if err := validateIndicators(indicators); err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	if err := validateOptions(options); err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
 	cube, err := c.Fetcher.CSD(codes, indicators, from, to, options)
 	if err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
 	ref, err := c.persist(ctx, request{Method: "csd", Codes: codes, Indicators: indicators, From: from, To: to, Options: options}, cube, time.Now())
+	if err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	return cube, ref, nil
+}
+
+// CollectCSS preserves report-period requests and their SDK-decoded responses
+// before mapping. A successful response does not establish disclosure date,
+// revision, unit or permission to use a particular statement item.
+func (c Collector) CollectCSS(ctx context.Context, codes, indicators, options string) (Cube, ArchiveRef, error) {
+	f, ok := c.Fetcher.(CrossSectionFetcher)
+	if !ok || c.Store == nil {
+		return Cube{}, ArchiveRef{}, errors.New("emquant: cross-section fetcher and raw store are required")
+	}
+	if err := ctx.Err(); err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	if codes == "" || indicators == "" {
+		return Cube{}, ArchiveRef{}, errors.New("emquant: incomplete query")
+	}
+	if err := validateIndicators(indicators); err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	if err := validateOptions(options); err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	cube, err := f.CSS(codes, indicators, options)
+	if err != nil {
+		return Cube{}, ArchiveRef{}, err
+	}
+	ref, err := c.persist(ctx, request{Method: "css", Codes: codes, Indicators: indicators, Options: options}, cube, time.Now())
 	if err != nil {
 		return Cube{}, ArchiveRef{}, err
 	}
@@ -225,6 +267,12 @@ func (c Collector) CollectQuote(ctx context.Context, codes, indicators, options 
 		return Quote{}, ArchiveRef{}, errors.New("emquant: fetcher and raw store are required")
 	}
 	if err := ctx.Err(); err != nil {
+		return Quote{}, ArchiveRef{}, err
+	}
+	if err := validateIndicators(indicators); err != nil {
+		return Quote{}, ArchiveRef{}, err
+	}
+	if err := validateOptions(options); err != nil {
 		return Quote{}, ArchiveRef{}, err
 	}
 	quote, err := c.Fetcher.QuoteSnapshot(codes, indicators, options)

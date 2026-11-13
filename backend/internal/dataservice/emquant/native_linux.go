@@ -172,6 +172,11 @@ func (c *Client) query(mode int, codes, indicators, from, to, options string) (c
 	if (mode != 3 && (codes == "" || indicators == "")) || ((mode == 0 || mode == 3) && (from == "" || to == "")) {
 		return Cube{}, errors.New("emquant: incomplete query")
 	}
+	if mode != 3 {
+		if err := validateIndicators(indicators); err != nil {
+			return Cube{}, err
+		}
+	}
 	if err := validateOptions(options); err != nil {
 		return Cube{}, err
 	}

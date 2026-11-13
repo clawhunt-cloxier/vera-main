@@ -19,6 +19,7 @@ type testFetcher struct {
 func (f *testFetcher) CSD(_, _, _, _, _ string) (Cube, error)      { f.calls++; return f.cube, f.err }
 func (f *testFetcher) QuoteSnapshot(_, _, _ string) (Quote, error) { f.calls++; return f.quote, f.err }
 func (f *testFetcher) TradeDates(_, _, _ string) (Cube, error)     { f.calls++; return f.cube, f.err }
+func (f *testFetcher) CSS(_, _, _ string) (Cube, error)            { f.calls++; return f.cube, f.err }
 
 type testRawStore struct {
 	hash  string
@@ -39,7 +40,7 @@ func TestCollectorArchivesBeforeReturning(t *testing.T) {
 	cube := Cube{Codes: []string{"A"}, Indicators: []string{"X"}, Dates: []string{"2026-11-12"}, Values: []Cell{{Type: 11, Value: 12.5}}}
 	f := &testFetcher{cube: cube}
 	s := &testRawStore{ref: "object://test/1"}
-	got, ref, err := (Collector{Fetcher: f, Store: s}).CollectCSD(context.Background(), "A", "X", "2026-11-12", "2026-11-12", "private-option")
+	got, ref, err := (Collector{Fetcher: f, Store: s}).CollectCSD(context.Background(), "A", "X", "2026-11-12", "2026-11-12", "Other=private-option")
 	if err != nil || len(got.Values) != 1 || s.calls != 1 || ref.BodyRef != s.ref || ref.BodySHA256 != digest(s.body) || ref.BodySHA256 != s.hash || len(ref.RequestFingerprint) != 64 {
 		t.Fatalf("archive failed: ref=%+v err=%v", ref, err)
 	}
@@ -50,7 +51,7 @@ func TestCollectorArchivesBeforeReturning(t *testing.T) {
 	if err := json.Unmarshal(s.body, &body); err != nil || body.Format != "emquant-sdk-decoded-v2" || body.RequestFingerprint != ref.RequestFingerprint || body.ReceivedAt.IsZero() {
 		t.Fatalf("invalid archived body: %v", err)
 	}
-	_, ref2, err := (Collector{Fetcher: f, Store: s}).CollectCSD(context.Background(), "A", "X", "2026-11-12", "2026-11-12", "different-option")
+	_, ref2, err := (Collector{Fetcher: f, Store: s}).CollectCSD(context.Background(), "A", "X", "2026-11-12", "2026-11-12", "Other=different-option")
 	if err != nil || ref.RequestFingerprint == ref2.RequestFingerprint {
 		t.Fatalf("request fingerprint did not change: %v", err)
 	}
@@ -78,6 +79,28 @@ func TestCollectorFailsClosed(t *testing.T) {
 	calls = f.calls
 	if _, _, err := c.CollectCSD(ctx, "A", "X", "D1", "D2", ""); !errors.Is(err, context.Canceled) || f.calls != calls {
 		t.Fatal("cancelled request reached SDK")
+	}
+}
+
+func TestCollectCSSArchivesAndRejectsFillOptions(t *testing.T) {
+	f := &testFetcher{cube: Cube{Codes: []string{"A"}, Indicators: []string{"X"}, Dates: []string{"2025-12-31"}, Values: []Cell{{Type: 11, Value: 123.5}}}}
+	s := &testRawStore{ref: "object://test/css"}
+	c := Collector{Fetcher: f, Store: s}
+	cube, ref, err := c.CollectCSS(context.Background(), "A", "X", "ReportDate=20251231,Type=1")
+	if err != nil || len(cube.Values) != 1 || ref.BodySHA256 != digest(s.body) {
+		t.Fatalf("CSS archive: %v", err)
+	}
+	req, _ := json.Marshal(request{Method: "css", Codes: "A", Indicators: "X", Options: "ReportDate=20251231,Type=1"})
+	if ref.RequestFingerprint != digest(req) {
+		t.Fatal("CSS fingerprint mismatch")
+	}
+	before := f.calls
+	if _, _, err = c.CollectCSS(context.Background(), "A", "X", "FillData=1"); err == nil || f.calls != before {
+		t.Fatal("unsafe option reached fetcher")
+	}
+	s.err = errors.New("store unavailable")
+	if cube, _, err = c.CollectCSS(context.Background(), "A", "X", "ReportDate=20251231,Type=1"); err == nil || len(cube.Values) != 0 {
+		t.Fatal("failed archive exposed data")
 	}
 }
 
