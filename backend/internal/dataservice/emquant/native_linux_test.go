@@ -130,6 +130,31 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	}
 }
 
+// TestLiveSecurity is separate because response formats and access to these
+// fields are unverified. It never logs returned values.
+func TestLiveSecurity(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_SECURITY") != "1" {
+		t.Skip("live vendor security test not requested")
+	}
+	c, err := Open(os.Getenv("EMQUANT_LIBRARY"), os.Getenv("EMQUANT_USER"), os.Getenv("EMQUANT_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	store := &testRawStore{ref: "object://test/security-live"}
+	result, err := (Collector{Fetcher: c, Store: store}).CollectSecurityBasics(context.Background(), "300059.SZ")
+	if err != nil || result.ShortName == "" || result.FirstListingDate == "" {
+		t.Fatalf("security response: %v", err)
+	}
+	if _, _, err := DecodeArchive(store.body, result.Source.BodySHA256); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestLiveIndustry is separate because product coverage and response shape
 // have not been verified. It never logs response contents.
 func TestLiveIndustry(t *testing.T) {

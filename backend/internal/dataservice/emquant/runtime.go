@@ -145,6 +145,21 @@ func (r *Runtime) MapIndustryFromArchive(ctx context.Context, ref ArchiveRef, co
 	return mapIndustryLevel(cube, ref, code, asOf, level)
 }
 
+// MapSecurityFromArchive recovers partial security basics from the exact
+// archived response; it does not establish the security's trading status or
+// the historical validity of its short name.
+func (r *Runtime) MapSecurityFromArchive(ctx context.Context, ref ArchiveRef, code string) (SecurityBasics, error) {
+	body, err := r.ReadArchive(ctx, ref)
+	if err != nil {
+		return SecurityBasics{}, err
+	}
+	cube, _, err := DecodeArchive(body, ref.BodySHA256)
+	if err != nil {
+		return SecurityBasics{}, err
+	}
+	return mapSecurityBasics(cube, ref, code)
+}
+
 // CollectQuote returns a source archive and unnormalized observation. It does
 // not certify that the vendor field is real time or ready for a report.
 func (r *Runtime) CollectQuote(ctx context.Context, codes, indicators, options string) (Quote, ArchiveRef, error) {
@@ -189,6 +204,13 @@ func (r *Runtime) CollectIndustryLevel(ctx context.Context, code, asOf string, l
 		return IndustryObservation{}, errors.New("emquant: runtime unavailable")
 	}
 	return r.collector.CollectIndustryLevel(ctx, code, asOf, level)
+}
+
+func (r *Runtime) CollectSecurityBasics(ctx context.Context, code string) (SecurityBasics, error) {
+	if r == nil || r.client == nil {
+		return SecurityBasics{}, errors.New("emquant: runtime unavailable")
+	}
+	return r.collector.CollectSecurityBasics(ctx, code)
 }
 
 func (r *Runtime) CollectCFN(ctx context.Context, codes, content string, mode int, options string) (Cube, ArchiveRef, error) {

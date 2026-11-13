@@ -133,6 +133,19 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	if _, err := runtime.MapIndustryFromArchive(ctx, industry.Source, "A.SH", "2025-12-31", 1); err == nil {
 		t.Fatal("industry archive accepted with the wrong level")
 	}
+	<-archived
+	securityFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"NAME", "LISTDATE", "DELISTDATE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "模拟证券"}, {Type: 13, Value: "2010-01-02"}, {Type: 0}}}}
+	security, err := (Collector{Fetcher: securityFetcher, Store: runtime.store}).CollectSecurityBasics(ctx, "A.SH")
+	if err != nil {
+		t.Fatalf("security archive: %v", err)
+	}
+	replayedSecurity, err := runtime.MapSecurityFromArchive(ctx, security.Source, "A.SH")
+	if err != nil || replayedSecurity.ShortName != "模拟证券" || replayedSecurity.FirstListingDate != "2010-01-02" || replayedSecurity.DelistingDate != nil {
+		t.Fatalf("security archive mapping: %v", err)
+	}
+	if _, err := runtime.MapSecurityFromArchive(ctx, security.Source, "B.SZ"); err == nil {
+		t.Fatal("security archive accepted with the wrong security")
+	}
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}
