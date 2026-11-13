@@ -299,6 +299,7 @@ func TestAPIFlow(t *testing.T) {
 	k.check(t, resp("/api/v1/reports", "get", "200"), b)
 	// Evidence, calculation and series.
 	seenCalc := false
+	var calcID, seriesID string
 	for _, cl := range rep.Claims {
 		b = c.json("GET", "/api/v1/evidence/"+cl.Ev[0].String(), nil, 200, nil)
 		k.check(t, schema("Evidence"), b)
@@ -306,6 +307,7 @@ func TestAPIFlow(t *testing.T) {
 			b = c.json("GET", "/api/v1/calculations/"+cl.Calcs[0].String(), nil, 200, nil)
 			k.check(t, schema("Calculation"), b)
 			seenCalc = true
+			calcID = cl.Calcs[0].String()
 		}
 	}
 	if !seenCalc {
@@ -316,6 +318,7 @@ func TestAPIFlow(t *testing.T) {
 		for _, ch := range s.Charts {
 			b = c.json("GET", rp+"/series/"+ch.SeriesID, nil, 200, nil)
 			k.check(t, schema("ChartSeries"), b)
+			seriesID = ch.SeriesID
 			charts++
 		}
 	}
@@ -368,6 +371,32 @@ func TestAPIFlow(t *testing.T) {
 	bob.json("GET", "/api/v1/research-tasks/"+task.ID.String(), nil, 404, nil)
 	bob.json("GET", "/api/v1/evidence/"+rep.Claims[0].Ev[0].String(), nil, 404, nil)
 	bob.json("DELETE", "/api/v1/watchlist/"+wi.ID.String(), nil, 404, nil)
+	// V01: every other private endpoint is workspace-scoped too.
+	bob.json("GET", "/api/v1/research-plans/"+pr.Plan.ID.String(), nil, 404, nil)
+	bob.json("GET", "/api/v1/calculations/"+calcID, nil, 404, nil)
+	bob.json("GET", rp+"/series/"+seriesID, nil, 404, nil)
+	bob.json("POST", rp+"/feedback", map[string]any{"kind": "useful", "claim_ref": rep.Claims[0].Ref}, 404, nil)
+	bob.json("POST", "/api/v1/research-tasks/"+task.ID.String()+"/cancel", map[string]any{"expected_revision": 1}, 404, nil)
+	bob.json("PATCH", "/api/v1/watchlist/"+wi.ID.String(), map[string]any{"note": "x", "expected_version": wi.Version + 1}, 404, nil)
+	for _, lp := range []string{"/api/v1/research-tasks", "/api/v1/reports", "/api/v1/watchlist"} {
+		var list struct {
+			Items []any `json:"items"`
+		}
+		bob.json("GET", lp, nil, 200, &list)
+		if len(list.Items) != 0 {
+			t.Fatalf("%s leaks %d items across workspaces", lp, len(list.Items))
+		}
+	}
+	// Replaying alice's Idempotency-Key from bob's workspace must not return alice's task.
+	if code, b, h := bob.do("POST", "/api/v1/research-tasks", body, key); code == 202 || h.Get("Idempotent-Replayed") == "true" ||
+		strings.Contains(string(b), task.ID.String()) {
+		t.Fatalf("idempotency key crossed workspaces: %d %s", code, clip(string(b), 300))
+	}
+	var aliceRows int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM feedback WHERE workspace_id=$1`, ws).Scan(&aliceRows)
+	if aliceRows != 1 {
+		t.Fatalf("feedback rows in alice's workspace: %d", aliceRows)
+	}
 	c.json("DELETE", "/api/v1/watchlist/"+wi.ID.String(), nil, 204, nil)
 
 	// Signed-out requests are refused.
