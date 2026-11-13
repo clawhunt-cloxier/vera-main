@@ -1,5 +1,5 @@
 {
-  "version": "1",
+  "version": "2",
   "description": "Unified dataset field dictionary (DATA_SERVICE §3–4). Envelope fields (record_id, entity_id, published_at, available_at, provider_id, source_tier, ...) are common to every dataset and not repeated here. Monetary values are CNY yuan; ratios are decimal fractions (0.1234 = 12.34%).",
   "units": {
     "CNY": "人民币元",
@@ -202,6 +202,39 @@
           "required": true,
           "description": "是否交易日"
         }
+      ]
+    },
+    {
+      "id": "mkt.intraday_quote",
+      "title": "个股盘中行情快照",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["entity_id", "event_at", "provider_id"],
+      "mvp": true,
+      "fields": [
+        {"name": "event_at", "type": "datetime", "unit": "none", "required": true, "description": "行情事件时间，RFC3339 含时区；须验证厂商含义"},
+        {"name": "received_at", "type": "datetime", "unit": "none", "required": true, "description": "系统接收时间，RFC3339 含时区"},
+        {"name": "last_price", "type": "decimal", "unit": "CNY", "required": true, "description": "最近成交价，元；须确认厂商口径"},
+        {"name": "market_status", "type": "enum", "values": ["continuous", "suspended", "closed", "unknown"], "unit": "none", "required": true, "description": "交易状态；厂商枚举未确认时不得推断"},
+        {"name": "latency_mode", "type": "enum", "values": ["real_time", "delayed", "unknown"], "unit": "none", "required": true, "description": "经授权及能力核实的延迟性质；未知不得标为实时"},
+        {"name": "delay_ms", "type": "integer", "unit": "none", "required": false, "description": "已确认的延迟毫秒数；未知不填"}
+      ]
+    },
+    {
+      "id": "mkt.intraday_index_quote",
+      "title": "指数盘中行情快照",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": ["index_code", "event_at", "provider_id"],
+      "mvp": true,
+      "fields": [
+        {"name": "index_code", "type": "string", "unit": "none", "required": true, "description": "指数代码，须明确基准和市场"},
+        {"name": "event_at", "type": "datetime", "unit": "none", "required": true, "description": "行情事件时间，RFC3339 含时区；须验证厂商含义"},
+        {"name": "received_at", "type": "datetime", "unit": "none", "required": true, "description": "系统接收时间，RFC3339 含时区"},
+        {"name": "last_value", "type": "decimal", "unit": "index_point", "required": true, "description": "指数最新点位；须确认厂商口径"},
+        {"name": "market_status", "type": "enum", "values": ["continuous", "suspended", "closed", "unknown"], "unit": "none", "required": true, "description": "交易状态；厂商枚举未确认时不得推断"},
+        {"name": "latency_mode", "type": "enum", "values": ["real_time", "delayed", "unknown"], "unit": "none", "required": true, "description": "经授权及能力核实的延迟性质；未知不得标为实时"},
+        {"name": "delay_ms", "type": "integer", "unit": "none", "required": false, "description": "已确认的延迟毫秒数；未知不填"}
       ]
     },
     {

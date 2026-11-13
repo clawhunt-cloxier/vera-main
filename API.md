@@ -9,6 +9,7 @@
 - 服务端从会话确定 workspace，客户端不提交 workspace 或租户 ID。访问不属于本 workspace 的资源一律返回 404。
 - 业务 JSON 响应带 `request_id`（健康检查和登录重定向除外）。日志不记录报告正文、密钥和 cookie。
 - 时间用 RFC3339；十进制数值用字符串；ID 为服务端生成的 UUID。
+- ADR-0004 的 OpenAPI 0.4 草案增加计划 `snapshot_mode`、任务/报告 `snapshot_as_of`、证据事件/接收时间与报告 `source_freshness`。`collect_latest` 的计划 `as_of` 是预览时点，任务冻结前 `snapshot_as_of=null`，冻结后与快照不可变绑定；既有请求及任务继续使用 `fixed_legacy` 原语义。草案字段在迁移和服务实现完成前不可作为已提供的功能；客户端和服务端需协调升级，不能要求旧客户端理解新增字段。
 - 需要幂等的写请求带 `Idempotency-Key`（1–128 字符）。同一 workspace、方法、规范化路由和键：请求哈希相同则返回原响应，不同则返回 409。幂等记录保存 30 天。
 - 列表：`page_size` 默认 20、上限 100；不透明游标，按 `created_at` + `id` 稳定排序。
 

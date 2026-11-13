@@ -109,7 +109,7 @@ for ds in cat['datasets']:
     assert len(names) == len(set(names)), ds['id']
     assert ds['default_tier'] in ('L1', 'L2', 'L3', 'L4'), ds['id']
     for g in ds['grain']:
-        assert g in names or g == 'entity_id', f"{ds['id']}: grain {g}"
+        assert g in names or g in ('entity_id', 'provider_id'), f"{ds['id']}: grain {g}"
     for f in ds['fields']:
         assert f['unit'] in units, f"{ds['id']}.{f['name']}: unit"
         assert f['type'] in ('string', 'text', 'date', 'datetime', 'decimal', 'integer', 'boolean', 'enum', 'enum_ref'), f['name']
