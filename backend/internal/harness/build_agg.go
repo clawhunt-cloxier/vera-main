@@ -3,6 +3,7 @@ package harness
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -104,7 +105,12 @@ func (b *builder) composition(ind dataservice.EntityRow, members []uuid.UUID, gr
 	}
 	total := facts.Sum("F27.event_sum", "CNY", all)
 	b.S.Computed(group, subj, "成分股总市值合计", day, total, ind.Code+"|mv")
-	slices.SortFunc(mvs, func(a, c mv) int { return c.in.Value.Cmp(a.in.Value) })
+	slices.SortFunc(mvs, func(a, c mv) int {
+		if d := c.in.Value.Cmp(a.in.Value); d != 0 {
+			return d
+		}
+		return strings.Compare(b.B.Entities[a.id].Code, b.B.Entities[c.id].Code)
+	})
 	t := facts.Table{Title: subj + " 成分股市值排名", Columns: []string{"排名", "公司", "总市值（亿元）", "占比"}}
 	for i, m := range mvs {
 		if i >= 10 {
@@ -176,21 +182,27 @@ func (b *builder) industryFin(ind dataservice.EntityRow, members []uuid.UUID, fi
 	}
 	b.S.Value(finGroup, subj, "归母净利润为正的成分股数量", periodLabel(fy), facts.KindComputed, "", "count:家", decimal.NewFromInt(int64(profitable)), idsOf(revAll)...)
 	// concentration
-	slices.SortFunc(mfs, func(a, c memberFin) int { return c.rev.Value.Cmp(a.rev.Value) })
-	var top5 []facts.Input
-	for i := 0; i < len(mfs) && i < 5; i++ {
-		top5 = append(top5, *mfs[i].rev)
-	}
+	slices.SortFunc(mfs, func(a, c memberFin) int {
+		if d := c.rev.Value.Cmp(a.rev.Value); d != 0 {
+			return d
+		}
+		return strings.Compare(b.B.Entities[a.id].Code, b.B.Entities[c.id].Code)
+	})
 	if len(mfs) > 5 {
+		ranked := make([]facts.Ranked, len(mfs))
+		for i, m := range mfs {
+			ranked[i] = facts.Ranked{Key: b.B.Entities[m.id].Code, Input: *m.rev}
+		}
+		top, _ := facts.TopN(ranked, 5, "CNY")
 		cr5 := facts.Derived("F22.share_of_total", "ratio", revAll, func() (*decimal.Decimal, string) {
-			t, s := decimal.Zero, decimal.Zero
+			t := decimal.Zero
 			for _, x := range revAll {
 				t = t.Add(x.Value)
 			}
-			for _, x := range top5 {
-				s = s.Add(x.Value)
+			if !t.IsPositive() || !top.OK() {
+				return nil, "营业收入合计不为正"
 			}
-			v := s.Div(t)
+			v := top.Result.Div(t)
 			return &v, ""
 		})
 		b.S.Computed(concGroup, subj, "营业收入前 5 名集中度 CR5", periodLabel(fy), cr5, ind.Code+"|cr5")
@@ -343,7 +355,12 @@ func (b *builder) groupMargin(label, code string, members []uuid.UUID, n int, gr
 	}), code+"|mchg")
 	f.Change = true
 	b.S.Value(group, label, "纳入统计的融资标的数量", wl, facts.KindComputed, "", "count:家", decimal.NewFromInt(int64(len(ends))), idsOf(ends)...)
-	slices.SortFunc(movers, func(a, c mv) int { return c.chg.Result.Cmp(*a.chg.Result) })
+	slices.SortFunc(movers, func(a, c mv) int {
+		if d := c.chg.Result.Cmp(*a.chg.Result); d != 0 {
+			return d
+		}
+		return strings.Compare(b.B.Entities[a.id].Code, b.B.Entities[c.id].Code)
+	})
 	for i := 0; i < len(movers) && i < 3; i++ {
 		m := movers[i]
 		b.S.Computed(group, b.name(m.id), "融资余额变化（净增排名第 "+fmt.Sprint(i+1)+" 位）", wl, m.chg, code+"|mtop|"+b.B.Entities[m.id].Code)

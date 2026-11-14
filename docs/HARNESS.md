@@ -117,6 +117,21 @@ type SectionSpec struct {
 - 文本类事实（年报经营讨论、公告、电话会议纪要）以段落为单位，每段一个 fact_id，截断长度在技能中配置；超长内容由选证规则挑选，不让模型通读全文。
 - `vendor_derived` 事实必须带 `basis`，写作时必须说明口径（见 §7.3 规则 R-07）。
 
+### 5.1 公式库
+
+公式定义在技能规格中：F01–F18 见 [stock-analysis §4](skills/stock-analysis.md)，F20–F25 见 [capital-flow](skills/capital-flow.md)。下列公式由多个技能共用，统一在此定义：
+
+| ID | 计算 | 适用条件 |
+| --- | --- | --- |
+| F19 net_margin | 归母净利润 / 营业收入 | 营业收入 > 0 |
+| F25 top_n | 按数值降序（并列时按证券代码升序）取前 N 个成分；结果为前 N 个数值之和，成分列表供表格与 F22 使用 | 有效成分 ≥ N |
+| F26 interest_bearing_debt | 短期借款、长期借款、应付债券等有息负债科目求和 | 各科目同一报告期 |
+| F27 event_sum | 同口径事件或成分数值求和（成交额、市值、营业收入等）| 同一口径与时间窗 |
+| F28 aggregate_yoy | 成分合计本期 / 同一成分集合上年同期合计 − 1 | 上年同期合计 > 0 |
+
+- 所有公式使用 Decimal，输入不提前舍入，只在展示时舍入（四舍五入，远离零）。公式语义变化时提升 `formula_version`（当前 1.1.0），报告冻结该版本。
+- 事实 ID（`F` + 序号）与公式 ID（`F12.period_return`）共用 `F` 前缀但格式不同：事实 ID 不含点号，只在单个任务内有效。
+
 ## 6. 章节写作
 
 ### 6.1 提示词结构
@@ -285,13 +300,15 @@ DELIVERING 只能由交付步骤在一个事务中完成：锁任务行，校验
 
 ### 10.2 步骤
 
-任务内每个可重试单元是一个步骤（`task_steps`）：`collect`、`compute`、`write:<section>`、`verify:<section>`、`summary`、`render`、`deliver`。
+任务内每个可重试单元是一个步骤（`task_steps`）：`collect`、`compute`、`write:<section>`、`verify:<section>`、`summary`、`verify:summary`、`render`、`deliver`。
 
 步骤状态：PENDING → RUNNING → SUCCEEDED | FAILED | SKIPPED。唯一键 `(task_id, epoch, step_key, input_hash)`。
 
-- 步骤开始时以条件更新领取（`status=PENDING` 或租约过期），写入租约到期时间。
+- 步骤开始时以条件更新领取（`status` 为 PENDING/FAILED/SKIPPED，或 RUNNING 且租约过期），`attempt` 加一并写入租约到期时间 `lease_until`（默认 2 分钟）；执行中每 30 秒续租。租约未过期的步骤不会被第二个 Worker 执行，该次运行返回“步骤忙”，River 作业延后重试（不消耗重试次数）。
+- 结果只在 `attempt` 仍匹配时写入（防护令牌）：租约过期被接管的 Worker 恢复后不能覆盖结果，改用接管者已保存的结果。
 - 步骤成功时保存输出引用与哈希；重复执行同一步骤（Worker 重启、River 重投）先读已有结果，不再调用模型。
 - 模型调用在步骤内部，通过 `model_calls` 表记录每次尝试；已有成功的调用记录时直接复用。
+- 核心要点（S1）由模型从已核验结论改写；逐字引用单条结论的要点无需再核，其余要点由核验器（`verify:summary`）逐条判断，只保留 supported；核验不可用或保留不足 3 条时，改用逐字引用已核验结论的确定性摘要。
 - 前端进度来自步骤列表：显示章节名称和状态，不显示百分比，不显示模型思维内容。
 
 ### 10.3 River 作业
