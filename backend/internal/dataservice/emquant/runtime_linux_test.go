@@ -121,6 +121,19 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 		t.Fatal("statement archive accepted with the wrong report period")
 	}
 	<-archived
+	marginFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"TRADINGBALANCEM", "PURCHASEWITHBORROWEDMONEYM", "REPAYMENTTOBROKERM", "SECLENDINGBALANCEVOLUMEM", "SECLENDINGBALANCEM"}, Dates: []string{"2026-11-02"}, Values: []Cell{{Type: 8, Value: int64(123)}, {Type: 0}, {Type: 0}, {Type: 0}, {Type: 0}}}}
+	margin, err := (Collector{Fetcher: marginFetcher, Store: runtime.store}).CollectMarginObservations(ctx, "A.SH", "2026-11-02", "2026-11-03")
+	if err != nil {
+		t.Fatalf("margin archive: %v", err)
+	}
+	replayedMargin, err := runtime.MapMarginFromArchive(ctx, margin.Source, "A.SH", "2026-11-02", "2026-11-03")
+	if err != nil || len(replayedMargin.Rows) != 1 || replayedMargin.Rows[0].Cells["TRADINGBALANCEM"].Value != int64(123) {
+		t.Fatalf("margin replay: %v", err)
+	}
+	if _, err := runtime.MapMarginFromArchive(ctx, margin.Source, "A.SH", "2026-11-02", "2026-11-04"); err == nil {
+		t.Fatal("margin archive accepted with wrong range")
+	}
+	<-archived
 	disclosureFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"STMTACTDATE", "CORRECTANNCNUM", "CORRECTANNCDATE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "2026-04-01"}, {Type: 8, Value: int64(1)}, {Type: 0}}}}
 	disclosure, err := (Collector{Fetcher: disclosureFetcher, Store: runtime.store}).CollectDisclosureObservation(ctx, "A.SH", "2025-12-31")
 	if err != nil {

@@ -186,6 +186,31 @@ func (r *Runtime) MapIndustryFromArchive(ctx context.Context, ref ArchiveRef, co
 	return mapIndustryLevel(cube, ref, code, asOf, level)
 }
 
+// MapMarginFromArchive retains the unnormalized vendor cells and their
+// source locations; it does not establish units or publication timing.
+func (r *Runtime) MapMarginFromArchive(ctx context.Context, ref ArchiveRef, code, from, to string) (MarginObservations, error) {
+	start, end, err := marginRange(code, from, to)
+	if err != nil {
+		return MarginObservations{}, err
+	}
+	body, err := r.ReadArchive(ctx, ref)
+	if err != nil {
+		return MarginObservations{}, err
+	}
+	cube, _, err := DecodeArchive(body, ref.BodySHA256)
+	if err != nil {
+		return MarginObservations{}, err
+	}
+	return mapMarginObservations(cube, ref, code, start, end)
+}
+
+func (r *Runtime) CollectMarginObservations(ctx context.Context, code, from, to string) (MarginObservations, error) {
+	if r == nil || r.client == nil {
+		return MarginObservations{}, errors.New("emquant: runtime unavailable")
+	}
+	return r.collector.CollectMarginObservations(ctx, code, from, to)
+}
+
 // MapSecurityFromArchive recovers partial security basics from the exact
 // archived response; it does not establish the security's trading status or
 // the historical validity of its short name.

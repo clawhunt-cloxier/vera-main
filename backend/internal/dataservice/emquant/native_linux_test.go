@@ -193,6 +193,38 @@ func TestLiveSecurityName(t *testing.T) {
 	}
 }
 
+// TestLiveMarginObservation consumes vendor quota; it does not log values.
+func TestLiveMarginObservation(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_MARGIN") != "1" {
+		t.Skip("live margin test not requested")
+	}
+	c, err := Open(os.Getenv("EMQUANT_LIBRARY"), os.Getenv("EMQUANT_USER"), os.Getenv("EMQUANT_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	store := &testRawStore{ref: "object://test/margin-live"}
+	result, err := (Collector{Fetcher: c, Store: store}).CollectMarginObservations(context.Background(), "300059.SZ", "2026-11-02", "2026-11-06")
+	if err != nil {
+		t.Fatalf("margin observation: %v", err)
+	}
+	cube, _, err := DecodeArchive(store.body, result.Source.BodySHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, end, err := marginRange("300059.SZ", "2026-11-02", "2026-11-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mapMarginObservations(cube, result.Source, "300059.SZ", start, end); err != nil {
+		t.Fatalf("margin replay: %v", err)
+	}
+}
+
 // TestLiveDisclosureObservation requires explicit opt-in and does not log cells.
 func TestLiveDisclosureObservation(t *testing.T) {
 	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_DISCLOSURE") != "1" {
