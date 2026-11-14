@@ -31,6 +31,7 @@ typedef struct {
  int (*csqsnapshot)(const char *, const char *, const char *, eqdata **);
  int (*cfn)(const char *, const char *, int, const char *, eqdata **);
  int (*cec)(const char *, const char *, eqtable **);
+ int (*ctr)(const char *, const char *, const char *, eqtable **);
  int (*tradedates)(const char *, const char *, const char *, eqdata **);
  int (*release)(void *);
 } eqapi;
@@ -52,6 +53,7 @@ static int eq_open(eqapi *a, const char *path) {
  a->csd = dlsym(a->handle, "csd"); a->css = dlsym(a->handle, "css"); a->csqsnapshot = dlsym(a->handle, "csqsnapshot"); a->tradedates = dlsym(a->handle, "tradedates"); a->release = dlsym(a->handle, "releasedata");
  a->cfn = dlsym(a->handle, "cfn");
  a->cec = dlsym(a->handle, "cec");
+ a->ctr = dlsym(a->handle, "ctr");
  if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->csqsnapshot || !a->tradedates || !a->release) {
   dlclose(a->handle); memset(a, 0, sizeof(*a)); return -2;
  }
@@ -88,6 +90,10 @@ static int eq_news(eqapi *a, const char *codes, const char *content, int mode, c
 static int eq_cec(eqapi *a, const char *codes, const char *options, eqtable **out) {
  if (!a->cec) return -4;
  return a->cec(codes, options, out);
+}
+static int eq_ctr(eqapi *a, const char *name, const char *fields, const char *options, eqtable **out) {
+ if (!a->ctr) return -4;
+ return a->ctr(name, fields, options, out);
 }
 static int eq_release_table(eqapi *a, eqtable *d) { return a->release(d); }
 static int eq_release(eqapi *a, eqdata *d) { return a->release(d); }
@@ -206,10 +212,24 @@ func (c *Client) CFN(codes, content string, mode int, options string) (Cube, err
 
 // CheckStockCodes requests stock-code suffix candidates from CEC. It never
 // chooses among multiple candidates or asserts their current listing status.
-func (c *Client) CheckStockCodes(codes string) (table Table, err error) {
+func (c *Client) CheckStockCodes(codes string) (Table, error) {
 	if err := validateStockCodeQuery(codes); err != nil {
 		return Table{}, err
 	}
+	return c.queryTable("cec", codes, "", stockCodeOptions)
+}
+
+// MatchStockName requests candidate securities for one explicit short name.
+// It does not resolve ambiguity or establish a security's market or status.
+func (c *Client) MatchStockName(name string) (Table, error) {
+	options, err := stockNameOptions(name)
+	if err != nil {
+		return Table{}, err
+	}
+	return c.queryTable("ctr", "SECUMATCH", stockNameIndicators, options)
+}
+
+func (c *Client) queryTable(method, first, indicators, options string) (table Table, err error) {
 	nativeMu.Lock()
 	defer nativeMu.Unlock()
 	if c == nil || c.closed || !c.started || nativeCurrent != c {
@@ -218,16 +238,27 @@ func (c *Client) CheckStockCodes(codes string) (table Table, err error) {
 	if rc := C.eq_callback_error(); rc != 0 {
 		return Table{}, &SDKError{Operation: "connection callback", Code: int(rc)}
 	}
-	a := C.CString(codes)
+	a := C.CString(first)
 	defer C.free(unsafe.Pointer(a))
-	b := C.CString(stockCodeOptions)
+	b := C.CString(options)
 	defer C.free(unsafe.Pointer(b))
+	cfields := C.CString(indicators)
+	defer C.free(unsafe.Pointer(cfields))
 	var data *C.eqtable
-	if rc := C.eq_cec(&c.api, a, b, &data); rc != 0 {
-		return Table{}, &SDKError{Operation: "code lookup", Code: int(rc)}
+	var rc C.int
+	switch method {
+	case "cec":
+		rc = C.eq_cec(&c.api, a, b, &data)
+	case "ctr":
+		rc = C.eq_ctr(&c.api, a, cfields, b, &data)
+	default:
+		return Table{}, errors.New("emquant: invalid table query")
+	}
+	if rc != 0 {
+		return Table{}, &SDKError{Operation: "security lookup", Code: int(rc)}
 	}
 	if data == nil {
-		return Table{}, errors.New("emquant: null code lookup response")
+		return Table{}, errors.New("emquant: null security lookup response")
 	}
 	defer func() {
 		if rc := C.eq_release_table(&c.api, data); rc != 0 {

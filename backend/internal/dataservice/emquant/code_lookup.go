@@ -10,11 +10,26 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // CEC completion may return multiple suffixes. Restrict inputs to short
 // numeric stock codes and return the vendor table without selecting a match.
 const stockCodeOptions = "ReturnType=1,SecuType=1,SecuMarket=1"
+const stockNameIndicators = "SECURITYSHORTNAME,SECUCODE"
+
+func stockNameOptions(name string) (string, error) {
+	if !utf8.ValidString(name) || name == "" || strings.TrimSpace(name) != name || utf8.RuneCountInString(name) > 32 {
+		return "", errors.New("emquant: invalid security name")
+	}
+	for _, ch := range name {
+		if !unicode.IsLetter(ch) && !unicode.IsNumber(ch) && !strings.ContainsRune(" *.-·()（）", ch) {
+			return "", errors.New("emquant: invalid security name")
+		}
+	}
+	return "SecuName=" + name + ",Priority=0", nil
+}
 
 func validateStockCodeQuery(codes string) error {
 	parts := strings.Split(codes, ",")
@@ -38,6 +53,10 @@ func validateStockCodeQuery(codes string) error {
 
 type codeFetcher interface {
 	CheckStockCodes(codes string) (Table, error)
+}
+
+type nameFetcher interface {
+	MatchStockName(name string) (Table, error)
 }
 
 type tableArchiveBody struct {
@@ -65,10 +84,32 @@ func (c Collector) CollectStockCodeCandidates(ctx context.Context, codes string)
 	if err := validateStockCodeQuery(codes); err != nil {
 		return Table{}, ArchiveRef{}, err
 	}
+	return c.collectTable(ctx, request{Method: "cec", Codes: codes, Options: stockCodeOptions}, func() (Table, error) {
+		return f.CheckStockCodes(codes)
+	})
+}
+
+// CollectStockNameCandidates accepts one explicit security short name, not a
+// free-form research question. It retains all candidate rows without choosing.
+func (c Collector) CollectStockNameCandidates(ctx context.Context, name string) (Table, ArchiveRef, error) {
+	f, ok := c.Fetcher.(nameFetcher)
+	if !ok || c.Store == nil {
+		return Table{}, ArchiveRef{}, errors.New("emquant: name lookup and raw store are required")
+	}
+	options, err := stockNameOptions(name)
+	if err != nil {
+		return Table{}, ArchiveRef{}, err
+	}
+	return c.collectTable(ctx, request{Method: "ctr", Codes: "SECUMATCH", Indicators: stockNameIndicators, Options: options}, func() (Table, error) {
+		return f.MatchStockName(name)
+	})
+}
+
+func (c Collector) collectTable(ctx context.Context, reqInfo request, fetch func() (Table, error)) (Table, ArchiveRef, error) {
 	var table Table
 	err := c.callVendor(ctx, func() error {
 		var e error
-		table, e = f.CheckStockCodes(codes)
+		table, e = fetch()
 		return e
 	})
 	if err != nil {
@@ -78,22 +119,22 @@ func (c Collector) CollectStockCodeCandidates(ctx context.Context, codes string)
 		return Table{}, ArchiveRef{}, err
 	}
 	received := time.Now().UTC()
-	req, err := json.Marshal(request{Method: "cec", Codes: codes, Options: stockCodeOptions})
+	req, err := json.Marshal(reqInfo)
 	if err != nil {
 		return Table{}, ArchiveRef{}, err
 	}
 	fingerprint := digest(req)
 	body, err := json.Marshal(tableArchiveBody{Format: "emquant-sdk-table-v1", RequestFingerprint: fingerprint, ReceivedAt: received, Data: table})
 	if err != nil || len(body) > maxArchiveSize {
-		return Table{}, ArchiveRef{}, errors.New("emquant: invalid code lookup archive")
+		return Table{}, ArchiveRef{}, errors.New("emquant: invalid security lookup archive")
 	}
 	hash := digest(body)
 	ref, err := c.Store.Put(ctx, hash, body)
 	if err != nil {
-		return Table{}, ArchiveRef{}, fmt.Errorf("emquant: code lookup archive failed: %w", err)
+		return Table{}, ArchiveRef{}, fmt.Errorf("emquant: security lookup archive failed: %w", err)
 	}
 	if ref == "" {
-		return Table{}, ArchiveRef{}, errors.New("emquant: code lookup archive returned empty reference")
+		return Table{}, ArchiveRef{}, errors.New("emquant: security lookup archive returned empty reference")
 	}
 	if err := ctx.Err(); err != nil {
 		return Table{}, ArchiveRef{}, err

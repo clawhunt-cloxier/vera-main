@@ -34,4 +34,8 @@ func (*Client) CheckStockCodes(_ string) (Table, error) {
 	return Table{}, errors.New("emquant: native SDK requires Linux and cgo")
 }
 
+func (*Client) MatchStockName(_ string) (Table, error) {
+	return Table{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
 func (*Client) Close() error { return nil }

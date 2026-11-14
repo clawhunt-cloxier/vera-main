@@ -158,6 +158,18 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	if _, err := runtime.ReadCodeTableArchive(ctx, codeRef, "000002"); err == nil {
 		t.Fatal("code archive accepted with the wrong query")
 	}
+	<-archived
+	names, nameRef, err := runtime.CollectStockNameCandidates(ctx, "模拟证券")
+	if err != nil || names.Rows != 1 {
+		t.Fatalf("name lookup archive: %v", err)
+	}
+	replayedNames, err := runtime.ReadNameTableArchive(ctx, nameRef, "模拟证券")
+	if err != nil || len(replayedNames.Values) != 2 || replayedNames.Values[1].Value != "600000.SH" {
+		t.Fatalf("name replay: %v", err)
+	}
+	if _, err := runtime.ReadNameTableArchive(ctx, nameRef, "另一证券"); err == nil {
+		t.Fatal("name archive accepted with wrong query")
+	}
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}

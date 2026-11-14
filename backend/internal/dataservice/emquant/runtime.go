@@ -98,13 +98,25 @@ func (r *Runtime) ReadArchive(ctx context.Context, ref ArchiveRef) ([]byte, erro
 // unselected code candidates; caller-supplied provenance still needs registry
 // and permission verification before the table can be used by research.
 func (r *Runtime) ReadCodeTableArchive(ctx context.Context, ref ArchiveRef, codes string) (Table, error) {
-	if r == nil || r.store == nil || ref.ReceivedAt.IsZero() || ref.ArchivedAt.IsZero() || ref.ArchivedAt.Before(ref.ReceivedAt) {
-		return Table{}, errors.New("emquant: missing table archive provenance")
-	}
 	if err := validateStockCodeQuery(codes); err != nil {
 		return Table{}, err
 	}
-	req, err := json.Marshal(request{Method: "cec", Codes: codes, Options: stockCodeOptions})
+	return r.readTableArchive(ctx, ref, request{Method: "cec", Codes: codes, Options: stockCodeOptions})
+}
+
+func (r *Runtime) ReadNameTableArchive(ctx context.Context, ref ArchiveRef, name string) (Table, error) {
+	options, err := stockNameOptions(name)
+	if err != nil {
+		return Table{}, err
+	}
+	return r.readTableArchive(ctx, ref, request{Method: "ctr", Codes: "SECUMATCH", Indicators: stockNameIndicators, Options: options})
+}
+
+func (r *Runtime) readTableArchive(ctx context.Context, ref ArchiveRef, query request) (Table, error) {
+	if r == nil || r.store == nil || ref.ReceivedAt.IsZero() || ref.ArchivedAt.IsZero() || ref.ArchivedAt.Before(ref.ReceivedAt) {
+		return Table{}, errors.New("emquant: missing table archive provenance")
+	}
+	req, err := json.Marshal(query)
 	if err != nil || digest(req) != ref.RequestFingerprint {
 		return Table{}, errors.New("emquant: table request provenance mismatch")
 	}
@@ -247,6 +259,13 @@ func (r *Runtime) CollectStockCodeCandidates(ctx context.Context, codes string) 
 		return Table{}, ArchiveRef{}, errors.New("emquant: runtime unavailable")
 	}
 	return r.collector.CollectStockCodeCandidates(ctx, codes)
+}
+
+func (r *Runtime) CollectStockNameCandidates(ctx context.Context, name string) (Table, ArchiveRef, error) {
+	if r == nil || r.client == nil {
+		return Table{}, ArchiveRef{}, errors.New("emquant: runtime unavailable")
+	}
+	return r.collector.CollectStockNameCandidates(ctx, name)
 }
 
 func (r *Runtime) CollectCFN(ctx context.Context, codes, content string, mode int, options string) (Cube, ArchiveRef, error) {

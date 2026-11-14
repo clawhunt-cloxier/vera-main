@@ -30,6 +30,8 @@ func (f *testFetcher) CheckStockCodes(_ string) (Table, error) {
 	return f.table, f.err
 }
 
+func (f *testFetcher) MatchStockName(_ string) (Table, error) { f.calls++; return f.table, f.err }
+
 type testRawStore struct {
 	hash  string
 	body  []byte
@@ -62,7 +64,8 @@ func TestCollectorDoesNotBypassAccountGate(t *testing.T) {
 	_, _, e4 := c.CollectQuote(ctx, "A", "TIME,NOW", "")
 	_, _, e5 := c.CollectOpenDates(ctx, "CNSESH", "2026-11-01", "2026-11-02")
 	_, _, e6 := c.CollectStockCodeCandidates(ctx, "000001")
-	for _, err := range []error{e1, e2, e3, e4, e5, e6} {
+	_, _, e7 := c.CollectStockNameCandidates(ctx, "模拟证券")
+	for _, err := range []error{e1, e2, e3, e4, e5, e6, e7} {
 		if !errors.Is(err, ErrRateLimited) {
 			t.Fatalf("gate error not propagated: %v", err)
 		}

@@ -119,6 +119,10 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	if _, err = c.CheckStockCodes("000001.SZ"); err == nil {
 		t.Fatal("non-numeric lookup reached SDK")
 	}
+	names, err := c.MatchStockName("模拟证券")
+	if err != nil || names.Rows != 1 || len(names.Values) != 2 || names.Values[1].Value != "600000.SH" {
+		t.Fatalf("name lookup: %v", err)
+	}
 	if data, err := c.CSD("DISCONNECT", "X", "D1", "D2", ""); !errors.Is(err, ErrUnavailable) || len(data.Values) != 0 {
 		t.Fatalf("disconnect callback returned data: %v", err)
 	}
@@ -162,6 +166,30 @@ func TestLiveCodeLookup(t *testing.T) {
 	}
 	if _, observed, fingerprint, err := DecodeTableArchive(store.body, ref.BodySHA256); err != nil || !observed.Equal(ref.ReceivedAt) || fingerprint != ref.RequestFingerprint {
 		t.Fatalf("code lookup archive: %v", err)
+	}
+}
+
+// TestLiveSecurityName requires explicit opt-in and never logs returned values.
+func TestLiveSecurityName(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_NAME") != "1" {
+		t.Skip("live name lookup test not requested")
+	}
+	c, err := Open(os.Getenv("EMQUANT_LIBRARY"), os.Getenv("EMQUANT_USER"), os.Getenv("EMQUANT_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	store := &testRawStore{ref: "object://test/name-live"}
+	table, ref, err := (Collector{Fetcher: c, Store: store}).CollectStockNameCandidates(context.Background(), "东方财富")
+	if err != nil || table.Rows == 0 {
+		t.Fatalf("name lookup response: %v", err)
+	}
+	if _, observed, fingerprint, err := DecodeTableArchive(store.body, ref.BodySHA256); err != nil || !observed.Equal(ref.ReceivedAt) || fingerprint != ref.RequestFingerprint {
+		t.Fatalf("name lookup archive: %v", err)
 	}
 }
 

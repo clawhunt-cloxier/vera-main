@@ -53,6 +53,14 @@ int cec(const char *codes, const char *options, eqtable **out) {
  *out = &data;
  return 0;
 }
+int ctr(const char *name, const char *fields, const char *options, eqtable **out) {
+ if (strcmp(name, "SECUMATCH") || strcmp(fields, "SECURITYSHORTNAME,SECUCODE") || !strstr(options, "SecuName=") || !strstr(options, ",Priority=0")) return 99;
+ static eqchar columns[] = {{"SECURITYSHORTNAME",sizeof("SECURITYSHORTNAME")},{"SECUCODE",sizeof("SECUCODE")}};
+ static eqvariant values[] = {{.type=13,.text={"SYNTHETIC",sizeof("SYNTHETIC")}},{.type=13,.text={"600000.SH",sizeof("600000.SH")}}};
+ static eqtable data = {1,2,{columns,2},{values,2}};
+ *out = &data;
+ return 0;
+}
 int tradedates(const char *from, const char *to, const char *options, eqdata **out) {
  (void)to; (void)options;
  if (!strcmp(from, "ERROR")) return 88;
