@@ -73,6 +73,11 @@
 
 - 厂商 2025 年指标手册列出融资余额、买入、偿还、融券余量与余额对应的五项日序列及 `Period=1`；新增单证券、日期区间的采集、归档、逐字段位置和回放，保留 SDK 原始类型与空值，空响应不表示非标的或无数据。单位、日期语义、实际发布时间、账户权限和返回形状均待确认，不映射为 `flow.margin` 或写入快照。合成测试仅验证请求绑定与机制，未用真实账号联调。
 
+### 2026-11-14 与 Claude 在途 PR 的兼容核对
+
+- 用户要求避免与 Claude 现有 PR 冲突。以 `origin/dev` `c301eba`、本分支 `1bbbd36`、Claude T016 `6b109fe`、T017 `bfb066e`、T018 `3e161b8` 及当时远端任务分支为准，逐一核对 T011、领取记录、T013、T016、T017、T018 和 T024：本分支与 T016/T018 共同修改 `backend/internal/harness/engine.go`，与 T017 共同修改 `backend/internal/app/app.go`；其他已发布 Claude 分支未与本分支修改相同文件。T014/T012 后续仍将涉及本分支的数据服务与接线，须按其实际 PR 再检查。
+- 仅在独立临时目录使用 `git merge-tree` 试合并七个 Claude 分支与本分支、以及 T026 契约分支与各 Claude 分支；上述已发布提交无文本冲突，未更改任何任务分支或用户工作树。T016、T017、T018 与本分支的组合通过 `go test -run '^$' ./...` 全包编译，及 `go test -race ./internal/dataservice ./internal/harness -run 'TestVendorStoreExcludesExistingSyntheticData|TestSyncRejectsConflictingImmutableRecordsAtomically|TestBundleRejectsLegacySnapshotWithDifferentTaskCutoff|TestStepLeaseExcludesConcurrentWorkers|TestStepLeaseTakeoverAndFencing' -count=1`。这些是针对当时 SHA 的局部验证，不代表全量集成、最终合并或真实数据端到端通过；任一分支更新或 T026 `collect_latest` 实现后必须重新验证快照截止语义。
+
 ## 最新用户要求与现有规格冲突
 
 用户已明确要求研究同时支持盘中实时行情和发起研究时最新可用的其他数据，并确认允许数据持久化、向用户展示及第三方模型处理。此要求与 SPEC §5、DATA_SERVICE §8 和资金动向技能中仅使用上一个已收盘交易日的限制冲突；不能把财报、公告、资金等低频数据标成实时行情，也不能以任务创建时间冒充各数据项的实际时间。T026 领取 PR #16 已合入，根规格、数据集、新鲜度规则及技能版本的修订在草案 PR #20 中，尚未合入或实现；需在实际链路中体现行情事件时间、接收时间、延迟/过期和缺失处理。不能宣称盘中研究已实现。用户确认是用途许可输入；具体产品、权限、时延和数据字段仍需以厂商资料及账户能力验证。
