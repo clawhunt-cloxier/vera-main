@@ -64,10 +64,15 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 	ids := map[string]uuid.UUID{}
 	n := 0
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing,synthetic,basis) VALUES($1,$2,$3,$4,$5,$6)
+		var providerID string
+		if err := tx.QueryRow(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing,synthetic,basis) VALUES($1,$2,$3,$4,$5,$6)
 			ON CONFLICT (id) DO UPDATE SET name=excluded.name,
-                allow_model_processing=providers.allow_model_processing AND excluded.allow_model_processing, basis=excluded.basis`,
-			p.ID(), p.Name(), kind, p.AllowModelProcessing(), p.Synthetic(), basis); err != nil {
+                allow_model_processing=providers.allow_model_processing AND excluded.allow_model_processing, basis=excluded.basis
+            WHERE providers.kind=excluded.kind AND providers.synthetic=excluded.synthetic
+            RETURNING id`, p.ID(), p.Name(), kind, p.AllowModelProcessing(), p.Synthetic(), basis).Scan(&providerID); err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("provider %s: identity conflicts with existing provider kind", p.ID())
+			}
 			return err
 		}
 		for _, e := range ents {

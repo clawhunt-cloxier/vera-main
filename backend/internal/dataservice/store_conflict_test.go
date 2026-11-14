@@ -91,3 +91,40 @@ func TestConcurrentSyncConflictingSources(t *testing.T) {
 		t.Fatalf("unexpected committed state: providers=%d records=%d err=%v", providers, records, err)
 	}
 }
+
+// A synthetic provider with the same identifier must not write under the
+// existing vendor identity, even when a development store permits fixtures.
+type syntheticCollisionProvider struct{ collisionProvider }
+
+func (syntheticCollisionProvider) Synthetic() bool { return true }
+
+func TestSyncRejectsProviderKindCollision(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.New(t)
+	cat, err := dataservice.LoadCatalog("../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := dataservice.NewStore(pool, cat)
+	day := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	first := dataservice.Record{DatasetID: "ref.trading_calendar", RecordKey: "original", Period: &day, AvailableAt: day, Origin: "exchange", SourceTier: "L2", Payload: map[string]any{"trade_date": "2026-01-01", "is_open": true}}
+	vendor := collisionProvider{id: "shared-id", records: []dataservice.Record{first}}
+	if _, err := store.Sync(ctx, vendor); err != nil {
+		t.Fatal(err)
+	}
+	other := first
+	other.RecordKey = "synthetic-new"
+	synthetic := syntheticCollisionProvider{collisionProvider{id: "shared-id", records: []dataservice.Record{other}}}
+	if n, err := store.Sync(ctx, synthetic); err == nil || n != 0 {
+		t.Fatal("accepted synthetic data under vendor identity")
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM records WHERE record_key='synthetic-new'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("identity collision persisted data: %v", err)
+	}
+	realStore := dataservice.NewVendorStore(pool, cat)
+	records, err := realStore.Query(ctx, dataservice.Query{DatasetIDs: []string{"ref.trading_calendar"}, AsOf: day.Add(time.Hour), ModelUse: true})
+	if err != nil || len(records) != 1 || records[0].RecordKey != "original" {
+		t.Fatalf("vendor view after conflict: %v", err)
+	}
+}
