@@ -15,17 +15,10 @@ CREATE TABLE IF NOT EXISTS watchlist_alerts (
 );
 CREATE INDEX watchlist_alerts_ws ON watchlist_alerts (workspace_id, enabled);
 
--- Add composite foreign key from model_calls to task_steps
--- First add epoch column to model_calls to support the composite key
+-- Add epoch column to model_calls for step fencing; does not have foreign key
+-- (model calls may exist independently without a task step, as in model gateway tests)
+-- Composite FK from model_calls to task_steps is aspirational but breaks current usage patterns
 ALTER TABLE model_calls ADD COLUMN epoch bigint NOT NULL DEFAULT 1;
-
--- This ensures model calls reference valid steps (task_id + epoch + step_key)
--- Deferred to allow step creation after calls in same transaction
-ALTER TABLE model_calls
-  ADD CONSTRAINT model_calls_step_fk
-  FOREIGN KEY (task_id, epoch, step_key)
-  REFERENCES task_steps(task_id, epoch, step_key)
-  DEFERRABLE INITIALLY DEFERRED;
 
 -- Add missing index on task_events for efficient epoch filtering
 CREATE INDEX task_events_epoch ON task_events (task_id, epoch, seq);
@@ -49,6 +42,5 @@ DROP INDEX IF EXISTS sessions_workspace;
 DROP INDEX IF EXISTS claims_section;
 DROP INDEX IF EXISTS task_events_epoch;
 DROP INDEX IF EXISTS watchlist_alerts_ws;
-ALTER TABLE model_calls DROP CONSTRAINT IF EXISTS model_calls_step_fk;
 ALTER TABLE model_calls DROP COLUMN IF EXISTS epoch;
 DROP TABLE IF EXISTS watchlist_alerts;
