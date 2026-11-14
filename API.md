@@ -61,7 +61,7 @@
 
 ## 4. 变更
 
-修改契约时同步更新 OpenAPI、JSON Schema、Go DTO、前端类型和契约测试。前端类型由 OpenAPI 生成（T013 选定生成器并锁定版本），不手写重复类型。删除或改名字段需要兼容窗口；已冻结的报告不随 schema 变化而改写。
+修改契约时同步更新 OpenAPI、JSON Schema、Go DTO、前端类型和契约测试。前端类型由 OpenAPI 生成（openapi-typescript 7.13.0，`cd web && npm run gen:api`；`make check-api-types` 检查漂移），不手写重复类型。删除或改名字段需要兼容窗口，`make check-contract-compat` 拦截不兼容变更；确需破坏时在 `contracts/compat-exceptions.json` 登记理由与批准记录（PR/ADR）；已冻结的报告不随 schema 变化而改写。
 
 ## 5. 浏览器投影
 

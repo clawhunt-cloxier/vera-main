@@ -9,7 +9,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T000 | 冻结首版规范与协作仓库 | 无 | DONE | Codex / main（授权初始化） | docs、contracts、任务与交接；check-docs |
 | T001 | 可运行 Web/API 起点与 CI | T000 | DONE | Codex / main（授权初始化） | healthz/readyz、React 起始页、Go 测试、前端构建、CI |
 | T010 | 产品模块、Harness、数据服务与运行时规范（ADR-0003） | T001 | REVIEW | Claude-Code / agent/claude/T010-product-architecture | SPEC、ARCHITECTURE、HARNESS、DATA_SERVICE、技能规格、API/契约、DATA_MODEL、TASKS；check-docs、check-contracts |
-| T011 | 工程门禁 | T010 | IN_PROGRESS | Claude-Code / agent/claude/T011-golangci | 已完成：golangci-lint v2（`make lint-go`，CI 固定 v2.15.0）、前端 ESLint/Prettier（`make lint-web`）、CODEOWNERS、Go/Node 版本检查脚本，均已接入 `make verify`；未完成：OpenAPI→TS 生成与漂移检查、契约兼容检查，见 [交接](docs/handoffs/2026-11-12-T011-claude.md) |
+| T011 | 工程门禁 | T010 | REVIEW | Claude-Code / agent/claude/T011-contract-gates | golangci-lint v2（`make lint-go`，CI 固定 v2.15.0）、前端 ESLint/Prettier（`make lint-web`）、CODEOWNERS、工具链版本检查（`make check-toolchain`）、OpenAPI→TS 漂移检查（`make check-api-types`）、契约兼容检查（`make check-contract-compat`），均已接入 `make verify`，见 [交接](docs/handoffs/2026-11-12-T011-claude.md) |
 | T012 | 开发环境与数据库基础 | T010 | TODO | 未领取 | Compose（postgres、对象存储、keycloak、caddy）、goose/sqlc、RLS、River 接入、`make dev-up`、`make test-integration`；DATA_MODEL §1–4 的集成测试；OPERATIONS §1 版本锁定 |
 | T013 | 身份、会话、邀请与 workspace | T012 | TODO | 未领取 | OIDC（自建 Keycloak，realm 入库）、会话、CSRF、邀请码、onboarding、`/me`；V01 |
 | T014 | 数据服务框架与 fixture 适配器 | T012 | TODO | 未领取 | Provider/Mapper 接口、映射 YAML、按 contracts/datasets/catalog.json 的统一记录、快照、新鲜度、对账；按 demo-universe 生成 fixture；production 拒绝 fixture |
