@@ -8,7 +8,7 @@
 |------|------|------|
 | Go | 1.23.3 | 后端运行时 |
 | Node.js | 22.11.0 | 前端构建与运行 |
-| PostgreSQL | 17 | 主数据库 |
+| PostgreSQL | 18 | 主数据库 |
 | Keycloak | 26.0.7 | 身份认证 |
 | Caddy | 2.8.4 | 反向代理 |
 | MinIO | RELEASE.2024-11-07T00-52-20Z | 对象存储 |
@@ -51,7 +51,7 @@
 生产环境使用的基础镜像：
 
 ```
-postgres:17-alpine
+postgres:18-alpine
 quay.io/keycloak/keycloak:26.0.7
 caddy:2.8.4-alpine
 quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z
