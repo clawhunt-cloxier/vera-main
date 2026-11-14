@@ -69,4 +69,4 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 
 `TestPreviouslyArchivedQuote` 通过 `EMQUANT_ARCHIVE_REPLAY=1` 和显式测试 S3 配置只读回放已有归档，不向厂商请求新数据。2026-11-13 UTC 使用先前真实 SDK 联调留存的本地测试桶运行通过：对象哈希和解码可验证，旧行情按当前时间被判定过期；这不证明厂商真实性、字段含义、实时权限或延迟承诺。
 
-后续还需要实体和行业目录、公告正文及财报版本、完整日线与资金数据集、跨 worker 限流、报告各来源时间展示、生产环境配置以及真实数据加真实模型的端到端验收。工程计划与当前状态见 [接入交接](handoffs/2026-11-12-emquant-probe-codex.md)及 [ADR-0004 草案](https://github.com/clawhunt-cloxier/vera-main/pull/20)。
+后续还需要实体和行业目录、公告正文及财报版本、完整日线与资金数据集、跨 worker 限流、报告各来源时间展示、生产环境配置以及真实数据加真实模型的端到端验收。工程计划与当前状态见 [接入交接](handoffs/2026-11-12-emquant-probe-codex.md)及 [ADR-0004 目标契约](decisions/0004-intraday-data-cutoff.md)。
