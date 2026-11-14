@@ -37,7 +37,7 @@ dev-up:
 dev-down:
 	docker compose down
 dev-migrate:
-	cd backend && go run github.com/pressly/goose/v3/cmd/goose@v3.23.1 -dir internal/platform/db/migrations postgres "host=localhost port=5432 user=postgres password=dev_password_change_in_production dbname=vera_dev sslmode=disable" up
+	cd backend && DATABASE_URL="postgres://postgres:dev_password_change_in_production@localhost:5432/vera_dev?sslmode=disable" go run ./cmd/dbmigrate
 test-integration:
 	@echo "Running integration tests..."
 	cd backend && go test -tags=integration ./internal/platform/db/... ./internal/identity/...
