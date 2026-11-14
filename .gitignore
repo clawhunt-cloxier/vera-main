@@ -18,3 +18,4 @@ __pycache__/
 *.pyc
 bin/
 .DS_Store
+.claude/
