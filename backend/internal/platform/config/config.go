@@ -14,14 +14,28 @@ import (
 
 type ModelProfile struct {
 	Name       string
-	Adapter    string // openai | sim | replay
+	Adapter    string // openai | record | sim | replay
 	BaseURL    string
 	ModelID    string
 	APIKey     string
 	PriceTable string
-	Thinking   bool
-	ExtraBody  string // JSON object merged into chat/completions requests (vendor switches such as thinking)
+	// Thinking is "" (not sent; vendor default), "enabled" or "disabled" (sent as thinking.type). An explicit
+	// "thinking" key in ExtraBody wins over this setting.
+	Thinking string
+	// ExtraBody is a JSON object merged into chat/completions requests (vendor switches). Keys owned by the gateway
+	// (ReservedBodyKeys) are rejected because they would desynchronise hashing, budgets or validation.
+	ExtraBody   map[string]any
+	Temperature float64
+	// MaxOutput overrides the per-call default output limit for every call on this profile; 0 keeps the defaults.
+	MaxOutput int
+	// TimeoutSeconds is the per-HTTP-request timeout; 0 uses policy model_call.http_timeout_seconds.
+	TimeoutSeconds int
+	// Concurrency limits in-flight calls on this profile; 0 means only the platform limit applies.
+	Concurrency int
 }
+
+// ReservedBodyKeys are request fields the gateway owns; MODEL_<PROFILE>_EXTRA_BODY may not set them.
+var ReservedBodyKeys = []string{"model", "messages", "response_format", "stream", "max_tokens", "max_completion_tokens", "temperature"}
 
 type Config struct {
 	Env               string // development | test | production
@@ -104,25 +118,83 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("VERA_DAILY_MODEL_COST_LIMIT_USD: %w", err)
 	}
 	c.DailyCostLimit = limit
+	var problems []string
 	for _, p := range []string{"writer", "verifier", "router"} {
-		u := strings.ToUpper(p)
-		c.Profiles[p] = ModelProfile{
-			Name:       p,
-			Adapter:    env("MODEL_"+u+"_ADAPTER", "sim"),
-			BaseURL:    env("MODEL_"+u+"_BASE_URL", ""),
-			ModelID:    env("MODEL_"+u+"_ID", ""),
-			APIKey:     env("MODEL_"+u+"_API_KEY", ""),
-			PriceTable: env("MODEL_PRICE_TABLE_VERSION", ""),
-			Thinking:   boolEnv("MODEL_"+u+"_THINKING", false),
-			ExtraBody:  env("MODEL_"+u+"_EXTRA_BODY", ""),
-		}
+		mp, perr := loadProfile(p)
+		problems = append(problems, perr...)
+		c.Profiles[p] = mp
 	}
-	err = c.validate()
+	err = c.validate(problems)
 	return c, err
 }
 
-func (c *Config) validate() error {
+// loadProfile reads MODEL_<PROFILE>_* variables. Malformed values are reported, never silently defaulted.
+func loadProfile(name string) (ModelProfile, []string) {
+	u := "MODEL_" + strings.ToUpper(name) + "_"
+	p := ModelProfile{
+		Name:       name,
+		Adapter:    env(u+"ADAPTER", "sim"),
+		BaseURL:    env(u+"BASE_URL", ""),
+		ModelID:    env(u+"ID", ""),
+		APIKey:     env(u+"API_KEY", ""),
+		PriceTable: env("MODEL_PRICE_TABLE_VERSION", ""),
+	}
 	var problems []string
+	bad := func(k, why string) {
+		problems = append(problems, fmt.Sprintf("model profile %s: %s%s %s", name, u, k, why))
+	}
+	if v := env(u+"THINKING", ""); v != "" {
+		switch strings.ToLower(v) {
+		case "true", "1", "on", "enabled":
+			p.Thinking = "enabled"
+		case "false", "0", "off", "disabled":
+			p.Thinking = "disabled"
+		default:
+			bad("THINKING", "must be enabled/disabled (or true/false)")
+		}
+	}
+	if v := env(u+"EXTRA_BODY", ""); v != "" {
+		if err := json.Unmarshal([]byte(v), &p.ExtraBody); err != nil || p.ExtraBody == nil {
+			bad("EXTRA_BODY", "must be a JSON object")
+		}
+		for _, k := range ReservedBodyKeys {
+			if _, ok := p.ExtraBody[k]; ok {
+				bad("EXTRA_BODY", fmt.Sprintf("may not set %q (use the dedicated MODEL_<PROFILE>_* variable)", k))
+			}
+		}
+	}
+	if v := env(u+"TEMPERATURE", ""); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < 0 || f > 2 {
+			bad("TEMPERATURE", "must be a number in [0, 2]")
+		}
+		p.Temperature = f
+	}
+	if v := env(u+"MAX_OUTPUT_TOKENS", ""); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			bad("MAX_OUTPUT_TOKENS", "must be a positive integer")
+		}
+		p.MaxOutput = n
+	}
+	if v := env(u+"TIMEOUT_SECONDS", ""); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			bad("TIMEOUT_SECONDS", "must be a positive integer")
+		}
+		p.TimeoutSeconds = n
+	}
+	if v := env(u+"CONCURRENCY", ""); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			bad("CONCURRENCY", "must be a positive integer")
+		}
+		p.Concurrency = n
+	}
+	return p, problems
+}
+
+func (c *Config) validate(problems []string) error {
 	switch c.Env {
 	case "development", "test", "production":
 	default:
@@ -138,13 +210,11 @@ func (c *Config) validate() error {
 		problems = append(problems, "OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET are required unless VERA_DEV_OIDC=true")
 	}
 	for name, p := range c.Profiles {
-		if p.ExtraBody != "" && !json.Valid([]byte(p.ExtraBody)) {
-			problems = append(problems, fmt.Sprintf("model profile %s: MODEL_%s_EXTRA_BODY must be a JSON object", name, strings.ToUpper(name)))
-		}
 		switch p.Adapter {
-		case "openai":
+		case "openai", "record":
+			// record forwards cassette misses to the real vendor, so it needs everything a real call needs.
 			if p.BaseURL == "" || p.ModelID == "" || p.APIKey == "" || p.PriceTable == "" {
-				problems = append(problems, fmt.Sprintf("model profile %s: openai adapter needs base_url, model_id, api_key and price table version", name))
+				problems = append(problems, fmt.Sprintf("model profile %s: %s adapter needs base_url, model_id, api_key and price table version", name, p.Adapter))
 			}
 		case "sim", "replay":
 		default:

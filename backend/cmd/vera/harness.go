@@ -21,7 +21,8 @@ const harnessUsage = `vera harness <command>
   eval [--cases tests/fixtures/demo-universe.json] [--only SA-01,...]
         按评测集逐个运行技能（使用当前配置的模型 profile：sim/replay/openai），输出状态、结论存活率、调用数与费用；
         与期望不符时退出码为 1。
-  replay --task <id>
+  replay --task <id> [--dry-run]
+        --dry-run 只打印步骤台账、模型调用与被删除的结论（= vera admin task inspect），不重跑、不调用模型
         用原任务的技能、对象、参数与数据截止时点在评测 workspace 中重跑，并对比结论数量与结果类型。
 `
 
@@ -101,6 +102,18 @@ func harnessCmd(ctx context.Context, a *app.App, args []string) error {
 		fmt.Print(harnessUsage)
 		return nil
 	}
+	// replay --dry-run only reads the ledger (= vera admin task inspect): no workspace, no River, no model calls.
+	if args[0] == "replay" {
+		fs := flag.NewFlagSet("replay", flag.ContinueOnError)
+		task := fs.String("task", "", "")
+		dry := fs.Bool("dry-run", false, "")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *dry {
+			return inspect(ctx, a, *task, os.Stdout)
+		}
+	}
 	// CreateTask enqueues River jobs in its transaction, so the engine needs an insert-only client.
 	// Runs below execute synchronously via Engine.Run; no worker is started here.
 	if _, err := a.Engine.NewRiver(a.Pool, false, 0); err != nil {
@@ -128,7 +141,7 @@ func harnessCmd(ctx context.Context, a *app.App, args []string) error {
 		if err := json.Unmarshal(b, &m); err != nil {
 			return err
 		}
-		w := tw()
+		w := tw(os.Stdout)
 		fmt.Fprintln(w, "用例\t技能\t对象\t结果\t期望\t保留/删除结论\t存活率\t调用\t费用USD\t耗时")
 		failed := 0
 		for _, c := range m.Cases {
@@ -169,6 +182,7 @@ func harnessCmd(ctx context.Context, a *app.App, args []string) error {
 	case "replay":
 		fs := flag.NewFlagSet("replay", flag.ContinueOnError)
 		task := fs.String("task", "", "")
+		_ = fs.Bool("dry-run", false, "")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}

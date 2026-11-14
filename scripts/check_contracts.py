@@ -10,6 +10,33 @@ root = Path(__file__).resolve().parents[1]
 api = json.loads((root/'contracts/openapi.json').read_text())
 validate_spec(api)
 schemas = api['components']['schemas']
+draft = json.loads((root/'contracts/drafts/openapi-0.4.json').read_text())
+validate_spec(draft)
+draft_schemas = draft['components']['schemas']
+assert 'snapshot_mode' not in schemas['ResearchPlan']['properties']
+assert 'snapshot_mode' in draft_schemas['ResearchPlan']['required']
+assert {'snapshot_mode', 'snapshot_as_of'} <= set(draft_schemas['Task']['required'])
+assert 'available_at' in draft_schemas['SourceFreshness']['required']
+report_rule = Draft202012Validator({
+    'type': 'object',
+    'properties': {'snapshot_mode': draft_schemas['Report']['properties']['snapshot_mode']},
+    'required': ['snapshot_mode'],
+    'allOf': draft_schemas['Report']['allOf'],
+})
+assert list(report_rule.iter_errors({'snapshot_mode': 'collect_latest'}))
+assert not list(report_rule.iter_errors({'snapshot_mode': 'collect_latest', 'snapshot_as_of': 'example', 'source_freshness': []}))
+assert not list(report_rule.iter_errors({'snapshot_mode': 'fixed_legacy'}))
+freshness = Draft202012Validator(draft_schemas['SourceFreshness'], format_checker=FormatChecker())
+source = {'dataset_id': 'mkt.intraday_quote', 'provider': 'example', 'event_at': None, 'published_at': None,
+          'received_at': None, 'available_at': None, 'period': None, 'latency_mode': 'unknown',
+          'status': 'unknown', 'note': 'synthetic test'}
+assert not list(freshness.iter_errors(source))
+assert list(freshness.iter_errors({**source, 'latency_mode': 'real_time'}))
+assert not list(freshness.iter_errors({**source, 'latency_mode': 'real_time',
+                                     'event_at': '2026-06-30T05:01:55Z',
+                                     'received_at': '2026-06-30T05:01:56Z',
+                                     'available_at': '2026-06-30T05:01:57Z'}))
+assert 'application/vnd.vera.v0.4+json' in draft['paths']['/api/v1/research-plans']['post']['responses']['200']['content']
 
 
 def load(name):
@@ -109,7 +136,7 @@ for ds in cat['datasets']:
     assert len(names) == len(set(names)), ds['id']
     assert ds['default_tier'] in ('L1', 'L2', 'L3', 'L4'), ds['id']
     for g in ds['grain']:
-        assert g in names or g == 'entity_id', f"{ds['id']}: grain {g}"
+        assert g in names or g in ('entity_id', 'provider_id'), f"{ds['id']}: grain {g}"
     for f in ds['fields']:
         assert f['unit'] in units, f"{ds['id']}.{f['name']}: unit"
         assert f['type'] in ('string', 'text', 'date', 'datetime', 'decimal', 'integer', 'boolean', 'enum', 'enum_ref'), f['name']

@@ -1,0 +1,18 @@
+{
+  "version": "1",
+  "synthetic": true,
+  "status": "specification_examples_not_executable_yet",
+  "skill_versions": {"stock_analysis": "1.1.0", "capital_flow": "1.1.0", "deep_research": "1.1.0"},
+  "cases": [
+    {"id": "RT-01", "scenario": "fresh_intraday_quote", "cutoff": "2026-06-30T05:02:00Z", "event_at": "2026-06-30T05:01:55Z", "received_at": "2026-06-30T05:01:56Z", "available_at": "2026-06-30T05:01:57Z", "max_age_seconds": 30, "latency_mode": "real_time", "expect": "include_with_event_and_received_times"},
+    {"id": "RT-02", "scenario": "quote_stale", "cutoff": "2026-06-30T05:02:00Z", "event_at": "2026-06-30T05:00:00Z", "received_at": "2026-06-30T05:00:01Z", "available_at": "2026-06-30T05:00:02Z", "max_age_seconds": 30, "latency_mode": "real_time", "expect": "unavailable_for_required_realtime"},
+    {"id": "RT-03", "scenario": "received_after_cutoff", "cutoff": "2026-06-30T05:02:00Z", "event_at": "2026-06-30T05:01:59Z", "received_at": "2026-06-30T05:02:01Z", "available_at": "2026-06-30T05:02:02Z", "max_age_seconds": 30, "latency_mode": "real_time", "expect": "exclude_from_snapshot"},
+    {"id": "RT-04", "scenario": "unknown_latency", "cutoff": "2026-06-30T05:02:00Z", "event_at": "2026-06-30T05:01:55Z", "received_at": "2026-06-30T05:01:56Z", "available_at": "2026-06-30T05:01:57Z", "max_age_seconds": 30, "latency_mode": "unknown", "expect": "do_not_label_realtime"},
+    {"id": "RT-05", "scenario": "filing_published_after_cutoff", "report_period": "2025-12-31", "published_at": "2026-07-01T00:00:00Z", "cutoff": "2026-06-30T05:02:00Z", "expect": "exclude_statement"},
+    {"id": "RT-06", "scenario": "restart_after_freeze", "expect": "reuse_frozen_snapshot_and_cutoff"},
+    {"id": "RT-07", "scenario": "closed_market", "expect": "label_closing_date_and_time_not_realtime"},
+    {"id": "RT-08", "scenario": "missing_quote_permission", "expect": "abstain_when_realtime_required_no_fixture_fallback"},
+    {"id": "RT-09", "scenario": "unknown_adjustment_or_suspension", "expect": "do_not_create_complete_daily_bar"},
+    {"id": "RT-10", "scenario": "historical_statement_revision_unknown", "expect": "do_not_claim_point_in_time_correctness"}
+  ]
+}

@@ -9,6 +9,8 @@
 - 服务端从会话确定 workspace，客户端不提交 workspace 或租户 ID。访问不属于本 workspace 的资源一律返回 404。
 - 业务 JSON 响应带 `request_id`（健康检查和登录重定向除外）。日志不记录报告正文、密钥和 cookie。
 - 时间用 RFC3339；十进制数值用字符串；ID 为服务端生成的 UUID。
+- ADR-0004 的 [OpenAPI 0.4 目标草案](contracts/drafts/openapi-0.4.json)增加计划 `snapshot_mode`、任务/报告 `snapshot_as_of`、证据事件/接收时间与报告 `source_freshness`；现行 [0.3 契约](contracts/openapi.json)保持原样。`collect_latest` 的计划 `as_of` 是预览时点，任务冻结前 `snapshot_as_of=null`，冻结后与快照不可变绑定；既有请求及任务继续使用 `fixed_legacy` 原语义。
+- 目标协商协议：业务 JSON 接口请求 `Accept: application/vnd.vera.v0.4+json` 时使用 0.4 语义，成功 JSON 响应带相同 `Content-Type` 和 `Vary: Accept`；缺省或请求 `application/json` 沿用 0.3。尚未部署 0.4 的服务应返回 406，客户端还必须核对响应 `Content-Type`，防止旧服务忽略 `Accept` 并返回旧格式。健康检查、认证跳转和 PDF 按原媒体类型处理，错误可用原错误 JSON。新建 0.4 计划使用 `collect_latest`；读取历史任务时可返回 `fixed_legacy`。创建 0.4 计划和确认任务均须协商 0.4，不能跨版本确认；各版本的计划哈希按该版本规则计算并固定。此协议尚未实现，不能据此宣称服务已提供 0.4。
 - 需要幂等的写请求带 `Idempotency-Key`（1–128 字符）。同一 workspace、方法、规范化路由和键：请求哈希相同则返回原响应，不同则返回 409。幂等记录保存 30 天。
 - 列表：`page_size` 默认 20、上限 100；不透明游标，按 `created_at` + `id` 稳定排序。
 
@@ -61,7 +63,7 @@
 
 ## 4. 变更
 
-修改契约时同步更新 OpenAPI、JSON Schema、Go DTO、前端类型和契约测试。前端类型由 OpenAPI 生成（T013 选定生成器并锁定版本），不手写重复类型。删除或改名字段需要兼容窗口；已冻结的报告不随 schema 变化而改写。
+修改契约时同步更新 OpenAPI、JSON Schema、Go DTO、前端类型和契约测试。前端类型由 OpenAPI 生成（openapi-typescript 7.13.0，`cd web && npm run gen:api`；`make check-api-types` 检查漂移），不手写重复类型。删除或改名字段需要兼容窗口，`make check-contract-compat` 拦截不兼容变更；确需破坏时在 `contracts/compat-exceptions.json` 登记理由与批准记录（PR/ADR）；已冻结的报告不随 schema 变化而改写。
 
 ## 5. 浏览器投影
 

@@ -11,8 +11,8 @@
 | users | issuer+subject 唯一；persona；invited_by | identity |
 | workspaces | 每用户一个；owner_user_id 唯一 | identity |
 | sessions | hash(session_id)、user、workspace、expires_at、csrf_hash、revoked_at | identity |
-| research_plans | id、skill_id/version、subject_id、params、as_of、sections、plan_hash、expires_at、consumed_task_id | harness |
-| research_tasks | id、plan_id 唯一、skill_id/version、subject_id、status、revision、epoch、deadline、budget、snapshot_hash、report_ref、reason_code | research |
+| research_plans | id、skill_id/version、subject_id、params、as_of、snapshot_mode、sections、plan_hash、expires_at、consumed_task_id | harness |
+| research_tasks | id、plan_id 唯一、skill_id/version、subject_id、status、revision、epoch、deadline、budget、snapshot_hash、snapshot_as_of、report_ref、reason_code | research |
 | task_events | task+sequence 唯一；event_type、expected_revision、epoch、payload | research |
 | task_steps | task+epoch+step_key+input_hash 唯一；status、lease_until、attempt、output_ref、output_hash | harness |
 | model_calls | step_id+attempt 唯一；profile、model_id、observed_model_version、request_hash、状态（SENT/SUCCEEDED/FAILED/UNKNOWN）、usage、cost、reserved_cost | harness |
@@ -43,6 +43,8 @@
 | audit_events | actor、action、resource、result、trace_id；只追加 | platform |
 
 快照和事实表放在共享区，是因为同一数据快照可以被多个用户的任务复用（例如同一交易日对同一股票的个股分析）。用户只能通过自己任务的 `snapshot_hash` 访问它们，读取接口校验任务归属。
+
+ADR-0004 的 `snapshot_mode` 与 `snapshot_as_of` 是待实施的目标字段，不表示现有迁移已有这些列。`collect_latest` 的任务在冻结前截止为空；冻结事务必须同时固定截止和快照哈希，并用 epoch 与唯一约束保证并发重试只能采用同一结果。既有任务按 `fixed_legacy` 保留原时间及快照，不得重算。新增数据及血缘的 `available_at` 必须不早于其真实持久化完成；跨 S3 与 PostgreSQL 的提交顺序、崩溃恢复及可见性由实施迁移与集成测试证明，不能仅用对象接收时间代替数据库可见时间。
 
 ## 2. 隔离
 

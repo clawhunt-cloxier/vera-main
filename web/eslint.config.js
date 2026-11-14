@@ -27,6 +27,14 @@ export default [
     },
   },
   {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: globals.node,
+    },
+  },
+  {
     ignores: ['dist/', 'src/routeTree.gen.ts'],
   },
 ];
