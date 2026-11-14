@@ -1,0 +1,21 @@
+# sqlc configuration for generating type-safe database code
+version: "2"
+sql:
+  - schema: "internal/platform/db/migrations"
+    queries: "internal/platform/db/queries"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "dbgen"
+        out: "internal/platform/db/dbgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_pointers_for_null_types: true
+        emit_interface: false
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "timestamptz"
+            go_type: "time.Time"

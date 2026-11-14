@@ -1,0 +1,5 @@
+# SQL queries will be added here for sqlc to generate Go code
+# Example structure:
+# - users.sql
+# - workspaces.sql
+# - research.sql
