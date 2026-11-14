@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -78,7 +79,6 @@ type Sheet struct {
 	Unavailable map[string]string  `json:"unavailable"` // section id → reason found while computing
 	Suspicious  int                `json:"suspicious"`
 	Sources     map[string]string  `json:"sources"` // dataset id → latest available_at
-	n           int
 }
 
 func NewSheet(task uuid.UUID, epoch int64) *Sheet {
@@ -86,8 +86,7 @@ func NewSheet(task uuid.UUID, epoch int64) *Sheet {
 }
 
 func (s *Sheet) add(f Fact) *Fact {
-	s.n++
-	f.ID = fmt.Sprintf("F%d", s.n)
+	f.ID = fmt.Sprintf("F%d", len(s.Facts)+1)
 	s.Facts = append(s.Facts, f)
 	return &s.Facts[len(s.Facts)-1]
 }
@@ -123,6 +122,15 @@ func (s *Sheet) Computed(group, subject, label, period string, c Calc, key strin
 	f.Value = &v
 	f.Display, f.Unit = Display(v, c.Unit)
 	return s.add(f)
+}
+
+// Finalize orders facts by group (stable within a group) and renumbers IDs F1…Fn (HARNESS §5), so IDs do not
+// depend on the order builders ran in. Call once after all facts are added and before any ID is used.
+func (s *Sheet) Finalize() {
+	slices.SortStableFunc(s.Facts, func(a, b Fact) int { return strings.Compare(a.Group, b.Group) })
+	for i := range s.Facts {
+		s.Facts[i].ID = fmt.Sprintf("F%d", i+1)
+	}
 }
 
 // Vendor marks a computed fact as derived from vendor-defined data, which requires the basis in prose (R-07).
@@ -229,3 +237,55 @@ func Display(v decimal.Decimal, unit string) (string, string) {
 }
 
 func Ptr(s string) *string { return &s }
+
+// The Fact and Series JSON tags describe what leaves the sheet (series API payload); fields bound to evidence are
+// hidden there. The sheet itself is persisted in the step ledger and reloaded on redelivery, so it carries them.
+type storedFact struct {
+	Fact
+	Num      *decimal.Decimal `json:"num,omitempty"`
+	Change   bool             `json:"change,omitempty"`
+	Evidence []uuid.UUID      `json:"evidence,omitempty"`
+	CalcID   *uuid.UUID       `json:"calc_id,omitempty"`
+}
+
+type storedSeries struct {
+	Series
+	Section string `json:"section,omitempty"`
+}
+
+type sheetAlias Sheet
+
+type storedSheet struct {
+	*sheetAlias
+	Facts  []storedFact   `json:"facts"`
+	Charts []storedSeries `json:"charts"`
+}
+
+func (s *Sheet) MarshalJSON() ([]byte, error) {
+	st := storedSheet{sheetAlias: (*sheetAlias)(s), Facts: make([]storedFact, len(s.Facts)), Charts: make([]storedSeries, len(s.Charts))}
+	for i, f := range s.Facts {
+		st.Facts[i] = storedFact{Fact: f, Num: f.Value, Change: f.Change, Evidence: f.Evidence, CalcID: f.CalcID}
+	}
+	for i, c := range s.Charts {
+		st.Charts[i] = storedSeries{Series: c, Section: c.Section}
+	}
+	return json.Marshal(st)
+}
+
+func (s *Sheet) UnmarshalJSON(b []byte) error {
+	st := storedSheet{sheetAlias: (*sheetAlias)(s)}
+	if err := json.Unmarshal(b, &st); err != nil {
+		return err
+	}
+	s.Facts, s.Charts = make([]Fact, len(st.Facts)), make([]Series, len(st.Charts))
+	for i, f := range st.Facts {
+		fact := f.Fact
+		fact.Value, fact.Change, fact.Evidence, fact.CalcID = f.Num, f.Change, f.Evidence, f.CalcID
+		s.Facts[i] = fact
+	}
+	for i, c := range st.Charts {
+		c.Series.Section = c.Section
+		s.Charts[i] = c.Series
+	}
+	return nil
+}

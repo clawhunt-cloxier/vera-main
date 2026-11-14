@@ -4,6 +4,7 @@ package facts
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -17,7 +18,7 @@ const (
 )
 
 // FormulaVersion is bumped whenever any formula's semantics change; it is frozen into reports.
-const FormulaVersion = "1.0.0"
+const FormulaVersion = "1.1.0"
 
 // Input is one evidence-bound operand.
 type Input struct {
@@ -307,6 +308,41 @@ func ConsecutiveDays(ps []Point) Calc {
 		c.Inputs = append(c.Inputs, Input{valid[i].EvidenceID, valid[i].Value, ""})
 	}
 	return c.ok(decimal.NewFromInt(int64(dir * n)))
+}
+
+// Ranked is one member of a set ranked by a metric. Key (e.g. the security code) breaks ties so the order does
+// not depend on input order.
+type Ranked struct {
+	Key   string
+	Input Input
+}
+
+// RankDesc sorts by value descending, then key ascending.
+func RankDesc(items []Ranked) {
+	slices.SortFunc(items, func(a, b Ranked) int {
+		if c := b.Input.Value.Cmp(a.Input.Value); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Key, b.Key)
+	})
+}
+
+// F25 top_n: the first n members by value (descending, ties by key). Applicable only with at least n members.
+// The result is the sum of the top n values; the ranked members are returned for tables and F22 shares.
+func TopN(items []Ranked, n int, unit string) (Calc, []Ranked) {
+	c := newCalc("F25.top_n", unit, nil)
+	if n <= 0 || len(items) < n {
+		return c.na(fmt.Sprintf("有效成分 %d 个，不足 %d 个", len(items), n)), nil
+	}
+	ranked := slices.Clone(items)
+	RankDesc(ranked)
+	top := ranked[:n]
+	sum := decimal.Zero
+	for _, r := range top {
+		sum = sum.Add(r.Input.Value)
+		c.Inputs = append(c.Inputs, r.Input)
+	}
+	return c.ok(sum), top
 }
 
 // StableID derives calculation IDs from the task and a key so recomputation is idempotent.

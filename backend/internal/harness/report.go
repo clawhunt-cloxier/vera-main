@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -185,6 +186,12 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 	if err != nil {
 		return err
 	}
+	points, err = step(parent, e, t, "verify:summary", func() ([]summaryPoint, error) {
+		return e.verifySummary(ctx, parent, t, sheet, points, by, final, required)
+	})
+	if err != nil {
+		return err
+	}
 	doc, err := step(parent, e, t, "render", func() (Document, error) {
 		return e.render(parent, t, sk, subject, sheet, secs, results, final, points)
 	})
@@ -357,4 +364,71 @@ func (e *Engine) priceVersion() string {
 		return e.Gateway.Prices.Version
 	}
 	return ""
+}
+
+// verifySummary semantically checks summary points that rewrite claims (HARNESS §7): only points the verifier marks
+// supported survive. Points that quote a single claim verbatim need no check. When the verifier is unavailable or
+// fewer than three points survive, the deterministic fallback (verbatim claims) is used, so nothing unverified ships.
+func (e *Engine) verifySummary(ctx, parent context.Context, t *taskRow, sheet *facts.Sheet, points []summaryPoint,
+	by map[string]finalClaim, final []finalClaim, required []string) ([]summaryPoint, error) {
+	verbatim := func(p summaryPoint) bool {
+		return len(p.ClaimRefs) == 1 && by[p.ClaimRefs[0]].Claim.Text == p.Text
+	}
+	var b strings.Builder
+	var pending []string
+	for i, p := range points {
+		if verbatim(p) {
+			continue
+		}
+		ref := fmt.Sprintf("S1.%d", i+1)
+		pending = append(pending, ref)
+		fmt.Fprintf(&b, "要点 %s：%s\n依据的已核验结论：\n", ref, p.Text)
+		for _, r := range p.ClaimRefs {
+			c := by[r]
+			fmt.Fprintf(&b, "  %s（%s）：%s\n", r, c.Claim.Kind, c.Claim.Text)
+			for _, id := range c.Claim.Refs {
+				if f, ok := sheet.Get(id); ok {
+					b.WriteString("    " + factLine(*f) + "\n")
+				}
+			}
+		}
+	}
+	if len(pending) == 0 {
+		return points, nil
+	}
+	raw, _, err := e.Gateway.Complete(ctx, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "verify:summary", Profile: "verifier",
+		Messages: []model.Message{{Role: "system", Content: summaryVerifyRules}, {Role: "user", Content: b.String()}}, MaxOutput: 2000,
+		Schema: "verify-output", Budget: t.Budget, Simulate: func() (any, error) {
+			vs := []map[string]string{}
+			for _, r := range pending {
+				vs = append(vs, map[string]string{"claim_ref": r, "verdict": "supported", "reason": "", "rewrite": "", "suggested_kind": "none"})
+			}
+			return map[string]any{"verdicts": vs}, nil
+		}})
+	if err != nil {
+		if errors.Is(err, errStale) || errors.Is(err, context.Canceled) && parent.Err() != nil {
+			return nil, err
+		}
+		return fallbackSummary(final, required), nil
+	}
+	var out verifyOut
+	if json.Unmarshal(raw, &out) != nil {
+		return fallbackSummary(final, required), nil
+	}
+	ok := map[string]bool{}
+	for _, v := range out.Verdicts {
+		if v.Verdict == "supported" {
+			ok[v.ClaimRef] = true
+		}
+	}
+	var kept []summaryPoint
+	for i, p := range points {
+		if verbatim(p) || ok[fmt.Sprintf("S1.%d", i+1)] {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) < 3 {
+		return fallbackSummary(final, required), nil
+	}
+	return kept, nil
 }

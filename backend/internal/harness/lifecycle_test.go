@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
@@ -96,6 +97,19 @@ func TestLifecycle(t *testing.T) {
 	})
 	if suspicious < 1 {
 		t.Fatalf("ADV-01 paragraph not flagged suspicious")
+	}
+	// The compute output in the step ledger is what a redelivered run reloads: it must keep evidence bindings.
+	var stored facts.Sheet
+	db.InWorkspace(ctx, pool, ws, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT output FROM task_steps WHERE task_id=$1 AND step_key='compute'`, id).Scan(&stored)
+	})
+	if len(stored.Facts) == 0 {
+		t.Fatal("no facts in stored compute output")
+	}
+	for _, f := range stored.Facts {
+		if len(f.Evidence) == 0 || (f.Kind == facts.KindComputed && f.CalcID == nil) || (f.Display != "" && f.Display != "不适用" && f.Kind != facts.KindText && f.Value == nil && f.Unit != "") {
+			t.Fatalf("stored fact lost bindings: %+v", f)
+		}
 	}
 	// Cancelling a completed task conflicts.
 	_, rev := status(t, e, ws, id)

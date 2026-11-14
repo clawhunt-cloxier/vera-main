@@ -6,6 +6,9 @@ ADR-0004 的 [盘中时点与来源样例](tests/fixtures/intraday-cases.json) �
 
 - `make check-docs`：相对链接、显式锚点、JSON 代码块、任务 ID 唯一、关键文件、模拟算术夹具。
 - `make check-contracts`：OpenAPI 3.1 校验，计划、任务、策略 Schema 的示例与非法输入用例。
+- `make check-contract-compat`：把 `contracts/openapi.json` 与 `contracts/schemas/` 同基线版本比较（`CONTRACT_BASE_REF`，默认与 origin/dev 的 merge-base；CI 的 PR 用目标分支 SHA，推送用推送前 SHA）。删除操作、成功响应或响应字段，响应字段不再必需，请求新增必填项，请求类型、枚举、长度收紧，均判为不兼容；响应枚举新增只告警。确需破坏时在 `contracts/compat-exceptions.json` 逐条登记 finding、reason、approved_in。
+- `make check-api-types`：用锁定版本的 openapi-typescript 重新生成前端类型并与 `web/src/api/schema.d.ts` 比较；不一致时执行 `cd web && npm run gen:api`。
+- `make check-toolchain`：Go ≥ 1.27、Node ≥ 26 的版本检查。
 - `make test-go`：健康与就绪接口的 Go 测试。
 - `make build-web`：TypeScript 检查与 Vite 生产构建。
 - `make test-automation`：用离线 API 替身验证“合并后自动清理任务分支”的保护条件；不请求 GitHub，也不删除真实分支。真实触发与权限需在合并后查看维护作业。
@@ -19,7 +22,7 @@ Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch 
 
 | 任务 | 必须有的测试 |
 | --- | --- |
-| T011 | golangci-lint（`make lint-go`，已实现）、前端 lint 与格式检查（`make lint-web`，已实现）、OpenAPI → TS 类型生成一致性检查（未实现）、契约兼容性检查（未实现） |
+| T011 | golangci-lint（`make lint-go`，已实现）、前端 lint 与格式检查（`make lint-web`，已实现）、OpenAPI → TS 类型生成一致性检查（`make check-api-types`，已实现）、契约兼容性检查（`make check-contract-compat`，已实现，`scripts/test_contract_compat.py` 覆盖判定规则）、工具链版本检查（`make check-toolchain`，已实现） |
 | T012 | 迁移在真实 PostgreSQL 上执行；RLS 与复合外键；唯一约束并发测试；River 事务入队 |
 | T013 | OIDC 登录回调（state/nonce/PKCE）、CSRF、会话过期、邀请码、跨账号访问返回 404 |
 | T014 | 每个厂商映射的样本测试；单位与口径转换；对账冲突；新鲜度；fixture 在 production 模式拒绝启动 |

@@ -4,6 +4,7 @@ package identity
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -125,6 +126,15 @@ func Random(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
+// CSRFToken derives the per-session CSRF token from the raw session token, so the server stores only
+// its hash (DATA_MODEL sessions.csrf_hash) yet can still return it from /me. Only a holder of the
+// session cookie can compute it.
+func CSRFToken(sessionToken string) string {
+	m := hmac.New(sha256.New, []byte(sessionToken))
+	m.Write([]byte("vera-csrf-v1"))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
+
 func Hash(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
@@ -243,8 +253,8 @@ func (s *Service) startSession(ctx context.Context, iss, sub, email, name string
 			return err
 		}
 		out.token, out.workspace = Random(32), ws
-		if _, err := tx.Exec(ctx, `INSERT INTO sessions(id_hash,user_id,workspace_id,csrf_token,expires_at) VALUES($1,$2,$3,$4,$5)`,
-			Hash(out.token), uid, ws, Random(24), time.Now().Add(SessionTTL)); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO sessions(id_hash,user_id,workspace_id,csrf_hash,expires_at) VALUES($1,$2,$3,$4,$5)`,
+			Hash(out.token), uid, ws, Hash(CSRFToken(out.token)), time.Now().Add(SessionTTL)); err != nil {
 			return err
 		}
 		return audit.Record(ctx, tx, ws, uid.String(), "auth.login", "user:"+uid.String(), "success", nil)
@@ -262,8 +272,9 @@ type Principal struct {
 	UserID      uuid.UUID
 	WorkspaceID *uuid.UUID
 	Persona     string
-	CSRF        string
+	CSRF        string // derived token returned by /me; never stored
 	sessionHash string
+	csrfHash    string
 }
 
 type ctxKey struct{}
@@ -284,13 +295,14 @@ func (s *Service) principal(r *http.Request) (*Principal, error) {
 		return nil, errs.Unauthorized()
 	}
 	p := &Principal{sessionHash: Hash(c.Value)}
-	err = s.pool.QueryRow(r.Context(), `SELECT s.user_id, w.id, u.persona, s.csrf_token FROM sessions s
+	err = s.pool.QueryRow(r.Context(), `SELECT s.user_id, w.id, u.persona, s.csrf_hash FROM sessions s
 		JOIN users u ON u.id = s.user_id LEFT JOIN workspaces w ON w.owner_user_id = s.user_id
 		WHERE s.id_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.disabled_at IS NULL`, p.sessionHash).
-		Scan(&p.UserID, &p.WorkspaceID, &p.Persona, &p.CSRF)
+		Scan(&p.UserID, &p.WorkspaceID, &p.Persona, &p.csrfHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errs.Unauthorized()
 	}
+	p.CSRF = CSRFToken(c.Value)
 	return p, err
 }
 
@@ -313,7 +325,7 @@ func (s *Service) Require(needWorkspace bool) func(http.Handler) http.Handler {
 					httpx.Error(w, r, errs.Forbidden("ORIGIN_MISMATCH", "请求来源无效"))
 					return
 				}
-				if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(p.CSRF)) != 1 {
+				if tok := r.Header.Get("X-CSRF-Token"); tok == "" || subtle.ConstantTimeCompare([]byte(Hash(tok)), []byte(p.csrfHash)) != 1 {
 					httpx.Error(w, r, errs.Forbidden("CSRF_INVALID", "页面已过期，请刷新后重试"))
 					return
 				}
