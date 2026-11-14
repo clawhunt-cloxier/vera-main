@@ -69,6 +69,20 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = runtime.Close() }()
+	usage, err := runtime.UsageStatistics(ctx, "EM_CSD", "2026-11-01", "2026-11-13")
+	if err != nil || usage.Rows != 1 {
+		t.Fatalf("gated usage diagnostic: %v", err)
+	}
+	select {
+	case <-archived:
+		t.Fatal("account usage diagnostic was archived")
+	default:
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if data, err := runtime.UsageStatistics(cancelled, "EM_CSD", "2026-11-01", "2026-11-13"); err == nil || len(data.Values) != 0 {
+		t.Fatal("cancelled usage diagnostic returned data")
+	}
 	quote, ref, err := runtime.CollectQuote(ctx, "A,B", "X,Y", "")
 	if err != nil || len(quote.Data.Values) != 8 || ref.BodyRef == "" || ref.BodySHA256 == "" {
 		t.Fatalf("runtime collection: %v", err)

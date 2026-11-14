@@ -226,6 +226,28 @@ func (r *Runtime) MapSecurityFromArchive(ctx context.Context, ref ArchiveRef, co
 	return mapSecurityBasics(cube, ref, code)
 }
 
+// UsageStatistics is a read-only account diagnostic, not a research source.
+// It goes through the account gate and is not archived or sent to a model.
+func (r *Runtime) UsageStatistics(ctx context.Context, function, from, to string) (Table, error) {
+	if r == nil || r.client == nil {
+		return Table{}, errors.New("emquant: runtime unavailable")
+	}
+	if _, err := usageOptions(function, from, to); err != nil {
+		return Table{}, err
+	}
+	var table Table
+	if err := r.collector.callVendor(ctx, func() error { var err error; table, err = r.client.UsageStatistics(function, from, to); return err }); err != nil {
+		return Table{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Table{}, err
+	}
+	if err := validateTable(table); err != nil {
+		return Table{}, err
+	}
+	return table, nil
+}
+
 // CollectQuote returns a source archive and unnormalized observation. It does
 // not certify that the vendor field is real time or ready for a report.
 func (r *Runtime) CollectQuote(ctx context.Context, codes, indicators, options string) (Quote, ArchiveRef, error) {

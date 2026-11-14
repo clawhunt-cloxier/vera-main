@@ -119,6 +119,13 @@ func TestNativeLifecycleAndResponse(t *testing.T) {
 	if _, err = c.CheckStockCodes("000001.SZ"); err == nil {
 		t.Fatal("non-numeric lookup reached SDK")
 	}
+	usage, err := c.UsageStatistics("EM_CSD", "2026-11-01", "2026-11-13")
+	if err != nil || usage.Rows != 1 || len(usage.Values) != 2 || usage.Values[1].Value != int64(5) {
+		t.Fatalf("usage diagnostic: %v", err)
+	}
+	if _, err := c.UsageStatistics("EM_CSD,EM_CSS", "2026-11-01", "2026-11-13"); err == nil {
+		t.Fatal("unsupported function reached SDK")
+	}
 	names, err := c.MatchStockName("模拟证券")
 	if err != nil || names.Rows != 1 || len(names.Values) != 2 || names.Values[1].Value != "600000.SH" {
 		t.Fatalf("name lookup: %v", err)
@@ -190,6 +197,30 @@ func TestLiveSecurityName(t *testing.T) {
 	}
 	if _, observed, fingerprint, err := DecodeTableArchive(store.body, ref.BodySHA256); err != nil || !observed.Equal(ref.ReceivedAt) || fingerprint != ref.RequestFingerprint {
 		t.Fatalf("name lookup archive: %v", err)
+	}
+}
+
+// TestLiveUsageStatistics is an opt-in account diagnostic, not a quota or
+// entitlement certification. It never logs returned account metadata.
+func TestLiveUsageStatistics(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_USAGE") != "1" {
+		t.Skip("live usage test not requested")
+	}
+	c, err := Open(os.Getenv("EMQUANT_LIBRARY"), os.Getenv("EMQUANT_USER"), os.Getenv("EMQUANT_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	table, err := c.UsageStatistics("EM_CSD", "2026-11-01", "2026-11-13")
+	if err != nil {
+		t.Fatalf("usage query: %v", err)
+	}
+	if table.Rows == 0 {
+		t.Fatal("usage query returned no rows; cannot establish account usage")
 	}
 }
 

@@ -32,6 +32,7 @@ typedef struct {
  int (*cfn)(const char *, const char *, int, const char *, eqdata **);
  int (*cec)(const char *, const char *, eqtable **);
  int (*ctr)(const char *, const char *, const char *, eqtable **);
+ int (*datastatistics)(const char *, const char *, const char *, eqtable **);
  int (*tradedates)(const char *, const char *, const char *, eqdata **);
  int (*release)(void *);
 } eqapi;
@@ -54,6 +55,7 @@ static int eq_open(eqapi *a, const char *path) {
  a->cfn = dlsym(a->handle, "cfn");
  a->cec = dlsym(a->handle, "cec");
  a->ctr = dlsym(a->handle, "ctr");
+ a->datastatistics = dlsym(a->handle, "datastatistics");
  if (!a->setdir || !a->setcallback || !a->start || !a->stop || !a->csd || !a->css || !a->csqsnapshot || !a->tradedates || !a->release) {
   dlclose(a->handle); memset(a, 0, sizeof(*a)); return -2;
  }
@@ -94,6 +96,10 @@ static int eq_cec(eqapi *a, const char *codes, const char *options, eqtable **ou
 static int eq_ctr(eqapi *a, const char *name, const char *fields, const char *options, eqtable **out) {
  if (!a->ctr) return -4;
  return a->ctr(name, fields, options, out);
+}
+static int eq_usage(eqapi *a, const char *name, const char *fields, const char *options, eqtable **out) {
+ if (!a->datastatistics) return -4;
+ return a->datastatistics(name, fields, options, out);
 }
 static int eq_release_table(eqapi *a, eqtable *d) { return a->release(d); }
 static int eq_release(eqapi *a, eqdata *d) { return a->release(d); }
@@ -229,6 +235,16 @@ func (c *Client) MatchStockName(name string) (Table, error) {
 	return c.queryTable("ctr", "SECUMATCH", stockNameIndicators, options)
 }
 
+// UsageStatistics queries account usage metadata. Results must not be sent to
+// research models or logs; they do not establish per-minute limits or license.
+func (c *Client) UsageStatistics(function, from, to string) (Table, error) {
+	options, err := usageOptions(function, from, to)
+	if err != nil {
+		return Table{}, err
+	}
+	return c.queryTable("usage", function, usageIndicators, options)
+}
+
 func (c *Client) queryTable(method, first, indicators, options string) (table Table, err error) {
 	nativeMu.Lock()
 	defer nativeMu.Unlock()
@@ -251,14 +267,16 @@ func (c *Client) queryTable(method, first, indicators, options string) (table Ta
 		rc = C.eq_cec(&c.api, a, b, &data)
 	case "ctr":
 		rc = C.eq_ctr(&c.api, a, cfields, b, &data)
+	case "usage":
+		rc = C.eq_usage(&c.api, a, cfields, b, &data)
 	default:
 		return Table{}, errors.New("emquant: invalid table query")
 	}
 	if rc != 0 {
-		return Table{}, &SDKError{Operation: "security lookup", Code: int(rc)}
+		return Table{}, &SDKError{Operation: "table query", Code: int(rc)}
 	}
 	if data == nil {
-		return Table{}, errors.New("emquant: null security lookup response")
+		return Table{}, errors.New("emquant: null table response")
 	}
 	defer func() {
 		if rc := C.eq_release_table(&c.api, data); rc != 0 {

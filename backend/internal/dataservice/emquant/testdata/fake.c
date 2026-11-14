@@ -61,6 +61,14 @@ int ctr(const char *name, const char *fields, const char *options, eqtable **out
  *out = &data;
  return 0;
 }
+int datastatistics(const char *name, const char *fields, const char *options, eqtable **out) {
+ if ((strcmp(name,"EM_CSD") && strcmp(name,"EM_CSS")) || strcmp(fields,"FUNCENAME,SECUTYPE,PERIOD,STARTDATE,ENDDATE,THRESHOLD,USEDDATA,AVAILABEDATA") || !strstr(options,"StartDate=") || !strstr(options,",EndDate=")) return 99;
+ static eqchar columns[] = {{"FUNCENAME",sizeof("FUNCENAME")},{"USEDDATA",sizeof("USEDDATA")}};
+ static eqvariant values[] = {{.type=13,.text={"SYNTHETIC",sizeof("SYNTHETIC")}},{.type=6,.value.i=5}};
+ static eqtable data = {1,2,{columns,2},{values,2}};
+ *out = &data;
+ return 0;
+}
 int tradedates(const char *from, const char *to, const char *options, eqdata **out) {
  (void)to; (void)options;
  if (!strcmp(from, "ERROR")) return 88;

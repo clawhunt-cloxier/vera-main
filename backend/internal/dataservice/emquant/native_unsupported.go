@@ -38,4 +38,8 @@ func (*Client) MatchStockName(_ string) (Table, error) {
 	return Table{}, errors.New("emquant: native SDK requires Linux and cgo")
 }
 
+func (*Client) UsageStatistics(_, _, _ string) (Table, error) {
+	return Table{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
 func (*Client) Close() error { return nil }
