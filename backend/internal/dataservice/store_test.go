@@ -291,3 +291,88 @@ func (p *singleRecordProvider) Capabilities(context.Context) ([]dataservice.Capa
 func (p *singleRecordProvider) Records(context.Context) ([]dataservice.Record, error) {
 	return []dataservice.Record{p.record}, nil
 }
+
+func TestFreezeConcurrentQuarantineRace(t *testing.T) {
+	// Prove that quality_state is checked atomically with the FOR SHARE lock.
+	// Strategy: start a transaction that holds an UPDATE lock on a record
+	// (simulating a quarantine in progress), then start Freeze on that same
+	// record. Because Freeze's FOR SHARE needs to read the row, it must wait
+	// until the UPDATE lock is released. We release it with the record already
+	// QUARANTINED, so Freeze must see QUARANTINED and reject — not the PASS
+	// it would have seen before the lock.
+	//
+	// In a two-step implementation (check quality, then lock separately) the
+	// check would have run before the lock, seen PASS, and incorrectly allowed
+	// the freeze to proceed. The atomic implementation cannot observe PASS and
+	// then have QUARANTINED appear after acquiring the lock.
+	pool := dbtest.New(t)
+	ctx := context.Background()
+	p, err := fixture.New("../../../tests/fixtures/demo-universe.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := dataservice.LoadCatalog("../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := dataservice.NewStore(pool, cat)
+	if _, err := st.Sync(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := st.Query(ctx, dataservice.Query{
+		DatasetIDs: []string{"mkt.daily_bar"},
+		AsOf:       p.Now(),
+	})
+	if err != nil || len(recs) == 0 {
+		t.Fatalf("need records: %v", err)
+	}
+	target := recs[0].ID
+
+	// Open a transaction that immediately takes an UPDATE lock on the target
+	// row. We hold it open until Freeze is definitely waiting for the lock.
+	lockConn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockConn.Release()
+
+	tx, err := lockConn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Lock the row and quarantine it — but don't commit yet.
+	if _, err := tx.Exec(ctx, `UPDATE records SET quality_state='QUARANTINED' WHERE id=$1`, target); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatal(err)
+	}
+
+	// Channel to receive the Freeze result once the lock is released.
+	type result struct {
+		hash string
+		err  error
+	}
+	done := make(chan result, 1)
+
+	go func() {
+		h, e := st.Freeze(ctx, p.Now(), []uuid.UUID{target})
+		done <- result{h, e}
+	}()
+
+	// Give Freeze time to reach the FOR SHARE and block on our lock.
+	time.Sleep(100 * time.Millisecond)
+
+	// Commit the quarantine — this releases the UPDATE lock.
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	r := <-done
+	if r.err == nil {
+		t.Fatal("Freeze succeeded despite record being QUARANTINED when the lock was released")
+	}
+	if !strings.Contains(r.err.Error(), "QUARANTINED") {
+		t.Fatalf("expected QUARANTINED error, got: %v", r.err)
+	}
+}
