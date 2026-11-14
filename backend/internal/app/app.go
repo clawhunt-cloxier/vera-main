@@ -3,7 +3,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -84,16 +83,20 @@ func (a *App) build() error {
 	profiles := map[string]model.Profile{}
 	adapters := map[string]model.Adapter{"sim": model.Sim{}, "replay": model.Replay{Dir: c.ReplayDir}}
 	for name, p := range c.Profiles {
+		timeout := time.Duration(a.Policy.ModelCall.HTTPTimeoutSeconds) * time.Second
+		if p.TimeoutSeconds > 0 {
+			timeout = time.Duration(p.TimeoutSeconds) * time.Second
+		}
 		mp := model.Profile{Name: name, Adapter: p.Adapter, BaseURL: p.BaseURL, ModelID: p.ModelID, APIKey: p.APIKey, PriceTable: p.PriceTable,
-			Timeout: time.Duration(a.Policy.ModelCall.HTTPTimeoutSeconds) * time.Second}
+			Temperature: p.Temperature, Thinking: p.Thinking, ExtraBody: p.ExtraBody, Timeout: timeout, MaxOutput: p.MaxOutput,
+			Concurrency: p.Concurrency}
 		if mp.ModelID == "" {
 			mp.ModelID = "vera-" + p.Adapter
 		}
-		if p.ExtraBody != "" {
-			_ = json.Unmarshal([]byte(p.ExtraBody), &mp.ExtraBody)
-		}
-		if p.Adapter == "openai" {
+		if p.Adapter == "openai" || p.Adapter == "record" {
 			adapters["openai"] = model.OpenAI{HTTP: &http.Client{}}
+			// record: cassette hits replay for free, misses go to the vendor and are saved (development only).
+			adapters["record"] = model.Replay{Dir: c.ReplayDir, Record: adapters["openai"]}
 			if prices == nil {
 				if prices, err = model.LoadPrices(c.PriceTablePath); err != nil {
 					return err

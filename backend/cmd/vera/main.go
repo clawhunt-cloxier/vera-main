@@ -98,7 +98,7 @@ func serveAPI(ctx context.Context, a *app.App) error {
 }
 
 func runWorker(ctx context.Context, a *app.App) error {
-	c, err := a.Engine.NewRiver(a.Pool, true, a.Cfg.WorkerConcurrency, a.Watch.Register)
+	c, err := a.Engine.NewRiver(a.Pool, true, a.Cfg.WorkerConcurrency, a.Watch.Register, a.Engine.Gateway.Register)
 	if err != nil {
 		return err
 	}
