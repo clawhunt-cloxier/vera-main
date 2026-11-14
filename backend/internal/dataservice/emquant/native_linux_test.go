@@ -193,6 +193,34 @@ func TestLiveSecurityName(t *testing.T) {
 	}
 }
 
+// TestLiveDisclosureObservation requires explicit opt-in and does not log cells.
+func TestLiveDisclosureObservation(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_DISCLOSURE") != "1" {
+		t.Skip("live disclosure test not requested")
+	}
+	c, err := Open(os.Getenv("EMQUANT_LIBRARY"), os.Getenv("EMQUANT_USER"), os.Getenv("EMQUANT_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	store := &testRawStore{ref: "object://test/disclosure-live"}
+	got, err := (Collector{Fetcher: c, Store: store}).CollectDisclosureObservation(context.Background(), "300059.SZ", "2025-12-31")
+	if err != nil {
+		t.Fatalf("disclosure observation: %v", err)
+	}
+	cube, _, err := DecodeArchive(store.body, got.Source.BodySHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mapDisclosureObservation(cube, got.Source, "300059.SZ", "2025-12-31"); err != nil {
+		t.Fatalf("disclosure replay: %v", err)
+	}
+}
+
 // TestLiveSecurity is separate because response formats and access to these
 // fields are unverified. It never logs returned values.
 func TestLiveSecurity(t *testing.T) {

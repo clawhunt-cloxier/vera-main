@@ -247,6 +247,28 @@ func (r *Runtime) CollectIndustryLevel(ctx context.Context, code, asOf string, l
 	return r.collector.CollectIndustryLevel(ctx, code, asOf, level)
 }
 
+// CollectDisclosureObservation preserves vendor disclosure metadata without
+// asserting an association with a particular financial statement version.
+func (r *Runtime) CollectDisclosureObservation(ctx context.Context, code, period string) (DisclosureObservation, error) {
+	if r == nil || r.client == nil {
+		return DisclosureObservation{}, errors.New("emquant: runtime unavailable")
+	}
+	return r.collector.CollectDisclosureObservation(ctx, code, period)
+}
+
+// MapDisclosureFromArchive checks archive and request identity before mapping.
+func (r *Runtime) MapDisclosureFromArchive(ctx context.Context, ref ArchiveRef, code, period string) (DisclosureObservation, error) {
+	body, err := r.ReadArchive(ctx, ref)
+	if err != nil {
+		return DisclosureObservation{}, err
+	}
+	cube, _, err := DecodeArchive(body, ref.BodySHA256)
+	if err != nil {
+		return DisclosureObservation{}, err
+	}
+	return mapDisclosureObservation(cube, ref, code, period)
+}
+
 func (r *Runtime) CollectSecurityBasics(ctx context.Context, code string) (SecurityBasics, error) {
 	if r == nil || r.client == nil {
 		return SecurityBasics{}, errors.New("emquant: runtime unavailable")

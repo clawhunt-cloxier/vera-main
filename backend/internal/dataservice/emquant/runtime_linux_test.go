@@ -121,6 +121,19 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 		t.Fatal("statement archive accepted with the wrong report period")
 	}
 	<-archived
+	disclosureFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"STMTACTDATE", "CORRECTANNCNUM", "CORRECTANNCDATE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "2026-04-01"}, {Type: 8, Value: int64(1)}, {Type: 0}}}}
+	disclosure, err := (Collector{Fetcher: disclosureFetcher, Store: runtime.store}).CollectDisclosureObservation(ctx, "A.SH", "2025-12-31")
+	if err != nil {
+		t.Fatalf("disclosure archive: %v", err)
+	}
+	replayedDisclosure, err := runtime.MapDisclosureFromArchive(ctx, disclosure.Source, "A.SH", "2025-12-31")
+	if err != nil || replayedDisclosure.Cells["CORRECTANNCNUM"].Value != int64(1) {
+		t.Fatalf("disclosure replay: %v", err)
+	}
+	if _, err := runtime.MapDisclosureFromArchive(ctx, disclosure.Source, "A.SH", "2025-09-30"); err == nil {
+		t.Fatal("disclosure archive accepted with wrong period")
+	}
+	<-archived
 	industryFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"HISSW2021", "HISSW2021CODE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "模拟行业"}, {Type: 13, Value: "synthetic-code"}}}}
 	industry, err := (Collector{Fetcher: industryFetcher, Store: runtime.store}).CollectIndustryLevel(ctx, "A.SH", "2025-12-31", 2)
 	if err != nil {
