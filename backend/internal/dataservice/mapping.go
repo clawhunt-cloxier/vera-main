@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -123,12 +124,21 @@ func applyTransform(transform, unit string, val any) (any, error) {
 	case "string":
 		return str, nil
 	case "integer":
+		// Reject non-integer values (e.g. 1.9 must not silently truncate to 1).
 		n, err := strconv.ParseInt(str, 10, 64)
 		if err != nil {
-			if f, err2 := strconv.ParseFloat(str, 64); err2 == nil {
-				return int64(f), nil
+			// Accept only whole-number floats (e.g. "100.0" is fine, "1.9" is not).
+			f, err2 := strconv.ParseFloat(str, 64)
+			if err2 != nil {
+				return nil, fmt.Errorf("integer: cannot parse %q: %w", str, err)
 			}
-			return nil, err
+			if f != math.Trunc(f) {
+				return nil, fmt.Errorf("integer: %q is not an integer value", str)
+			}
+			if f > float64(math.MaxInt64) || f < float64(math.MinInt64) {
+				return nil, fmt.Errorf("integer: %q overflows int64", str)
+			}
+			return int64(f), nil
 		}
 		return n, nil
 	default:

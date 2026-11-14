@@ -39,10 +39,10 @@ type Record struct {
 	Payload     map[string]any
 
 	// Blood lineage (optional; set by vendor adapters, not fixture).
-	RawRef        string // object-storage key for the raw response
-	RawSHA256     string // SHA-256 of raw response body
-	RawLocator    string // JSON path or page range within raw body
-	MappingVersion int   // version of the MappingSpec used
+	RawRef         string // object-storage key for the raw response
+	RawSHA256      string // SHA-256 of raw response body
+	RawLocator     string // JSON path or page range within raw body
+	MappingVersion int    // version of the MappingSpec used
 
 	// Quality state: PASS (default) | WARN | QUARANTINED | REJECTED.
 	// QUARANTINED records are excluded from snapshots.
@@ -82,12 +82,12 @@ type Provider interface {
 type ErrClass string
 
 const (
-	ErrRateLimited         ErrClass = "RATE_LIMITED"          // back off and retry
-	ErrAuthFailed          ErrClass = "AUTH_FAILED"           // do not retry; block provider
-	ErrNotCovered          ErrClass = "NOT_COVERED"           // provider does not cover this subject/period
-	ErrSchemaChanged       ErrClass = "SCHEMA_CHANGED"        // mapping failed; alert and quarantine
-	ErrUpstreamUnavailable ErrClass = "UPSTREAM_UNAVAILABLE"  // transient; retry
-	ErrEmptyValid          ErrClass = "EMPTY_VALID"           // no data for period (e.g. no dragon-tiger today)
+	ErrRateLimited         ErrClass = "RATE_LIMITED"         // back off and retry
+	ErrAuthFailed          ErrClass = "AUTH_FAILED"          // do not retry; block provider
+	ErrNotCovered          ErrClass = "NOT_COVERED"          // provider does not cover this subject/period
+	ErrSchemaChanged       ErrClass = "SCHEMA_CHANGED"       // mapping failed; alert and quarantine
+	ErrUpstreamUnavailable ErrClass = "UPSTREAM_UNAVAILABLE" // transient; retry
+	ErrEmptyValid          ErrClass = "EMPTY_VALID"          // no data for period (e.g. no dragon-tiger today)
 )
 
 // ProviderError carries a classification alongside the underlying error.
@@ -110,18 +110,18 @@ type QualityIssue struct {
 // MappingSpec describes how to map one provider dataset to a canonical dataset.
 // Loaded from backend/internal/dataservice/mappings/<provider>/<dataset>.yaml.
 type MappingSpec struct {
-	Provider        string        `yaml:"provider"`
-	ProviderDataset string        `yaml:"provider_dataset"`
-	Target          string        `yaml:"target"`
-	Version         int           `yaml:"version"`
-	Fields          []FieldMap    `yaml:"fields"`
-	Basis           MappingBasis  `yaml:"basis"`
+	Provider        string       `yaml:"provider"`
+	ProviderDataset string       `yaml:"provider_dataset"`
+	Target          string       `yaml:"target"`
+	Version         int          `yaml:"version"`
+	Fields          []FieldMap   `yaml:"fields"`
+	Basis           MappingBasis `yaml:"basis"`
 }
 
 // FieldMap maps one provider field to a canonical field.
 type FieldMap struct {
 	Target    string `yaml:"target"`
-	Source    string `yaml:"source"`    // JSONPath expression ($.field or $.nested.field)
+	Source    string `yaml:"source"` // JSONPath expression ($.field or $.nested.field)
 	Unit      string `yaml:"unit"`
 	Transform string `yaml:"transform"` // decimal | date_yyyymmdd | scale_to_base | string | integer
 }

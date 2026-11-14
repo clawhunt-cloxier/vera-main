@@ -152,24 +152,24 @@ func nilIfZero(n int) *int {
 
 // StoredRecord is a record as read back for research, with its evidence identity.
 type StoredRecord struct {
-	ID          uuid.UUID
-	DatasetID   string
-	EntityID    *uuid.UUID
-	RecordKey   string
-	Version     int
-	Period      *time.Time
-	PublishedAt *time.Time
-	AvailableAt time.Time
-	ProviderID  string
-	Origin      string
-	SourceTier  string
-	Basis       string
-	Payload     map[string]any
-	ContentHash  string
-	QualityState string
-	RawRef        *string
-	RawSHA256     *string
-	RawLocator    *string
+	ID             uuid.UUID
+	DatasetID      string
+	EntityID       *uuid.UUID
+	RecordKey      string
+	Version        int
+	Period         *time.Time
+	PublishedAt    *time.Time
+	AvailableAt    time.Time
+	ProviderID     string
+	Origin         string
+	SourceTier     string
+	Basis          string
+	Payload        map[string]any
+	ContentHash    string
+	QualityState   string
+	RawRef         *string
+	RawSHA256      *string
+	RawLocator     *string
 	MappingVersion *int
 }
 
@@ -231,9 +231,11 @@ func sortRecords(out []StoredRecord) {
 }
 
 // Coverage reports which datasets have at least one record per entity as of asOf (capability check for plans).
+// Only PASS/WARN records are counted; QUARANTINED/REJECTED are excluded.
 func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Time) (map[uuid.UUID]map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT r.entity_id, r.dataset_id FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.entity_id = ANY($1) AND r.available_at <= $2 AND p.allow_model_processing`, entities, asOf)
+		WHERE r.entity_id = ANY($1) AND r.available_at <= $2 AND p.allow_model_processing
+		AND r.quality_state IN ('PASS','WARN')`, entities, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -254,10 +256,12 @@ func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Ti
 }
 
 // HasGlobal reports whether an entity-less dataset (calendar, index bars, connect turnover) has data as of asOf.
+// Only PASS/WARN records are counted.
 func (s *Store) HasGlobal(ctx context.Context, dataset string, asOf time.Time) (bool, error) {
 	var ok bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND r.available_at <= $2 AND p.allow_model_processing)`, dataset, asOf).Scan(&ok)
+		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND r.available_at <= $2 AND p.allow_model_processing
+		AND r.quality_state IN ('PASS','WARN'))`, dataset, asOf).Scan(&ok)
 	return ok, err
 }
 
@@ -284,17 +288,30 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 }
 
 // Freeze stores the exact record set used by a task and returns its hash.
+// It rejects any record ID whose quality_state is QUARANTINED or REJECTED, so that
+// bad data cannot enter a snapshot even when a caller specifies it directly.
 func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (string, error) {
 	sorted := slices.Clone(ids)
 	slices.SortFunc(sorted, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
 	sorted = slices.Compact(sorted)
+	// Verify every ID is a valid, usable record before freezing.
+	var badCount int
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM records WHERE id = ANY($1) AND quality_state NOT IN ('PASS','WARN')`,
+		sorted).Scan(&badCount)
+	if err != nil {
+		return "", fmt.Errorf("freeze: quality check failed: %w", err)
+	}
+	if badCount > 0 {
+		return "", fmt.Errorf("freeze: %d record(s) have QUARANTINED or REJECTED quality state", badCount)
+	}
 	h := sha256.New()
 	h.Write([]byte(asOf.UTC().Format(time.RFC3339)))
 	for _, id := range sorted {
 		h.Write(id[:])
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
-	_, err := s.pool.Exec(ctx, `INSERT INTO snapshots(hash,as_of,record_ids) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, hash, asOf, sorted)
+	_, err = s.pool.Exec(ctx, `INSERT INTO snapshots(hash,as_of,record_ids) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, hash, asOf, sorted)
 	return hash, err
 }
 

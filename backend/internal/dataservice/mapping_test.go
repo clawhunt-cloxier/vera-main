@@ -126,6 +126,46 @@ func TestApplyMappingFatalTransform(t *testing.T) {
 	}
 }
 
+func TestApplyMappingIntegerRejectsNonInteger(t *testing.T) {
+	spec := &MappingSpec{
+		Fields: []FieldMap{
+			{Target: "count", Source: "$.count", Transform: "integer"},
+		},
+	}
+	// 1.9 must not silently truncate to 1.
+	raw := map[string]any{"count": "1.9"}
+	_, issues, err := ApplyMapping(spec, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || !issues[0].Fatal {
+		t.Fatalf("expected 1 fatal issue for non-integer 1.9, got %v", issues)
+	}
+
+	// 100.0 is a whole-number float, should be accepted.
+	raw2 := map[string]any{"count": "100.0"}
+	payload, issues2, err := ApplyMapping(spec, raw2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues2) != 0 {
+		t.Fatalf("expected no issues for 100.0, got %v", issues2)
+	}
+	if payload["count"] != int64(100) {
+		t.Fatalf("count = %v, want 100", payload["count"])
+	}
+
+	// Plain integer string accepted.
+	raw3 := map[string]any{"count": "42"}
+	payload3, _, err := ApplyMapping(spec, raw3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload3["count"] != int64(42) {
+		t.Fatalf("count = %v, want 42", payload3["count"])
+	}
+}
+
 func TestQualityStateFromIssues(t *testing.T) {
 	if s := qualityStateFromIssues(nil); s != "PASS" {
 		t.Fatalf("nil → %s, want PASS", s)
