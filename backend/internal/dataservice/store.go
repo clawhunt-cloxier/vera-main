@@ -254,6 +254,16 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 	if err := s.pool.QueryRow(ctx, `SELECT as_of, record_ids FROM snapshots WHERE hash=$1`, hash).Scan(&asOf, &ids); err != nil {
 		return asOf, nil, err
 	}
+	sorted := slices.Clone(ids)
+	slices.SortFunc(sorted, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+	if len(slices.Compact(slices.Clone(sorted))) != len(sorted) {
+		return asOf, nil, fmt.Errorf("snapshot %s contains duplicate records", hash)
+	}
+	newHash := snapshotDigest(asOf, sorted, time.RFC3339Nano, "vera.snapshot.v2\x00")
+	legacyHash := snapshotDigest(asOf, sorted, time.RFC3339, "")
+	if hash != newHash && hash != legacyHash {
+		return asOf, nil, fmt.Errorf("snapshot %s: manifest hash mismatch", hash)
+	}
 	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id
 		WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`, ids, asOf)
 	if err != nil {
@@ -264,7 +274,7 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 		return asOf, nil, err
 	}
 	if len(out) != len(ids) {
-		return asOf, nil, fmt.Errorf("snapshot %s: %d of %d records present", hash, len(out), len(ids))
+		return asOf, nil, fmt.Errorf("snapshot %s: %d of %d records eligible", hash, len(out), len(ids))
 	}
 	sortRecords(out)
 	return asOf, out, nil

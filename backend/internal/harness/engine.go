@@ -629,7 +629,7 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 		return err
 	}
 	sheet, err := step(ctx, e, t, "compute", func() (*facts.Sheet, error) {
-		b, err := e.bundleFromSnapshot(ctx, subject, co)
+		b, err := e.bundleFromSnapshot(ctx, subject, co, t.AsOf)
 		if err != nil {
 			return nil, err
 		}
@@ -746,10 +746,13 @@ func (e *Engine) sectionReason(t *taskRow, id string) string {
 }
 
 // bundleFromSnapshot rebuilds the bundle exactly from the frozen record set and the frozen member/peer lists.
-func (e *Engine) bundleFromSnapshot(ctx context.Context, subject dataservice.EntityRow, co collectOut) (*Bundle, error) {
+func (e *Engine) bundleFromSnapshot(ctx context.Context, subject dataservice.EntityRow, co collectOut, expectedAsOf time.Time) (*Bundle, error) {
 	asOf, recs, err := e.Store.Snapshot(ctx, co.Snapshot)
 	if err != nil {
 		return nil, err
+	}
+	if !asOf.Equal(expectedAsOf.UTC().Truncate(time.Microsecond)) {
+		return nil, errors.New("snapshot cutoff does not match research task")
 	}
 	ids := map[uuid.UUID]bool{subject.ID: true}
 	for _, r := range recs {

@@ -83,6 +83,12 @@ func TestQueryRespectsDisclosureTimeBeforeSelectingRevision(t *testing.T) {
 	if err != nil || sameHash != otherHash {
 		t.Fatalf("timestamps within database precision produced different hashes: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE snapshots SET as_of=as_of+interval '1 second' WHERE hash=$1`, otherHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Snapshot(ctx, otherHash); err == nil {
+		t.Fatal("snapshot replay accepted a modified cutoff")
+	}
 	legacyCutoff := cutoff.Add(100 * time.Millisecond)
 	legacyIDs := []uuid.UUID{valid[0]}
 	legacyHasher := sha256.New()
@@ -101,6 +107,12 @@ func TestQueryRespectsDisclosureTimeBeforeSelectingRevision(t *testing.T) {
 	}
 	if gotCutoff, _, err := store.Snapshot(ctx, wholeSecondHash); err != nil || !gotCutoff.Equal(cutoff) {
 		t.Fatalf("whole-second snapshot cutoff changed: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE snapshots SET record_ids=$2 WHERE hash=$1`, wholeSecondHash, []uuid.UUID{valid[1]}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Snapshot(ctx, wholeSecondHash); err == nil {
+		t.Fatal("snapshot replay accepted a modified record list")
 	}
 	if gotHash, err := store.Freeze(ctx, legacyCutoff.Add(100*time.Millisecond), legacyIDs); err != nil || gotHash == legacyHash {
 		t.Fatalf("different cutoff reused legacy hash: %v", err)
@@ -133,10 +145,14 @@ func TestQueryRespectsDisclosureTimeBeforeSelectingRevision(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT id FROM records WHERE record_key='future-revision'`).Scan(&futureID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO snapshots(hash,as_of,record_ids) VALUES('legacy-invalid',$1,$2)`, cutoff, []uuid.UUID{futureID}); err != nil {
+	invalidHasher := sha256.New()
+	_, _ = invalidHasher.Write([]byte(cutoff.UTC().Format(time.RFC3339)))
+	_, _ = invalidHasher.Write(futureID[:])
+	invalidHash := hex.EncodeToString(invalidHasher.Sum(nil))
+	if _, err := pool.Exec(ctx, `INSERT INTO snapshots(hash,as_of,record_ids) VALUES($1,$2,$3)`, invalidHash, cutoff, []uuid.UUID{futureID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.Snapshot(ctx, "legacy-invalid"); err == nil {
+	if _, _, err := store.Snapshot(ctx, invalidHash); err == nil {
 		t.Fatal("snapshot replay accepted an undisclosed record")
 	}
 	if _, err := pool.Exec(ctx, `UPDATE providers SET allow_model_processing=false WHERE id='publication-test'`); err != nil {
