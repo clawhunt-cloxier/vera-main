@@ -94,8 +94,13 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 			lk = r.RecordKey
 		}
 		payload, _ := json.Marshal(r.Payload)
+		qs := r.QualityState
+		if qs == "" {
+			qs = "PASS"
+		}
 		rows = append(rows, []any{r.DatasetID, eid, r.RecordKey, lk, max(r.Version, 1), r.Period, r.PublishedAt, r.AvailableAt,
-			p.ID(), r.Origin, r.SourceTier, nilIfEmpty(r.Basis), payload, r.Hash()})
+			p.ID(), r.Origin, r.SourceTier, nilIfEmpty(r.Basis), payload, r.Hash(),
+			nilIfEmpty(r.RawRef), nilIfEmpty(r.RawSHA256), nilIfEmpty(r.RawLocator), nilIfZero(r.MappingVersion), qs})
 	}
 	n := 0
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -103,7 +108,8 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 			return err
 		}
 		cols := []string{"dataset_id", "entity_id", "record_key", "logical_key", "record_version", "period", "published_at",
-			"available_at", "provider_id", "origin", "source_tier", "basis", "payload", "content_hash"}
+			"available_at", "provider_id", "origin", "source_tier", "basis", "payload", "content_hash",
+			"raw_ref", "raw_sha256", "raw_locator", "mapping_version", "quality_state"}
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"records_in"}, cols, pgx.CopyFromRows(rows)); err != nil {
 			return err
 		}
@@ -137,6 +143,13 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
+func nilIfZero(n int) *int {
+	if n == 0 {
+		return nil
+	}
+	return &n
+}
+
 // StoredRecord is a record as read back for research, with its evidence identity.
 type StoredRecord struct {
 	ID          uuid.UUID
@@ -152,7 +165,12 @@ type StoredRecord struct {
 	SourceTier  string
 	Basis       string
 	Payload     map[string]any
-	ContentHash string
+	ContentHash  string
+	QualityState string
+	RawRef        *string
+	RawSHA256     *string
+	RawLocator    *string
+	MappingVersion *int
 }
 
 // Query selects the latest revision of each logical record available at asOf.
@@ -165,12 +183,14 @@ type Query struct {
 }
 
 const recordCols = `r.id, r.dataset_id, r.entity_id, r.record_key, r.record_version, r.period, r.published_at,
-		r.available_at, r.provider_id, r.origin, r.source_tier, coalesce(r.basis,''), r.payload, r.content_hash`
+		r.available_at, r.provider_id, r.origin, r.source_tier, coalesce(r.basis,''), r.payload, r.content_hash,
+		r.quality_state, r.raw_ref, r.raw_sha256, r.raw_locator, r.mapping_version`
 
 func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
 	var r StoredRecord
 	err := row.Scan(&r.ID, &r.DatasetID, &r.EntityID, &r.RecordKey, &r.Version, &r.Period, &r.PublishedAt, &r.AvailableAt,
-		&r.ProviderID, &r.Origin, &r.SourceTier, &r.Basis, &r.Payload, &r.ContentHash)
+		&r.ProviderID, &r.Origin, &r.SourceTier, &r.Basis, &r.Payload, &r.ContentHash,
+		&r.QualityState, &r.RawRef, &r.RawSHA256, &r.RawLocator, &r.MappingVersion)
 	return r, err
 }
 
@@ -180,6 +200,7 @@ func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
 		WHERE r.dataset_id = ANY($1) AND r.available_at <= $2
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
 		AND (NOT $6::bool OR p.allow_model_processing)
+		AND r.quality_state IN ('PASS','WARN')
 		ORDER BY r.dataset_id, r.logical_key, r.record_version DESC`
 	var ents []uuid.UUID
 	if len(q.EntityIDs) > 0 {

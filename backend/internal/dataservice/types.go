@@ -37,6 +37,16 @@ type Record struct {
 	SourceTier  string
 	Basis       string
 	Payload     map[string]any
+
+	// Blood lineage (optional; set by vendor adapters, not fixture).
+	RawRef        string // object-storage key for the raw response
+	RawSHA256     string // SHA-256 of raw response body
+	RawLocator    string // JSON path or page range within raw body
+	MappingVersion int   // version of the MappingSpec used
+
+	// Quality state: PASS (default) | WARN | QUARANTINED | REJECTED.
+	// QUARANTINED records are excluded from snapshots.
+	QualityState string
 }
 
 // Hash is the content hash stored with the record.
@@ -66,4 +76,58 @@ type Provider interface {
 	Entities(ctx context.Context) ([]Entity, error)
 	Records(ctx context.Context) ([]Record, error)
 	Capabilities(ctx context.Context) ([]Capability, error)
+}
+
+// ErrClass classifies provider errors so callers can decide whether to retry, skip, or alert.
+type ErrClass string
+
+const (
+	ErrRateLimited         ErrClass = "RATE_LIMITED"          // back off and retry
+	ErrAuthFailed          ErrClass = "AUTH_FAILED"           // do not retry; block provider
+	ErrNotCovered          ErrClass = "NOT_COVERED"           // provider does not cover this subject/period
+	ErrSchemaChanged       ErrClass = "SCHEMA_CHANGED"        // mapping failed; alert and quarantine
+	ErrUpstreamUnavailable ErrClass = "UPSTREAM_UNAVAILABLE"  // transient; retry
+	ErrEmptyValid          ErrClass = "EMPTY_VALID"           // no data for period (e.g. no dragon-tiger today)
+)
+
+// ProviderError carries a classification alongside the underlying error.
+type ProviderError struct {
+	Class ErrClass
+	Err   error
+}
+
+func (e *ProviderError) Error() string { return string(e.Class) + ": " + e.Err.Error() }
+func (e *ProviderError) Unwrap() error { return e.Err }
+
+// QualityIssue is produced by Mapper.Normalize for a single field or record.
+type QualityIssue struct {
+	RecordKey string
+	Field     string
+	Message   string
+	Fatal     bool // true → record should be QUARANTINED
+}
+
+// MappingSpec describes how to map one provider dataset to a canonical dataset.
+// Loaded from backend/internal/dataservice/mappings/<provider>/<dataset>.yaml.
+type MappingSpec struct {
+	Provider        string        `yaml:"provider"`
+	ProviderDataset string        `yaml:"provider_dataset"`
+	Target          string        `yaml:"target"`
+	Version         int           `yaml:"version"`
+	Fields          []FieldMap    `yaml:"fields"`
+	Basis           MappingBasis  `yaml:"basis"`
+}
+
+// FieldMap maps one provider field to a canonical field.
+type FieldMap struct {
+	Target    string `yaml:"target"`
+	Source    string `yaml:"source"`    // JSONPath expression ($.field or $.nested.field)
+	Unit      string `yaml:"unit"`
+	Transform string `yaml:"transform"` // decimal | date_yyyymmdd | scale_to_base | string | integer
+}
+
+// MappingBasis records methodology metadata for the mapping (adjust, tier, etc.)
+type MappingBasis struct {
+	Adjust string `yaml:"adjust"`
+	Tier   string `yaml:"tier"`
 }
