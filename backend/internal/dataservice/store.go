@@ -17,17 +17,28 @@ import (
 
 // Store persists provider output and answers point-in-time queries.
 type Store struct {
-	pool *pgxpool.Pool
-	cat  *Catalog
+	pool             *pgxpool.Pool
+	cat              *Catalog
+	excludeSynthetic bool
 }
 
 func NewStore(pool *pgxpool.Pool, cat *Catalog) *Store { return &Store{pool: pool, cat: cat} }
 
+// NewVendorStore excludes synthetic providers and entities, including rows
+// left over from a previous development deployment in the same database.
+func NewVendorStore(pool *pgxpool.Pool, cat *Catalog) *Store {
+	return &Store{pool: pool, cat: cat, excludeSynthetic: true}
+}
+
 func (s *Store) Catalog() *Catalog { return s.cat }
 
-// Sync upserts a provider's entities, records and capabilities. Records are immutable: existing
-// (dataset, record_key, version) rows are left untouched.
+// Sync atomically upserts a provider's entities, records and capabilities.
+// Existing record keys are idempotent only when their content and provenance
+// agree; a conflicting key fails the entire sync without replacing either.
 func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
+	if s.excludeSynthetic && p.Synthetic() {
+		return 0, fmt.Errorf("synthetic provider not permitted in vendor store")
+	}
 	ents, err := p.Entities(ctx)
 	if err != nil {
 		return 0, err
@@ -51,10 +62,17 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 		kind = "fixture"
 	}
 	ids := map[string]uuid.UUID{}
+	n := 0
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing,synthetic,basis) VALUES($1,$2,$3,$4,$5,$6)
-			ON CONFLICT (id) DO UPDATE SET name=excluded.name, allow_model_processing=excluded.allow_model_processing, basis=excluded.basis`,
-			p.ID(), p.Name(), kind, p.AllowModelProcessing(), p.Synthetic(), basis); err != nil {
+		var providerID string
+		if err := tx.QueryRow(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing,synthetic,basis) VALUES($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (id) DO UPDATE SET name=excluded.name,
+                allow_model_processing=providers.allow_model_processing AND excluded.allow_model_processing, basis=excluded.basis
+            WHERE providers.kind=excluded.kind AND providers.synthetic=excluded.synthetic
+            RETURNING id`, p.ID(), p.Name(), kind, p.AllowModelProcessing(), p.Synthetic(), basis).Scan(&providerID); err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("provider %s: identity conflicts with existing provider kind", p.ID())
+			}
 			return err
 		}
 		for _, e := range ents {
@@ -63,6 +81,7 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 			err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
 				VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
 				ON CONFLICT (code) DO UPDATE SET name=excluded.name, status=excluded.status, classification=excluded.classification, attrs=excluded.attrs
+                WHERE entities.synthetic=excluded.synthetic
 				RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs).Scan(&id)
 			if err != nil {
 				return fmt.Errorf("entity %s: %w", e.Code, err)
@@ -74,36 +93,29 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 				}
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	rows := make([][]any, 0, len(recs))
-	for _, r := range recs {
-		var eid *uuid.UUID
-		if r.EntityCode != "" {
-			id, ok := ids[r.EntityCode]
-			if !ok {
-				return 0, fmt.Errorf("record %s references unknown entity %s", r.RecordKey, r.EntityCode)
+		rows := make([][]any, 0, len(recs))
+		for _, r := range recs {
+			var eid *uuid.UUID
+			if r.EntityCode != "" {
+				id, ok := ids[r.EntityCode]
+				if !ok {
+					return fmt.Errorf("record %s references unknown entity %s", r.RecordKey, r.EntityCode)
+				}
+				eid = &id
 			}
-			eid = &id
+			lk := r.LogicalKey
+			if lk == "" {
+				lk = r.RecordKey
+			}
+			payload, _ := json.Marshal(r.Payload)
+			qs := r.QualityState
+			if qs == "" {
+				qs = "PASS"
+			}
+			rows = append(rows, []any{r.DatasetID, eid, r.RecordKey, lk, max(r.Version, 1), r.Period, r.PublishedAt, r.AvailableAt,
+				p.ID(), r.Origin, r.SourceTier, nilIfEmpty(r.Basis), payload, r.Hash(),
+				nilIfEmpty(r.RawRef), nilIfEmpty(r.RawSHA256), nilIfEmpty(r.RawLocator), nilIfZero(r.MappingVersion), qs})
 		}
-		lk := r.LogicalKey
-		if lk == "" {
-			lk = r.RecordKey
-		}
-		payload, _ := json.Marshal(r.Payload)
-		qs := r.QualityState
-		if qs == "" {
-			qs = "PASS"
-		}
-		rows = append(rows, []any{r.DatasetID, eid, r.RecordKey, lk, max(r.Version, 1), r.Period, r.PublishedAt, r.AvailableAt,
-			p.ID(), r.Origin, r.SourceTier, nilIfEmpty(r.Basis), payload, r.Hash(),
-			nilIfEmpty(r.RawRef), nilIfEmpty(r.RawSHA256), nilIfEmpty(r.RawLocator), nilIfZero(r.MappingVersion), qs})
-	}
-	n := 0
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `CREATE TEMP TABLE records_in (LIKE records INCLUDING DEFAULTS) ON COMMIT DROP`); err != nil {
 			return err
 		}
@@ -119,6 +131,19 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 			return err
 		}
 		n = int(tag.RowsAffected())
+		var conflict bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (
+            SELECT 1 FROM records_in i JOIN records r USING (dataset_id, record_key, record_version)
+            WHERE ROW(r.entity_id, r.logical_key, r.period, r.published_at, r.available_at,
+                      r.provider_id, r.origin, r.source_tier, r.basis, r.payload, r.content_hash)
+              IS DISTINCT FROM ROW(i.entity_id, i.logical_key, i.period, i.published_at, i.available_at,
+                      i.provider_id, i.origin, i.source_tier, i.basis, i.payload, i.content_hash)
+        )`).Scan(&conflict); err != nil {
+			return err
+		}
+		if conflict {
+			return fmt.Errorf("provider %s: immutable record key conflicts with existing content or provenance", p.ID())
+		}
 		for _, c := range caps {
 			var eid *uuid.UUID
 			if c.EntityCode != "" {
@@ -133,7 +158,10 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 		}
 		return nil
 	})
-	return n, err
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func nilIfEmpty(s string) *string {
@@ -186,6 +214,17 @@ const recordCols = `r.id, r.dataset_id, r.entity_id, r.record_key, r.record_vers
 		r.available_at, r.provider_id, r.origin, r.source_tier, coalesce(r.basis,''), r.payload, r.content_hash,
 		r.quality_state, r.raw_ref, r.raw_sha256, r.raw_locator, r.mapping_version`
 
+// Financial facts require a known disclosure time. Other sources may not have
+// one, but when supplied it must never be later than the snapshot cutoff.
+const visibleAtCutoff = `r.available_at <= $2
+		AND (r.published_at IS NULL OR r.published_at <= $2)
+		AND (r.dataset_id NOT IN ('fin.statement','fin.segment') OR r.published_at IS NOT NULL)`
+
+// A real-data store must also exclude a vendor record attached to a synthetic
+// entity: entity identity participates in the facts presented to the model.
+const realSourceFilter = ` AND (NOT %s::bool OR (NOT p.synthetic AND p.kind='vendor' AND
+ (r.entity_id IS NULL OR EXISTS (SELECT 1 FROM entities real_entity WHERE real_entity.id=r.entity_id AND NOT real_entity.synthetic))))`
+
 func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
 	var r StoredRecord
 	err := row.Scan(&r.ID, &r.DatasetID, &r.EntityID, &r.RecordKey, &r.Version, &r.Period, &r.PublishedAt, &r.AvailableAt,
@@ -197,16 +236,16 @@ func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
 func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
 	sql := `SELECT DISTINCT ON (r.dataset_id, r.logical_key) ` + recordCols + `
 		FROM records r JOIN providers p ON p.id = r.provider_id AND p.enabled
-		WHERE r.dataset_id = ANY($1) AND r.available_at <= $2
+		WHERE r.dataset_id = ANY($1) AND ` + visibleAtCutoff + `
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
-		AND (NOT $6::bool OR p.allow_model_processing)
+		AND (NOT $6::bool OR p.allow_model_processing)` + fmt.Sprintf(realSourceFilter, "$7") + `
 		AND r.quality_state IN ('PASS','WARN')
 		ORDER BY r.dataset_id, r.logical_key, r.record_version DESC`
 	var ents []uuid.UUID
 	if len(q.EntityIDs) > 0 {
 		ents = q.EntityIDs
 	}
-	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse)
+	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -231,11 +270,11 @@ func sortRecords(out []StoredRecord) {
 }
 
 // Coverage reports which datasets have at least one record per entity as of asOf (capability check for plans).
-// Only PASS/WARN records are counted; QUARANTINED/REJECTED are excluded.
+// Only PASS/WARN records count; QUARANTINED/REJECTED are excluded.
 func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Time) (map[uuid.UUID]map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT r.entity_id, r.dataset_id FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.entity_id = ANY($1) AND r.available_at <= $2 AND p.allow_model_processing
-		AND r.quality_state IN ('PASS','WARN')`, entities, asOf)
+		WHERE r.entity_id = ANY($1) AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
+		AND r.quality_state IN ('PASS','WARN')`, entities, asOf, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -255,24 +294,37 @@ func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Ti
 	return out, rows.Err()
 }
 
-// HasGlobal reports whether an entity-less dataset (calendar, index bars, connect turnover) has data as of asOf.
-// Only PASS/WARN records are counted.
+// HasGlobal reports whether an entity-less dataset has data as of asOf.
+// Only PASS/WARN records count.
 func (s *Store) HasGlobal(ctx context.Context, dataset string, asOf time.Time) (bool, error) {
 	var ok bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND r.available_at <= $2 AND p.allow_model_processing
-		AND r.quality_state IN ('PASS','WARN'))`, dataset, asOf).Scan(&ok)
+		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
+		AND r.quality_state IN ('PASS','WARN'))`, dataset, asOf, s.excludeSynthetic).Scan(&ok)
 	return ok, err
 }
 
-// Snapshot loads the frozen record set.
+// Snapshot loads a frozen research record set, rechecking its cutoff and the
+// provider's current permission for model processing.
 func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredRecord, error) {
 	var asOf time.Time
 	var ids []uuid.UUID
 	if err := s.pool.QueryRow(ctx, `SELECT as_of, record_ids FROM snapshots WHERE hash=$1`, hash).Scan(&asOf, &ids); err != nil {
 		return asOf, nil, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r WHERE r.id = ANY($1)`, ids)
+	sorted := slices.Clone(ids)
+	slices.SortFunc(sorted, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+	if len(slices.Compact(slices.Clone(sorted))) != len(sorted) {
+		return asOf, nil, fmt.Errorf("snapshot %s contains duplicate records", hash)
+	}
+	newHash := snapshotDigest(asOf, sorted, time.RFC3339Nano, "vera.snapshot.v2\x00")
+	legacyHash := snapshotDigest(asOf, sorted, time.RFC3339, "")
+	if hash != newHash && hash != legacyHash {
+		return asOf, nil, fmt.Errorf("snapshot %s: manifest hash mismatch", hash)
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id
+		WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
+		AND r.quality_state IN ('PASS','WARN')`, ids, asOf, s.excludeSynthetic)
 	if err != nil {
 		return asOf, nil, err
 	}
@@ -281,43 +333,94 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 		return asOf, nil, err
 	}
 	if len(out) != len(ids) {
-		return asOf, nil, fmt.Errorf("snapshot %s: %d of %d records present", hash, len(out), len(ids))
+		return asOf, nil, fmt.Errorf("snapshot %s: %d of %d records eligible", hash, len(out), len(ids))
 	}
 	sortRecords(out)
 	return asOf, out, nil
 }
 
-// Freeze stores the exact record set used by a task and returns its hash.
-// It rejects any record ID whose quality_state is QUARANTINED or REJECTED, so that
-// bad data cannot enter a snapshot even when a caller specifies it directly.
+// Freeze stores an eligible record set for model research and returns its hash.
+// It rejects any record whose quality_state is QUARANTINED or REJECTED before
+// performing the temporal eligibility check, so bad data cannot enter a snapshot.
 func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (string, error) {
+	// PostgreSQL timestamptz stores microseconds; hash the same instant that
+	// will be persisted rather than discarding subsecond precision or hashing
+	// nanoseconds the database cannot retain.
+	asOf = asOf.UTC().Truncate(time.Microsecond)
 	sorted := slices.Clone(ids)
 	slices.SortFunc(sorted, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
 	sorted = slices.Compact(sorted)
-	// Verify every ID is a valid, usable record before freezing.
-	var badCount int
-	err := s.pool.QueryRow(ctx,
-		`SELECT count(*) FROM records WHERE id = ANY($1) AND quality_state NOT IN ('PASS','WARN')`,
-		sorted).Scan(&badCount)
+	hash := snapshotDigest(asOf, sorted, time.RFC3339Nano, "vera.snapshot.v2\x00")
+	legacyHash := snapshotDigest(asOf, sorted, time.RFC3339, "")
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Reject quarantined/rejected records before temporal eligibility check.
+		var badCount int
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM records WHERE id = ANY($1) AND quality_state NOT IN ('PASS','WARN')`,
+			sorted).Scan(&badCount); err != nil {
+			return fmt.Errorf("freeze: quality check failed: %w", err)
+		}
+		if badCount > 0 {
+			return fmt.Errorf("freeze: %d record(s) have QUARANTINED or REJECTED quality state", badCount)
+		}
+		rows, err := tx.Query(ctx, `SELECT r.id FROM records r JOIN providers p ON p.id=r.provider_id
+			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+` FOR SHARE OF r,p`, sorted, asOf, s.excludeSynthetic)
+		if err != nil {
+			return err
+		}
+		var count int
+		for rows.Next() {
+			count++
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if count != len(sorted) {
+			return fmt.Errorf("snapshot contains missing, temporally ineligible, or currently unpermitted records")
+		}
+		// Preserve a previously frozen legacy snapshot only when its stored
+		// cutoff and exact IDs match; the old hash omitted fractional seconds.
+		var matches bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM snapshots WHERE hash=$1 AND as_of=$2 AND record_ids=$3)`, legacyHash, asOf, sorted).Scan(&matches); err != nil {
+			return err
+		}
+		if matches {
+			hash = legacyHash
+			return nil
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO snapshots(hash,as_of,record_ids) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, hash, asOf, sorted)
+		if err != nil || tag.RowsAffected() == 1 {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM snapshots WHERE hash=$1 AND as_of=$2 AND record_ids=$3)`, hash, asOf, sorted).Scan(&matches); err != nil {
+			return err
+		}
+		if !matches {
+			return fmt.Errorf("snapshot hash conflicts with stored content")
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("freeze: quality check failed: %w", err)
+		return "", err
 	}
-	if badCount > 0 {
-		return "", fmt.Errorf("freeze: %d record(s) have QUARANTINED or REJECTED quality state", badCount)
-	}
+	return hash, nil
+}
+
+func snapshotDigest(asOf time.Time, sorted []uuid.UUID, layout, domain string) string {
 	h := sha256.New()
-	h.Write([]byte(asOf.UTC().Format(time.RFC3339)))
+	_, _ = h.Write([]byte(domain))
+	_, _ = h.Write([]byte(asOf.UTC().Format(layout)))
 	for _, id := range sorted {
-		h.Write(id[:])
+		_, _ = h.Write(id[:])
 	}
-	hash := hex.EncodeToString(h.Sum(nil))
-	_, err = s.pool.Exec(ctx, `INSERT INTO snapshots(hash,as_of,record_ids) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, hash, asOf, sorted)
-	return hash, err
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Get loads specific records (evidence lookup).
 func (s *Store) Get(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]StoredRecord, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r WHERE r.id = ANY($1)`, ids)
+	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id WHERE r.id = ANY($1)`+fmt.Sprintf(realSourceFilter, "$2"), ids, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +455,7 @@ func scanEntity(row pgx.CollectableRow) (EntityRow, error) {
 }
 
 func (s *Store) Entities(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE id = ANY($1)`, ids)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE id = ANY($1) AND (NOT $2::bool OR NOT synthetic)`, ids, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +468,7 @@ func (s *Store) Entities(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]En
 }
 
 func (s *Store) EntityByCode(ctx context.Context, code string) (EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE code=$1`, code)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE code=$1 AND (NOT $2::bool OR NOT synthetic)`, code, s.excludeSynthetic)
 	if err != nil {
 		return EntityRow{}, err
 	}
@@ -373,7 +476,7 @@ func (s *Store) EntityByCode(ctx context.Context, code string) (EntityRow, error
 }
 
 func (s *Store) EntitiesByKind(ctx context.Context, kind string) ([]EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE kind=$1 ORDER BY code`, kind)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE kind=$1 AND (NOT $2::bool OR NOT synthetic) ORDER BY code`, kind, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -383,10 +486,10 @@ func (s *Store) EntitiesByKind(ctx context.Context, kind string) ([]EntityRow, e
 // Search matches names, codes and aliases (trigram similarity plus substring), best first.
 func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]EntityRow, error) {
 	q = strings.ToLower(strings.TrimSpace(q))
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2 = '' OR kind = $2) AND EXISTS (
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2 = '' OR kind = $2) AND (NOT $4::bool OR NOT e.synthetic) AND EXISTS (
 		SELECT 1 FROM entity_aliases a WHERE a.entity_id = e.id AND (a.alias LIKE '%' || $1 || '%' OR similarity(a.alias, $1) > 0.3))
 		ORDER BY (SELECT max(CASE WHEN a.alias = $1 THEN 2 ELSE similarity(a.alias, $1) END) FROM entity_aliases a WHERE a.entity_id = e.id) DESC, code
-		LIMIT $3`, q, kind, limit)
+		LIMIT $3`, q, kind, limit, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +500,8 @@ func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]Entity
 func (s *Store) Mentioned(ctx context.Context, text string) ([]EntityRow, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e JOIN LATERAL (
 		SELECT max(length(alias)) AS l FROM entity_aliases a WHERE a.entity_id = e.id AND length(a.alias) >= 2 AND strpos(lower($1), a.alias) > 0) m ON m.l IS NOT NULL
-		ORDER BY m.l DESC, code LIMIT 10`, text)
+        WHERE NOT $2::bool OR NOT e.synthetic
+		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
