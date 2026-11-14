@@ -5,8 +5,11 @@ This directory contains the Docker Compose-based development environment for Ver
 ## Quick Start
 
 ```bash
-# Start core services (Postgres, Keycloak, Caddy)
-# MinIO is optional; start with: docker compose --profile storage up -d
+# Start core services (Postgres only by default)
+# MinIO:        docker compose --profile storage up -d
+# Keycloak:     docker compose --profile auth up -d
+# Caddy proxy:  docker compose --profile proxy up -d
+# All services: docker compose --profile storage --profile auth --profile proxy up -d
 make dev-up
 
 # Apply database migrations
