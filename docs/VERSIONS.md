@@ -54,7 +54,7 @@
 postgres:17-alpine
 quay.io/keycloak/keycloak:26.0.7
 caddy:2.8.4-alpine
-minio/minio:RELEASE.2024-11-07T00-52-20Z
+quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z
 golang:1.23.3-alpine (构建)
 node:22.11.0-alpine (构建)
 ```

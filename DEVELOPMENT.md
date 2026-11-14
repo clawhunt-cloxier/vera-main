@@ -5,7 +5,8 @@ This directory contains the Docker Compose-based development environment for Ver
 ## Quick Start
 
 ```bash
-# Start all services (Postgres, MinIO, Keycloak, Caddy)
+# Start core services (Postgres, Keycloak, Caddy)
+# MinIO is optional; start with: docker compose --profile storage up -d
 make dev-up
 
 # Apply database migrations
@@ -28,7 +29,7 @@ make dev-web
   - User: `postgres`
   - Password: `dev_password_change_in_production`
   
-- **MinIO** (ports 9000/9001): S3-compatible object storage
+- **MinIO** (ports 9000/9001): S3-compatible object storage — optional, start with `docker compose --profile storage up -d`
   - API: http://localhost:9000
   - Console: http://localhost:9001
   - Access Key: `minioadmin`
