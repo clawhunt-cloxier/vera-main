@@ -1,4 +1,4 @@
-# 技能：深度研究 deep_research v1.0.0
+# 技能：深度研究 deep_research v1.1.0（目标，未实现）
 
 对应原项目 `deep-research.md` 与 `industry-report.md`：
 
@@ -12,7 +12,9 @@
 | `mode` | `company` / `industry` / `company_industry` | 由对象推断 | 选个股为 company，选申万行业为 industry；用户可选 company_industry |
 | `subject` | A 股个股或申万行业 | 必填 | company_industry 时为个股，行业取其申万二级行业 |
 | `focus` | 文本，≤200 字 | 空 | 用户关注点，用于选证排序和章节写作提示；不改变章节结构，不扩大数据范围 |
-| `as_of` | 时间 | 创建时刻 | 数据截止时点 |
+| `as_of` | 时间 | 计划预览时刻 | 新版本以任务冻结 `snapshot_as_of` 为准，见 ADR-0004 |
+
+若用户要求盘中行情，company 模式使用 `mkt.intraday_quote`，industry 模式使用已登记的对应行业 `mkt.intraday_index_quote`，联合模式分别展示；行情须满足授权、时点与新鲜度规则，否则明确不可用并按必需数据规则弃权。财报、公告和持仓分别展示实际披露时间，不能标为实时行情。
 
 `focus` 是不可信输入：只作为写作提示中的一个字段，经过长度与字符过滤，不能覆盖系统规则。
 

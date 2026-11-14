@@ -48,7 +48,7 @@ flowchart LR
 
 ### 3.2 计划内容
 
-`ResearchPlan` 字段：`plan_id`、`skill_id`、`skill_version`、`subject`（entity_id 与类型）、`params`（技能参数，经 Schema 校验）、`as_of`（数据截止时点）、`sections`（每章的可用性：available / limited / unavailable 及原因）、`estimated_budget`、`quota_cost`、`expires_at`、`plan_hash`。
+`ResearchPlan` 字段：`plan_id`、`skill_id`、`skill_version`、`subject`（entity_id 与类型）、`params`（技能参数，经 Schema 校验）、`as_of`（v1.0 为固定截止；ADR-0004 新版本中仅为计划预览时点）、`sections`（每章的可用性：available / limited / unavailable 及原因）、`estimated_budget`、`quota_cost`、`expires_at`、`plan_hash`。新版本计划还须绑定“采集后冻结最新可用数据”的策略；任务在数据和血缘持久化完成后原子记录 `snapshot_as_of` 与快照，恢复时不可重选。其 API、迁移及代码支持完成前不得宣称该行为已实现。
 
 章节可用性由能力登记计算：某章节的必需数据集当前没有已启用、已授权的厂商时，标为 unavailable。技能的必需章节不可用时，计划直接返回不可执行和原因，不创建任务。
 
