@@ -32,8 +32,9 @@ func NewVendorStore(pool *pgxpool.Pool, cat *Catalog) *Store {
 
 func (s *Store) Catalog() *Catalog { return s.cat }
 
-// Sync upserts a provider's entities, records and capabilities. Records are immutable: existing
-// (dataset, record_key, version) rows are left untouched.
+// Sync atomically upserts a provider's entities, records and capabilities.
+// Existing record keys are idempotent only when their content and provenance
+// agree; a conflicting key fails the entire sync without replacing either.
 func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 	if s.excludeSynthetic && p.Synthetic() {
 		return 0, fmt.Errorf("synthetic provider not permitted in vendor store")
@@ -61,6 +62,7 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 		kind = "fixture"
 	}
 	ids := map[string]uuid.UUID{}
+	n := 0
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing,synthetic,basis) VALUES($1,$2,$3,$4,$5,$6)
 			ON CONFLICT (id) DO UPDATE SET name=excluded.name,
@@ -86,31 +88,24 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 				}
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	rows := make([][]any, 0, len(recs))
-	for _, r := range recs {
-		var eid *uuid.UUID
-		if r.EntityCode != "" {
-			id, ok := ids[r.EntityCode]
-			if !ok {
-				return 0, fmt.Errorf("record %s references unknown entity %s", r.RecordKey, r.EntityCode)
+		rows := make([][]any, 0, len(recs))
+		for _, r := range recs {
+			var eid *uuid.UUID
+			if r.EntityCode != "" {
+				id, ok := ids[r.EntityCode]
+				if !ok {
+					return fmt.Errorf("record %s references unknown entity %s", r.RecordKey, r.EntityCode)
+				}
+				eid = &id
 			}
-			eid = &id
+			lk := r.LogicalKey
+			if lk == "" {
+				lk = r.RecordKey
+			}
+			payload, _ := json.Marshal(r.Payload)
+			rows = append(rows, []any{r.DatasetID, eid, r.RecordKey, lk, max(r.Version, 1), r.Period, r.PublishedAt, r.AvailableAt,
+				p.ID(), r.Origin, r.SourceTier, nilIfEmpty(r.Basis), payload, r.Hash()})
 		}
-		lk := r.LogicalKey
-		if lk == "" {
-			lk = r.RecordKey
-		}
-		payload, _ := json.Marshal(r.Payload)
-		rows = append(rows, []any{r.DatasetID, eid, r.RecordKey, lk, max(r.Version, 1), r.Period, r.PublishedAt, r.AvailableAt,
-			p.ID(), r.Origin, r.SourceTier, nilIfEmpty(r.Basis), payload, r.Hash()})
-	}
-	n := 0
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `CREATE TEMP TABLE records_in (LIKE records INCLUDING DEFAULTS) ON COMMIT DROP`); err != nil {
 			return err
 		}
@@ -125,6 +120,19 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 			return err
 		}
 		n = int(tag.RowsAffected())
+		var conflict bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (
+            SELECT 1 FROM records_in i JOIN records r USING (dataset_id, record_key, record_version)
+            WHERE ROW(r.entity_id, r.logical_key, r.period, r.published_at, r.available_at,
+                      r.provider_id, r.origin, r.source_tier, r.basis, r.payload, r.content_hash)
+              IS DISTINCT FROM ROW(i.entity_id, i.logical_key, i.period, i.published_at, i.available_at,
+                      i.provider_id, i.origin, i.source_tier, i.basis, i.payload, i.content_hash)
+        )`).Scan(&conflict); err != nil {
+			return err
+		}
+		if conflict {
+			return fmt.Errorf("provider %s: immutable record key conflicts with existing content or provenance", p.ID())
+		}
 		for _, c := range caps {
 			var eid *uuid.UUID
 			if c.EntityCode != "" {
@@ -139,7 +147,10 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 		}
 		return nil
 	})
-	return n, err
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func nilIfEmpty(s string) *string {
