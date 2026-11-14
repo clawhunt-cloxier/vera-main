@@ -135,9 +135,11 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (
             SELECT 1 FROM records_in i JOIN records r USING (dataset_id, record_key, record_version)
             WHERE ROW(r.entity_id, r.logical_key, r.period, r.published_at, r.available_at,
-                      r.provider_id, r.origin, r.source_tier, r.basis, r.payload, r.content_hash)
+                      r.provider_id, r.origin, r.source_tier, r.basis, r.payload, r.content_hash,
+                      r.raw_ref, r.raw_sha256, r.raw_locator, r.mapping_version)
               IS DISTINCT FROM ROW(i.entity_id, i.logical_key, i.period, i.published_at, i.available_at,
-                      i.provider_id, i.origin, i.source_tier, i.basis, i.payload, i.content_hash)
+                      i.provider_id, i.origin, i.source_tier, i.basis, i.payload, i.content_hash,
+                      i.raw_ref, i.raw_sha256, i.raw_locator, i.mapping_version)
         )`).Scan(&conflict); err != nil {
 			return err
 		}
@@ -353,18 +355,13 @@ func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (st
 	hash := snapshotDigest(asOf, sorted, time.RFC3339Nano, "vera.snapshot.v2\x00")
 	legacyHash := snapshotDigest(asOf, sorted, time.RFC3339, "")
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// Reject quarantined/rejected records before temporal eligibility check.
-		var badCount int
-		if err := tx.QueryRow(ctx,
-			`SELECT count(*) FROM records WHERE id = ANY($1) AND quality_state NOT IN ('PASS','WARN')`,
-			sorted).Scan(&badCount); err != nil {
-			return fmt.Errorf("freeze: quality check failed: %w", err)
-		}
-		if badCount > 0 {
-			return fmt.Errorf("freeze: %d record(s) have QUARANTINED or REJECTED quality state", badCount)
-		}
+		// Lock and qualify records in a single query so that a concurrent
+		// quality_state change between check and lock cannot slip a bad
+		// record into the snapshot. FOR SHARE holds an implicit row lock that
+		// blocks quality_state updates until the transaction commits.
 		rows, err := tx.Query(ctx, `SELECT r.id FROM records r JOIN providers p ON p.id=r.provider_id
-			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+` FOR SHARE OF r,p`, sorted, asOf, s.excludeSynthetic)
+			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
+			AND r.quality_state IN ('PASS','WARN') FOR SHARE OF r,p`, sorted, asOf, s.excludeSynthetic)
 		if err != nil {
 			return err
 		}
@@ -378,6 +375,17 @@ func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (st
 			return err
 		}
 		if count != len(sorted) {
+			// Distinguish quality rejection from temporal/permission rejection
+			// so the caller gets an actionable message.
+			var badCount int
+			if qerr := tx.QueryRow(ctx,
+				`SELECT count(*) FROM records WHERE id = ANY($1) AND quality_state NOT IN ('PASS','WARN')`,
+				sorted).Scan(&badCount); qerr != nil {
+				return fmt.Errorf("freeze: eligibility check failed: %w", qerr)
+			}
+			if badCount > 0 {
+				return fmt.Errorf("freeze: %d record(s) have QUARANTINED or REJECTED quality state", badCount)
+			}
 			return fmt.Errorf("snapshot contains missing, temporally ineligible, or currently unpermitted records")
 		}
 		// Preserve a previously frozen legacy snapshot only when its stored

@@ -166,6 +166,50 @@ func TestApplyMappingIntegerRejectsNonInteger(t *testing.T) {
 	}
 }
 
+func TestApplyMappingIntegerBoundaries(t *testing.T) {
+	spec := &MappingSpec{
+		Fields: []FieldMap{
+			{Target: "n", Source: "$.n", Transform: "integer"},
+		},
+	}
+	cases := []struct {
+		input string
+		fatal bool
+		want  int64
+	}{
+		// Exact int64 boundaries must be accepted.
+		{"9223372036854775807", false, 9223372036854775807},   // MaxInt64
+		{"-9223372036854775808", false, -9223372036854775808}, // MinInt64
+		// Values that overflow int64 must be rejected.
+		{"9223372036854775808", true, 0},  // MaxInt64+1
+		{"-9223372036854775809", true, 0}, // MinInt64-1
+		// Decimal-exact whole numbers that float64 would corrupt must be accepted correctly.
+		// float64 rounds "9007199254740993.0" to 9007199254740992; decimal keeps the right value.
+		{"9007199254740993.0", false, 9007199254740993},
+		// A value that looks close to 1 but has fractional digits must be rejected.
+		{"1.00000000000000001", true, 0},
+	}
+	for _, tc := range cases {
+		raw := map[string]any{"n": tc.input}
+		payload, issues, err := ApplyMapping(spec, raw)
+		if err != nil {
+			t.Fatalf("input %q: unexpected error %v", tc.input, err)
+		}
+		if tc.fatal {
+			if len(issues) != 1 || !issues[0].Fatal {
+				t.Errorf("input %q: expected 1 fatal issue, got %v", tc.input, issues)
+			}
+		} else {
+			if len(issues) != 0 {
+				t.Errorf("input %q: unexpected issues %v", tc.input, issues)
+			}
+			if payload["n"] != tc.want {
+				t.Errorf("input %q: got %v, want %d", tc.input, payload["n"], tc.want)
+			}
+		}
+	}
+}
+
 func TestQualityStateFromIssues(t *testing.T) {
 	if s := qualityStateFromIssues(nil); s != "PASS" {
 		t.Fatalf("nil → %s, want PASS", s)

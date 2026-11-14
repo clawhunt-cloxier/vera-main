@@ -2,6 +2,7 @@ package dataservice_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,4 +178,116 @@ func TestCoverageExcludesQuarantined(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestFreezeQualityCheckIsAtomic(t *testing.T) {
+	// Verify that quality_state is checked in the same query that locks the
+	// rows (FOR SHARE), so a concurrent quarantine cannot slip between check
+	// and lock.  We test the observable outcome: Freeze rejects a record that
+	// is QUARANTINED at the moment of locking, with a recognisable error.
+	pool := dbtest.New(t)
+	ctx := context.Background()
+	p, err := fixture.New("../../../tests/fixtures/demo-universe.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := dataservice.LoadCatalog("../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := dataservice.NewStore(pool, cat)
+	if _, err := st.Sync(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := st.Query(ctx, dataservice.Query{
+		DatasetIDs: []string{"mkt.daily_bar"},
+		AsOf:       p.Now(),
+	})
+	if err != nil || len(recs) < 2 {
+		t.Fatalf("need at least 2 records: %v", err)
+	}
+	goodID := recs[0].ID
+	targetID := recs[1].ID
+
+	// Quarantine the target directly — simulates what happens between a
+	// two-step (check then lock) implementation during the window.
+	if _, err := pool.Exec(ctx, `UPDATE records SET quality_state='QUARANTINED' WHERE id=$1`, targetID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Freeze including quarantined record must fail with a quality error.
+	_, ferr := st.Freeze(ctx, p.Now(), []uuid.UUID{goodID, targetID})
+	if ferr == nil {
+		t.Fatal("Freeze accepted a QUARANTINED record")
+	}
+	if !strings.Contains(ferr.Error(), "QUARANTINED") {
+		t.Fatalf("expected QUARANTINED error, got: %v", ferr)
+	}
+
+	// Good record alone must still succeed.
+	if _, err := st.Freeze(ctx, p.Now(), []uuid.UUID{goodID}); err != nil {
+		t.Fatalf("Freeze rejected a PASS record: %v", err)
+	}
+}
+
+func TestSyncRejectsLineageConflict(t *testing.T) {
+	// A re-sync with same (dataset, record_key, version) but different
+	// raw_ref/raw_sha256 must fail — lineage fields are part of the immutable
+	// record identity.
+	pool := dbtest.New(t)
+	ctx := context.Background()
+	cat, err := dataservice.LoadCatalog("../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := dataservice.NewStore(pool, cat)
+
+	day := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	rec := dataservice.Record{
+		DatasetID:   "ref.trading_calendar",
+		RecordKey:   "CNSESH:2026-01-01",
+		Period:      &day,
+		AvailableAt: day,
+		Origin:      "exchange",
+		SourceTier:  "L2",
+		Payload:     map[string]any{"trade_date": "2026-01-01", "is_open": true},
+		RawRef:      "s3://bucket/raw/2026-01-01.json",
+		RawSHA256:   "abc123",
+	}
+	p1 := &singleRecordProvider{id: "lineage-vendor-1", record: rec}
+	if _, err := st.Sync(ctx, p1); err != nil {
+		t.Fatalf("first sync failed: %v", err)
+	}
+
+	// Same record key but different raw lineage.
+	rec2 := rec
+	rec2.RawRef = "s3://bucket/raw/2026-01-01-v2.json"
+	rec2.RawSHA256 = "def456"
+	p2 := &singleRecordProvider{id: "lineage-vendor-1", record: rec2}
+	if _, err := st.Sync(ctx, p2); err == nil {
+		t.Fatal("Sync accepted conflicting lineage for same record key")
+	}
+}
+
+// singleRecordProvider is a minimal Provider for testing immutable record conflicts.
+type singleRecordProvider struct {
+	id     string
+	record dataservice.Record
+}
+
+func (p *singleRecordProvider) ID() string                 { return p.id }
+func (p *singleRecordProvider) Name() string               { return p.id }
+func (p *singleRecordProvider) Synthetic() bool            { return false }
+func (p *singleRecordProvider) AllowModelProcessing() bool { return true }
+func (p *singleRecordProvider) Basis() map[string]string   { return nil }
+func (p *singleRecordProvider) Now() time.Time             { return time.Now() }
+func (p *singleRecordProvider) Entities(context.Context) ([]dataservice.Entity, error) {
+	return nil, nil
+}
+func (p *singleRecordProvider) Capabilities(context.Context) ([]dataservice.Capability, error) {
+	return nil, nil
+}
+func (p *singleRecordProvider) Records(context.Context) ([]dataservice.Record, error) {
+	return []dataservice.Record{p.record}, nil
 }

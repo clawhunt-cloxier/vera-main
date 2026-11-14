@@ -125,20 +125,24 @@ func applyTransform(transform, unit string, val any) (any, error) {
 		return str, nil
 	case "integer":
 		// Reject non-integer values (e.g. 1.9 must not silently truncate to 1).
+		// Use decimal for exact parsing: float64 loses precision beyond 2^53 and
+		// cannot distinguish "9223372036854775808" from MaxInt64, or
+		// "9007199254740993.0" from "9007199254740992".
 		n, err := strconv.ParseInt(str, 10, 64)
 		if err != nil {
-			// Accept only whole-number floats (e.g. "100.0" is fine, "1.9" is not).
-			f, err2 := strconv.ParseFloat(str, 64)
-			if err2 != nil {
+			// Accept only whole-number decimals (e.g. "100.0" is fine, "1.9" is not).
+			d, derr := decimal.NewFromString(str)
+			if derr != nil {
 				return nil, fmt.Errorf("integer: cannot parse %q: %w", str, err)
 			}
-			if f != math.Trunc(f) {
+			if !d.Equal(d.Truncate(0)) {
 				return nil, fmt.Errorf("integer: %q is not an integer value", str)
 			}
-			if f > float64(math.MaxInt64) || f < float64(math.MinInt64) {
+			// Check range using exact decimal comparison.
+			if d.GreaterThan(decimal.NewFromInt(math.MaxInt64)) || d.LessThan(decimal.NewFromInt(math.MinInt64)) {
 				return nil, fmt.Errorf("integer: %q overflows int64", str)
 			}
-			return int64(f), nil
+			return d.BigInt().Int64(), nil
 		}
 		return n, nil
 	default:
