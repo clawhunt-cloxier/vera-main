@@ -7,10 +7,7 @@
 ```text
 backend/
   cmd/
-    api/            # vera-api
-    worker/         # vera-worker（River 作业）
-    admin/          # vera-admin
-    harness/        # vera-harness（replay、eval、adapter test）
+    vera/           # 单一二进制，子命令：api、worker、demo、admin（管理 CLI）、harness（replay、eval）
   internal/
     platform/       # 配置、日志、错误、幂等、审计、限流、数据库与事务工具
     identity/       # OIDC、会话、邀请、workspace
@@ -60,7 +57,7 @@ tests/fixtures/     # 入库的模拟数据与回放录制
 
 - 提示词放在 `harness/skills/<skill_id>/prompts/`，中文 Markdown，文件头写版本号；通用规则放在 `harness/skills/_common/prompts/`。
 - 构建时计算每个提示词文件的哈希，写入 `model_calls` 与报告版本。
-- 修改提示词、章节、规则或公式：升级技能版本，更新 docs/skills/ 中的规格，重新录制受影响的 replay 样本，运行 `vera-harness eval --suite fixture`，在 PR 中附结果。
+- 修改提示词、章节、规则或公式：升级技能版本，更新 docs/skills/ 中的规格，重新录制受影响的 replay 样本，运行 `vera harness eval`，在 PR 中附结果。
 - 规则集（禁用表达表、数字匹配规则）为 `harness/rules/*.yaml`，同样版本化。
 
 ## 4. 前端
