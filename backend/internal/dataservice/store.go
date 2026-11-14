@@ -17,17 +17,27 @@ import (
 
 // Store persists provider output and answers point-in-time queries.
 type Store struct {
-	pool *pgxpool.Pool
-	cat  *Catalog
+	pool             *pgxpool.Pool
+	cat              *Catalog
+	excludeSynthetic bool
 }
 
 func NewStore(pool *pgxpool.Pool, cat *Catalog) *Store { return &Store{pool: pool, cat: cat} }
+
+// NewVendorStore excludes synthetic providers and entities, including rows
+// left over from a previous development deployment in the same database.
+func NewVendorStore(pool *pgxpool.Pool, cat *Catalog) *Store {
+	return &Store{pool: pool, cat: cat, excludeSynthetic: true}
+}
 
 func (s *Store) Catalog() *Catalog { return s.cat }
 
 // Sync upserts a provider's entities, records and capabilities. Records are immutable: existing
 // (dataset, record_key, version) rows are left untouched.
 func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
+	if s.excludeSynthetic && p.Synthetic() {
+		return 0, fmt.Errorf("synthetic provider not permitted in vendor store")
+	}
 	ents, err := p.Entities(ctx)
 	if err != nil {
 		return 0, err
@@ -53,7 +63,8 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 	ids := map[string]uuid.UUID{}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing,synthetic,basis) VALUES($1,$2,$3,$4,$5,$6)
-			ON CONFLICT (id) DO UPDATE SET name=excluded.name, allow_model_processing=excluded.allow_model_processing, basis=excluded.basis`,
+			ON CONFLICT (id) DO UPDATE SET name=excluded.name,
+                allow_model_processing=providers.allow_model_processing AND excluded.allow_model_processing, basis=excluded.basis`,
 			p.ID(), p.Name(), kind, p.AllowModelProcessing(), p.Synthetic(), basis); err != nil {
 			return err
 		}
@@ -63,6 +74,7 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 			err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
 				VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
 				ON CONFLICT (code) DO UPDATE SET name=excluded.name, status=excluded.status, classification=excluded.classification, attrs=excluded.attrs
+                WHERE entities.synthetic=excluded.synthetic
 				RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs).Scan(&id)
 			if err != nil {
 				return fmt.Errorf("entity %s: %w", e.Code, err)
@@ -173,6 +185,11 @@ const visibleAtCutoff = `r.available_at <= $2
 		AND (r.published_at IS NULL OR r.published_at <= $2)
 		AND (r.dataset_id NOT IN ('fin.statement','fin.segment') OR r.published_at IS NOT NULL)`
 
+// A real-data store must also exclude a vendor record attached to a synthetic
+// entity: entity identity participates in the facts presented to the model.
+const realSourceFilter = ` AND (NOT %s::bool OR (NOT p.synthetic AND p.kind='vendor' AND
+ (r.entity_id IS NULL OR EXISTS (SELECT 1 FROM entities real_entity WHERE real_entity.id=r.entity_id AND NOT real_entity.synthetic))))`
+
 func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
 	var r StoredRecord
 	err := row.Scan(&r.ID, &r.DatasetID, &r.EntityID, &r.RecordKey, &r.Version, &r.Period, &r.PublishedAt, &r.AvailableAt,
@@ -185,13 +202,13 @@ func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
 		FROM records r JOIN providers p ON p.id = r.provider_id AND p.enabled
 		WHERE r.dataset_id = ANY($1) AND ` + visibleAtCutoff + `
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
-		AND (NOT $6::bool OR p.allow_model_processing)
+		AND (NOT $6::bool OR p.allow_model_processing)` + fmt.Sprintf(realSourceFilter, "$7") + `
 		ORDER BY r.dataset_id, r.logical_key, r.record_version DESC`
 	var ents []uuid.UUID
 	if len(q.EntityIDs) > 0 {
 		ents = q.EntityIDs
 	}
-	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse)
+	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +235,7 @@ func sortRecords(out []StoredRecord) {
 // Coverage reports which datasets have at least one record per entity as of asOf (capability check for plans).
 func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Time) (map[uuid.UUID]map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT r.entity_id, r.dataset_id FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.entity_id = ANY($1) AND `+visibleAtCutoff+` AND p.allow_model_processing`, entities, asOf)
+		WHERE r.entity_id = ANY($1) AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3"), entities, asOf, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +259,7 @@ func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Ti
 func (s *Store) HasGlobal(ctx context.Context, dataset string, asOf time.Time) (bool, error) {
 	var ok bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND `+visibleAtCutoff+` AND p.allow_model_processing)`, dataset, asOf).Scan(&ok)
+		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`)`, dataset, asOf, s.excludeSynthetic).Scan(&ok)
 	return ok, err
 }
 
@@ -265,7 +282,7 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 		return asOf, nil, fmt.Errorf("snapshot %s: manifest hash mismatch", hash)
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id
-		WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`, ids, asOf)
+		WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3"), ids, asOf, s.excludeSynthetic)
 	if err != nil {
 		return asOf, nil, err
 	}
@@ -293,7 +310,7 @@ func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (st
 	legacyHash := snapshotDigest(asOf, sorted, time.RFC3339, "")
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT r.id FROM records r JOIN providers p ON p.id=r.provider_id
-			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing FOR SHARE OF r,p`, sorted, asOf)
+			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+` FOR SHARE OF r,p`, sorted, asOf, s.excludeSynthetic)
 		if err != nil {
 			return err
 		}
@@ -349,7 +366,7 @@ func snapshotDigest(asOf time.Time, sorted []uuid.UUID, layout, domain string) s
 
 // Get loads specific records (evidence lookup).
 func (s *Store) Get(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]StoredRecord, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r WHERE r.id = ANY($1)`, ids)
+	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id WHERE r.id = ANY($1)`+fmt.Sprintf(realSourceFilter, "$2"), ids, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +401,7 @@ func scanEntity(row pgx.CollectableRow) (EntityRow, error) {
 }
 
 func (s *Store) Entities(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE id = ANY($1)`, ids)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE id = ANY($1) AND (NOT $2::bool OR NOT synthetic)`, ids, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +414,7 @@ func (s *Store) Entities(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]En
 }
 
 func (s *Store) EntityByCode(ctx context.Context, code string) (EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE code=$1`, code)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE code=$1 AND (NOT $2::bool OR NOT synthetic)`, code, s.excludeSynthetic)
 	if err != nil {
 		return EntityRow{}, err
 	}
@@ -405,7 +422,7 @@ func (s *Store) EntityByCode(ctx context.Context, code string) (EntityRow, error
 }
 
 func (s *Store) EntitiesByKind(ctx context.Context, kind string) ([]EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE kind=$1 ORDER BY code`, kind)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE kind=$1 AND (NOT $2::bool OR NOT synthetic) ORDER BY code`, kind, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -415,10 +432,10 @@ func (s *Store) EntitiesByKind(ctx context.Context, kind string) ([]EntityRow, e
 // Search matches names, codes and aliases (trigram similarity plus substring), best first.
 func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]EntityRow, error) {
 	q = strings.ToLower(strings.TrimSpace(q))
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2 = '' OR kind = $2) AND EXISTS (
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2 = '' OR kind = $2) AND (NOT $4::bool OR NOT e.synthetic) AND EXISTS (
 		SELECT 1 FROM entity_aliases a WHERE a.entity_id = e.id AND (a.alias LIKE '%' || $1 || '%' OR similarity(a.alias, $1) > 0.3))
 		ORDER BY (SELECT max(CASE WHEN a.alias = $1 THEN 2 ELSE similarity(a.alias, $1) END) FROM entity_aliases a WHERE a.entity_id = e.id) DESC, code
-		LIMIT $3`, q, kind, limit)
+		LIMIT $3`, q, kind, limit, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +446,8 @@ func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]Entity
 func (s *Store) Mentioned(ctx context.Context, text string) ([]EntityRow, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e JOIN LATERAL (
 		SELECT max(length(alias)) AS l FROM entity_aliases a WHERE a.entity_id = e.id AND length(a.alias) >= 2 AND strpos(lower($1), a.alias) > 0) m ON m.l IS NOT NULL
-		ORDER BY m.l DESC, code LIMIT 10`, text)
+        WHERE NOT $2::bool OR NOT e.synthetic
+		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}

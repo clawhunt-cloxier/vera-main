@@ -69,7 +69,11 @@ func (a *App) build() error {
 	if err != nil {
 		return err
 	}
-	a.Store = dataservice.NewStore(a.Pool, cat)
+	if c.DataProvider == "fixture" {
+		a.Store = dataservice.NewStore(a.Pool, cat)
+	} else {
+		a.Store = dataservice.NewVendorStore(a.Pool, cat)
+	}
 	if a.Provider, err = newProvider(c); err != nil {
 		return err
 	}

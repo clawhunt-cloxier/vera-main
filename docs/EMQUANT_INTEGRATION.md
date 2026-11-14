@@ -28,6 +28,8 @@
 
 厂商的[Python 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Python.html)和 [Linux C++ 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_CPP_Linux.pdf)定义 API、参数和内存释放；字段口径以具体数据产品及版本为准。用户提供的终端口径应在正式数据产品登记中记录来源与确认人，不把上述概括当作完整合同原文。
 
+使用非 fixture 数据提供方时，应用数据服务排除数据库遗留的模拟厂商记录和模拟实体，包括查询、覆盖检查、证据读取及旧快照回放；常规同步不能重新授予已撤销的模型处理权限。模拟实体与真实实体代码冲突时同步报错，需要治理处理，不能静默合并。此隔离不代替真实厂商注册、字段许可与血缘持久化。
+
 ## 未确认的信息及处理
 
 | 项目 | 未确认内容 | 当前处理 |
