@@ -19,7 +19,7 @@ import (
 func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.New(t)
-	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,kind) VALUES('stage-test','Synthetic stage test','vendor')`); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing) VALUES('stage-test','Synthetic stage test','vendor',true)`); err != nil {
 		t.Fatal(err)
 	}
 	var entityID uuid.UUID
@@ -125,7 +125,7 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	mu.Lock()
 	objects[objectKey] = saved
 	mu.Unlock()
-	view, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	view, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +134,10 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err := view.QueryRow(ctx, `SELECT count(*) FROM quote_publications WHERE staged_quote_id=$1`, id).Scan(&visible); err != nil || visible != 0 {
 		t.Fatalf("publication unexpectedly visible in earlier view: %d %v", visible, err)
 	}
+	earlierBoundary, err := BeginQuoteBoundary(ctx, view)
+	if err != nil {
+		t.Fatal(err)
+	}
 	available, err := runtime.PublishStagedQuote(ctx, id)
 	if err != nil || available.IsZero() {
 		t.Fatalf("publish staged quote: %v", err)
@@ -141,12 +145,69 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err := view.QueryRow(ctx, `SELECT count(*) FROM quote_publications WHERE staged_quote_id=$1`, id).Scan(&visible); err != nil || visible != 0 {
 		t.Fatalf("later publication leaked into established MVCC view: %d %v", visible, err)
 	}
+	oldView, err := runtime.SelectPublishedQuotesAt(ctx, view, earlierBoundary, []uuid.UUID{entityID}, QuoteLatestAvailable, dataservice.SourceDisplay)
+	if err != nil || len(oldView.Quotes) != 0 || len(oldView.Unavailable) != 1 || oldView.Unavailable[0] != entityID {
+		t.Fatalf("older view selected a later publication: %+v %v", oldView, err)
+	}
 	if err := view.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM quote_publications WHERE staged_quote_id=$1`, id).Scan(&visible); err != nil || visible != 1 {
 		t.Fatalf("committed publication absent from later view: %d %v", visible, err)
 	}
+	ordinary, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.SelectPublishedQuotes(ctx, ordinary, []uuid.UUID{entityID}, QuoteLatestAvailable, dataservice.SourceDisplay); err == nil {
+		t.Fatal("read-committed transaction accepted as a fixed view")
+	}
+	_ = ordinary.Rollback(ctx)
+	latest, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundary, err := BeginQuoteBoundary(ctx, latest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.SelectPublishedQuotesAt(ctx, foreign, boundary, []uuid.UUID{entityID}, QuoteLatestAvailable, dataservice.SourceDisplay); err == nil {
+		t.Fatal("a quote boundary was reused in a different transaction")
+	}
+	_ = foreign.Rollback(ctx)
+	selected, err := runtime.SelectPublishedQuotesAt(ctx, latest, boundary, []uuid.UUID{entityID}, QuoteLatestAvailable, dataservice.SourceDisplay)
+	if err != nil || len(selected.Quotes) != 1 || len(selected.Unavailable) != 0 || selected.Quotes[0].Price != "10.25" || selected.Quotes[0].StageID != id || selected.Quotes[0].MarketState != "unknown" || selected.Quotes[0].LatencyMode != "unknown" {
+		t.Fatalf("latest view did not preserve eligible quote and uncertainty: %+v %v", selected, err)
+	}
+	partial, err := runtime.SelectPublishedQuotesAt(ctx, latest, boundary, []uuid.UUID{otherEntity, entityID}, QuoteLatestAvailable, dataservice.SourceModel)
+	if err != nil || !partial.Cutoff.Equal(selected.Cutoff) || len(partial.Quotes) != 1 || len(partial.Unavailable) != 1 || partial.Unavailable[0] != otherEntity {
+		t.Fatalf("model view did not preserve explicit missing entity: %+v %v", partial, err)
+	}
+	realtime, err := runtime.SelectPublishedQuotesAt(ctx, latest, boundary, []uuid.UUID{entityID}, QuoteRealtimeTrade, dataservice.SourceDisplay)
+	if err != nil || len(realtime.Quotes) != 0 || len(realtime.Unavailable) != 1 {
+		t.Fatalf("unknown status or delay was treated as realtime trade: %+v %v", realtime, err)
+	}
+	if err := latest.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	objects[objectKey] = []byte("corrupt")
+	mu.Unlock()
+	corruptView, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.SelectPublishedQuotes(ctx, corruptView, []uuid.UUID{entityID}, QuoteLatestAvailable, dataservice.SourceDisplay); err == nil {
+		t.Fatal("view accepted a corrupted source object")
+	}
+	_ = corruptView.Rollback(ctx)
+	mu.Lock()
+	objects[objectKey] = saved
+	mu.Unlock()
 	again, err := runtime.PublishStagedQuote(ctx, id)
 	if err != nil || !again.Equal(available) {
 		t.Fatalf("publication retry changed its time: %v", err)
@@ -227,6 +288,13 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 		SELECT source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,max_age_ms,verified_by,verified_at,valid_from FROM quote_mapping_policies WHERE id=$1 RETURNING id`, policyID).Scan(&secondPolicy); err != nil {
 		t.Fatal(err)
 	}
+	secondStage, err := runtime.StageQuote(ctx, cat, source, secondPolicy, entityID, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.PublishStagedQuote(ctx, secondStage); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE quote_mapping_policies SET revoked_at=clock_timestamp() WHERE id=$1`, policyID); err != nil {
 		t.Fatal(err)
 	}
@@ -236,10 +304,30 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if _, err := runtime.PublishStagedQuote(ctx, id); err == nil {
 		t.Fatal("publication retry ignored revoked policy")
 	}
+	staleView, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := staleView.QueryRow(ctx, `SELECT count(*) FROM quote_publications`).Scan(&visible); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, license); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := runtime.SelectPublishedQuotes(ctx, staleView, []uuid.UUID{entityID}, QuoteLatestAvailable, dataservice.SourceModel); err == nil {
+		t.Fatal("a view established before revocation exposed a now-revoked grant")
+	}
+	_ = staleView.Rollback(ctx)
 	if _, err := runtime.StageQuote(ctx, cat, source, secondPolicy, entityID, "A"); err == nil {
 		t.Fatal("revoked source license was accepted")
 	}
+	revokedView, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied, err := runtime.SelectPublishedQuotes(ctx, revokedView, []uuid.UUID{entityID}, QuoteLatestAvailable, dataservice.SourceModel)
+	if err != nil || len(denied.Quotes) != 0 || len(denied.Unavailable) != 1 {
+		t.Fatalf("view exposed a revoked source: %+v %v", denied, err)
+	}
+	_ = revokedView.Rollback(ctx)
 }

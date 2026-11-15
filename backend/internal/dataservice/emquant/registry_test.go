@@ -24,8 +24,8 @@ func syntheticStorageLicense(t *testing.T, pool *pgxpool.Pool, provider, dataset
 	t.Helper()
 	var id uuid.UUID
 	err := pool.QueryRow(context.Background(), `INSERT INTO source_licenses
-		(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage)
-		VALUES($1,'synthetic-product',$2,$3,$4,'listed',ARRAY['A','B'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 day',true) RETURNING id`, provider, dataset, method, fields).Scan(&id)
+		(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing)
+		VALUES($1,'synthetic-product',$2,$3,$4,'listed',ARRAY['A','B'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 day',true,true,true) RETURNING id`, provider, dataset, method, fields).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}
