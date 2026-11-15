@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,12 +36,21 @@ func (r *Runtime) StageQuote(ctx context.Context, catalog *dataservice.Catalog, 
 		}
 		var policy QuoteMappingPolicy
 		var maxAgeMS int64
-		if err := tx.QueryRow(ctx, `SELECT time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,coalesce(latency_evidence_ref,''),max_age_ms
+		var statusMapping []byte
+		if err := tx.QueryRow(ctx, `SELECT time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,coalesce(latency_evidence_ref,''),max_age_ms,
+			coalesce(status_indicator,''),coalesce(status_evidence_ref,''),coalesce(status_mapping,'{}'::jsonb)
 			FROM quote_mapping_policies WHERE id=$1 AND source_license_id=$2 AND dataset_id=$3
 			AND revoked_at IS NULL AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp()
 			AND (valid_until IS NULL OR valid_until>clock_timestamp())`, policyID, source.LicenseID, source.DatasetID).
-			Scan(&policy.TimeConvention, &policy.TimeEvidence, &policy.PriceUnit, &policy.PriceEvidence, &policy.LatencyMode, &policy.LatencyEvidence, &maxAgeMS); err != nil {
+			Scan(&policy.TimeConvention, &policy.TimeEvidence, &policy.PriceUnit, &policy.PriceEvidence, &policy.LatencyMode, &policy.LatencyEvidence, &maxAgeMS, &policy.StatusIndicator, &policy.StatusEvidence, &statusMapping); err != nil {
 			return fmt.Errorf("emquant: quote policy is not current: %w", err)
+		}
+		if err := json.Unmarshal(statusMapping, &policy.StatusMapping); err != nil {
+			return errors.New("emquant: invalid quote status mapping")
+		}
+		expectedFields, err := QuotePolicyFields(policy)
+		if err != nil {
+			return err
 		}
 		policy.MaxAge = time.Duration(maxAgeMS) * time.Millisecond
 		policy.LicenseRef = source.LicenseID.String()
@@ -54,7 +64,7 @@ func (r *Runtime) StageQuote(ctx context.Context, catalog *dataservice.Catalog, 
 			ref.ReceivedAt.UTC().Truncate(time.Microsecond), ref.ArchivedAt.UTC().Truncate(time.Microsecond)).Scan(&provider, &fields, &codes); err != nil {
 			return fmt.Errorf("emquant: registered quote provenance mismatch: %w", err)
 		}
-		if len(fields) != 2 || fields[0] != "TIME" || fields[1] != "NOW" || len(codes) != 1 || codes[0] != code {
+		if !slices.Equal(fields, expectedFields) || len(codes) != 1 || codes[0] != code {
 			return errors.New("emquant: registered quote request scope mismatch")
 		}
 		var found uuid.UUID
@@ -74,7 +84,7 @@ func (r *Runtime) StageQuote(ctx context.Context, catalog *dataservice.Catalog, 
 		if err != nil {
 			return err
 		}
-		payload := map[string]any{"event_at": mapped.Price.EventAt.Format(time.RFC3339Nano), "received_at": mapped.Price.ObservedAt.Format(time.RFC3339Nano), "last_price": mapped.Price.Value, "market_status": "unknown", "latency_mode": mapped.DeclaredLatencyMode}
+		payload := map[string]any{"event_at": mapped.Price.EventAt.Format(time.RFC3339Nano), "received_at": mapped.Price.ObservedAt.Format(time.RFC3339Nano), "last_price": mapped.Price.Value, "market_status": mapped.MarketStatus, "latency_mode": mapped.DeclaredLatencyMode}
 		if err := catalog.Validate(dataservice.Record{DatasetID: source.DatasetID, Payload: payload}); err != nil {
 			return fmt.Errorf("emquant: mapped quote does not match catalog: %w", err)
 		}

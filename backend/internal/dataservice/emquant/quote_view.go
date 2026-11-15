@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -51,6 +52,16 @@ type PublishedQuote struct {
 	RawSHA256   string
 	RawRef      string
 	Locators    map[string]string
+	Fields      []string `json:",omitempty"`
+}
+
+// Historical quote components predate explicit field scope and contain only
+// TIME,NOW. New components persist their exact licensed field list.
+func publishedQuoteFields(q PublishedQuote) []string {
+	if len(q.Fields) == 0 {
+		return []string{"TIME", "NOW"}
+	}
+	return q.Fields
 }
 
 // QuoteBoundary binds one database cutoff and snapshot to one transaction.
@@ -132,6 +143,7 @@ func (r *Runtime) SelectPublishedQuotesAt(ctx context.Context, tx pgx.Tx, bounda
 		s.event_at,s.received_at,pub.available_at,q.latency_mode,s.payload->>'market_status',
 		o.content_hash,o.stored_path,o.request_fingerprint,o.fetched_at,o.archived_at,o.vendor_fields,o.vendor_codes,
 		q.time_convention,q.time_evidence_ref,q.price_unit,q.price_evidence_ref,coalesce(q.latency_evidence_ref,''),q.max_age_ms,
+		coalesce(q.status_indicator,''),coalesce(q.status_evidence_ref,''),coalesce(q.status_mapping,'{}'::jsonb),
 		s.payload::text,s.field_locators::text
 		FROM quote_publications pub JOIN staged_quotes s ON s.id=pub.staged_quote_id
 		JOIN raw_objects o ON o.id=s.raw_object_id AND o.source_license_id IS NOT NULL
@@ -140,7 +152,7 @@ func (r *Runtime) SelectPublishedQuotesAt(ctx context.Context, tx pgx.Tx, bounda
 		JOIN entities e ON e.id=s.entity_id AND e.kind='stock' AND NOT e.synthetic AND e.code=s.security_code
 		JOIN quote_mapping_policies q ON q.id=s.policy_id AND q.source_license_id=l.id AND q.dataset_id=o.dataset_id
 		WHERE s.entity_id=ANY($1) AND o.dataset_id='mkt.intraday_quote' AND o.vendor_method='CSQSNAPSHOT'
-		AND o.vendor_fields=ARRAY['TIME','NOW']::text[] AND o.vendor_codes=ARRAY[s.security_code]::text[]
+		AND o.vendor_fields=CASE WHEN q.status_indicator IS NULL THEN ARRAY['TIME','NOW']::text[] ELSE ARRAY['TIME','NOW',q.status_indicator]::text[] END AND o.vendor_codes=ARRAY[s.security_code]::text[]
 		AND l.vendor_method=o.vendor_method AND o.vendor_fields <@ l.field_names
 		AND (l.instrument_scope='all' OR o.vendor_codes <@ l.instrument_codes)
 		AND l.revoked_at IS NULL AND l.verified_at<=$2 AND l.valid_from<=$2 AND (l.valid_until IS NULL OR l.valid_until>$2)
@@ -162,6 +174,7 @@ func (r *Runtime) SelectPublishedQuotesAt(ctx context.Context, tx pgx.Tx, bounda
 		policy               QuoteMappingPolicy
 		maxAgeMS             int64
 		payload, locatorsRaw string
+		statusMapping        []byte
 	}
 	candidates := make([]candidate, 0, len(ids))
 	for rows.Next() {
@@ -170,6 +183,7 @@ func (r *Runtime) SelectPublishedQuotesAt(ctx context.Context, tx pgx.Tx, bounda
 			&c.quote.EventAt, &c.quote.ReceivedAt, &c.quote.AvailableAt, &c.quote.LatencyMode, &c.quote.MarketState,
 			&c.quote.RawSHA256, &c.quote.RawRef, &c.fingerprint, &c.fetched, &c.archived, &c.fields, &c.codes,
 			&c.policy.TimeConvention, &c.policy.TimeEvidence, &c.policy.PriceUnit, &c.policy.PriceEvidence, &c.policy.LatencyEvidence, &c.maxAgeMS,
+			&c.policy.StatusIndicator, &c.policy.StatusEvidence, &c.statusMapping,
 			&c.payload, &c.locatorsRaw); err != nil {
 			rows.Close()
 			return QuoteView{}, err
@@ -184,6 +198,10 @@ func (r *Runtime) SelectPublishedQuotesAt(ctx context.Context, tx pgx.Tx, bounda
 	view := QuoteView{Cutoff: cutoff, Requirement: requirement, Use: use, Quotes: make([]PublishedQuote, 0, len(candidates)), Unavailable: make([]uuid.UUID, 0)}
 	found := make(map[uuid.UUID]bool, len(candidates))
 	for _, c := range candidates {
+		if err := json.Unmarshal(c.statusMapping, &c.policy.StatusMapping); err != nil {
+			return QuoteView{}, errors.New("emquant: invalid quote status mapping")
+		}
+		c.quote.Fields = slices.Clone(c.fields)
 		var locked uuid.UUID
 		if err := tx.QueryRow(ctx, `SELECT id FROM quote_mapping_policies WHERE id=$1 AND revoked_at IS NULL
 			AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp() AND (valid_until IS NULL OR valid_until>clock_timestamp()) FOR SHARE`, c.quote.PolicyID).Scan(&locked); err != nil {
@@ -261,7 +279,7 @@ func (r *Runtime) verifyPublishedQuote(ctx context.Context, q *PublishedQuote, f
 	if err := json.Unmarshal([]byte(locatorJSON), &locators); err != nil {
 		return err
 	}
-	if !payload.EventAt.Equal(mapped.Price.EventAt) || !payload.ReceivedAt.Equal(observed) || !q.EventAt.Equal(mapped.Price.EventAt) || !q.ReceivedAt.Equal(observed.UTC().Truncate(time.Microsecond)) || payload.Price != mapped.Price.Value || payload.MarketState != "unknown" || payload.LatencyMode != q.LatencyMode || len(locators) != len(mapped.Locators) || locators["NOW"] != mapped.Locators["NOW"] || locators["TIME"] != mapped.Locators["TIME"] || len(cube.Codes) != 1 {
+	if !payload.EventAt.Equal(mapped.Price.EventAt) || !payload.ReceivedAt.Equal(observed) || !q.EventAt.Equal(mapped.Price.EventAt) || !q.ReceivedAt.Equal(observed.UTC().Truncate(time.Microsecond)) || payload.Price != mapped.Price.Value || payload.MarketState != mapped.MarketStatus || payload.LatencyMode != q.LatencyMode || !maps.Equal(locators, mapped.Locators) || len(cube.Codes) != 1 {
 		return errors.New("emquant: staged quote does not match its archived source")
 	}
 	q.Price = payload.Price

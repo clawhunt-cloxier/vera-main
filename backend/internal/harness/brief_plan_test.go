@@ -84,11 +84,11 @@ func TestRegisterBriefIntentBindsConfirmedPlanAtomically(t *testing.T) {
 	}
 	source := BriefQuoteSource{ProviderID: "brief-test", Product: "synthetic-product"}
 	if err := pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing)
-		VALUES('brief-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW'],'listed',ARRAY['600000.SH'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&source.LicenseID); err != nil {
+		VALUES('brief-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TRADESTATUS'],'listed',ARRAY['600000.SH'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&source.LicenseID); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,latency_evidence_ref,max_age_ms,verified_by,verified_at,valid_from)
-		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','real_time','synthetic-latency',60000,'synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute') RETURNING id`, source.LicenseID).Scan(&source.PolicyID); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,latency_evidence_ref,max_age_ms,verified_by,verified_at,valid_from,status_indicator,status_evidence_ref,status_mapping)
+		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','real_time','synthetic-latency',60000,'synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute','TRADESTATUS','synthetic-status','{"s:OPEN":"continuous","s:HALT":"suspended"}') RETURNING id`, source.LicenseID).Scan(&source.PolicyID); err != nil {
 		t.Fatal(err)
 	}
 	var unknownPolicy uuid.UUID
