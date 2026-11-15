@@ -296,7 +296,7 @@
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "application/vnd.vera.v0.4+json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateTask"
               }
@@ -853,9 +853,9 @@
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "application/vnd.vera.v0.4+json": {
               "schema": {
-                "$ref": "#/components/schemas/CreatePlan"
+                "$ref": "#/components/schemas/CreatePlanV04"
               }
             }
           }
@@ -2517,6 +2517,18 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "quote_requirement": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "realtime_trade",
+              "latest_available",
+              null
+            ],
+            "description": "Confirmed quote requirement bound to the plan hash and collection intent; null only for fixed_legacy plans. realtime_trade requires an authorized, fresh quote during verified continuous trading; latest_available accepts a current-policy quote with its actual latency and trading status identified."
           }
         },
         "required": [
@@ -2532,7 +2544,51 @@
           "reason_code",
           "estimate",
           "expires_at",
-          "snapshot_mode"
+          "snapshot_mode",
+          "quote_requirement"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "snapshot_mode": {
+                  "const": "collect_latest"
+                }
+              },
+              "required": [
+                "snapshot_mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "quote_requirement": {
+                  "enum": [
+                    "realtime_trade",
+                    "latest_available"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "snapshot_mode": {
+                  "const": "fixed_legacy"
+                }
+              },
+              "required": [
+                "snapshot_mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "quote_requirement": {
+                  "type": "null"
+                }
+              }
+            }
+          }
         ]
       },
       "PlanResult": {
@@ -3139,6 +3195,68 @@
         },
         "required": [
           "persona"
+        ]
+      },
+      "CreatePlanV04": {
+        "description": "0.4 plan creation: the user explicitly chooses the quote requirement; free text remains untrusted.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 500,
+                "pattern": "\\S"
+              },
+              "quote_requirement": {
+                "enum": [
+                  "realtime_trade",
+                  "latest_available"
+                ],
+                "description": "realtime_trade requires an authorized, fresh quote during verified continuous trading; latest_available accepts a current-policy quote with its actual latency and trading status identified."
+              }
+            },
+            "required": [
+              "text",
+              "quote_requirement"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "skill_id": {
+                "enum": [
+                  "deep_research",
+                  "stock_analysis",
+                  "capital_flow"
+                ]
+              },
+              "subject_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "params": {
+                "type": "object",
+                "description": "Validated server-side against the skill's params_schema from GET /api/v1/skills."
+              },
+              "quote_requirement": {
+                "enum": [
+                  "realtime_trade",
+                  "latest_available"
+                ],
+                "description": "realtime_trade requires an authorized, fresh quote during verified continuous trading; latest_available accepts a current-policy quote with its actual latency and trading status identified."
+              }
+            },
+            "required": [
+              "skill_id",
+              "subject_id",
+              "params",
+              "quote_requirement"
+            ]
+          }
         ]
       }
     }

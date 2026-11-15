@@ -20,6 +20,37 @@ import (
 
 const okSummary = `{"points":[{"text":"a","claim_refs":["S2.1"]}]}`
 
+func TestWaitContextHonoursCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	if err := waitContext(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitContext error = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("cancelled retry wait took %s", elapsed)
+	}
+}
+
+func TestGatewayStopsBeforeRetryWhenContextIsCancelled(t *testing.T) {
+	var hits atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}, Profile{})
+	ctx, cancel := context.WithCancel(context.Background())
+	x.g.wait = func(_ context.Context, _ time.Duration) error {
+		cancel()
+		return context.Canceled
+	}
+	if _, _, err := x.g.Complete(ctx, x.req()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("retry cancellation error = %v, want context.Canceled", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("cancelled retry made %d upstream calls, want 1", hits.Load())
+	}
+}
+
 func reply(w http.ResponseWriter, content, finish string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"model": "flash-1017",
 		"choices": []any{map[string]any{"message": map[string]any{"content": content}, "finish_reason": finish}},
@@ -52,7 +83,7 @@ func newGW(t *testing.T, h http.HandlerFunc, prof Profile) *harnessT {
 	}
 	x := &harnessT{pool: pool, pol: pol}
 	x.g = NewGateway(pool, map[string]Profile{"writer": prof}, map[string]Adapter{"openai": OpenAI{}}, prices(), sc, pol, decimal.RequireFromString("30"))
-	x.g.sleep = func(d time.Duration) { x.slept = append(x.slept, d) }
+	x.g.wait = func(_ context.Context, d time.Duration) error { x.slept = append(x.slept, d); return nil }
 	return x
 }
 
@@ -209,6 +240,24 @@ func TestRequestBodyAndProfileCaps(t *testing.T) {
 	}
 }
 
+func TestModelToolsNeverReachVendor(t *testing.T) {
+	var calls atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		reply(w, okSummary, "stop")
+	}, Profile{ExtraBody: map[string]any{"tools": []any{map[string]any{"type": "deepseek_web_search"}}}})
+	if _, _, err := x.g.Complete(context.Background(), x.req()); err == nil {
+		t.Fatal("gateway accepted model tool configuration")
+	}
+	if calls.Load() != 0 || len(x.ledger(t)) != 0 {
+		t.Fatal("tool request reached vendor or reserved a model call")
+	}
+	profile := x.g.Profiles["writer"]
+	if _, err := (OpenAI{}).Do(context.Background(), Call{Profile: profile}); err == nil || calls.Load() != 0 {
+		t.Fatal("direct adapter accepted model tool configuration")
+	}
+}
+
 func TestPeakAndOffPeakPricing(t *testing.T) {
 	p := prices()
 	p.PeakWindowsUTC = append(p.PeakWindowsUTC, struct {
@@ -261,3 +310,61 @@ type fixed struct{ r Raw }
 
 func (fixed) Name() string                            { return "fixed" }
 func (f fixed) Do(context.Context, Call) (Raw, error) { return f.r, nil }
+
+func TestAuthorizationRecheckedBeforeEachSend(t *testing.T) {
+	var hits atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}, Profile{})
+	authorized := true
+	denied := errors.New("source license expired")
+	req := x.req()
+	req.WithSend = func(_ context.Context, send func() (Raw, error)) (Raw, error) {
+		if !authorized {
+			return Raw{}, denied
+		}
+		return send()
+	}
+	x.g.wait = func(context.Context, time.Duration) error { authorized = false; return nil }
+	if _, _, err := x.g.Complete(context.Background(), req); !errors.Is(err, denied) {
+		t.Fatalf("error: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("sent after permission expiry: %d", hits.Load())
+	}
+	for _, status := range x.ledger(t) {
+		if status != "FAILED" {
+			t.Fatalf("unreleased reservation: %s", status)
+		}
+	}
+}
+
+func TestSourceCommitFailureRetainsPaidReservation(t *testing.T) {
+	var hits atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		reply(w, okSummary, "stop")
+	}, Profile{})
+	req := x.req()
+	req.WithSend = func(_ context.Context, send func() (Raw, error)) (Raw, error) {
+		raw, err := send()
+		if err != nil {
+			return raw, err
+		}
+		return raw, errors.New("commit failed after paid request")
+	}
+	_, _, err := x.g.Complete(context.Background(), req)
+	var modelErr *Error
+	if !errors.As(err, &modelErr) || !modelErr.Unknown {
+		t.Fatalf("post-send accounting: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("paid send repeated: %d", hits.Load())
+	}
+	for _, status := range x.ledger(t) {
+		if status != "UNKNOWN" {
+			t.Fatalf("paid reservation released: %s", status)
+		}
+	}
+}

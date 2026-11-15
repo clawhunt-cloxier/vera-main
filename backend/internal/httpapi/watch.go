@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/httpx"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/watchlist"
 )
@@ -20,6 +21,9 @@ func (s *Server) watchItems(r *http.Request, ws uuid.UUID, items []watchlist.Ite
 	}
 	out := []WatchItem{}
 	for _, it := range items {
+		if _, ok := ents[it.EntityID]; !ok {
+			continue
+		}
 		wi := WatchItem{ID: it.ID, Version: it.Version, Entity: toEntity(ents[it.EntityID], s.Engine.Skills), Tags: it.Tags, Note: it.Note,
 			Alerts: it.Alerts, AddedAt: it.AddedAt, Snapshot: it.Snapshot}
 		last, err := s.reportSummaries(r, ws, `subject_id=$1 ORDER BY delivered_at DESC LIMIT 1`, it.EntityID)
@@ -67,6 +71,9 @@ func (s *Server) addWatch(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if len(out) != 1 {
+		return errs.NotFound()
+	}
 	httpx.JSON(w, r, http.StatusCreated, out[0])
 	return nil
 }
@@ -93,6 +100,9 @@ func (s *Server) patchWatch(w http.ResponseWriter, r *http.Request) error {
 	out, err := s.watchItems(r, ws, []watchlist.Item{it})
 	if err != nil {
 		return err
+	}
+	if len(out) != 1 {
+		return errs.NotFound()
 	}
 	httpx.JSON(w, r, 200, out[0])
 	return nil

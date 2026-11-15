@@ -1,0 +1,15 @@
+{
+  "version": "1",
+  "synthetic": true,
+  "status": "specification_examples_not_executable_yet",
+  "skill_id": "stock_analysis",
+  "skill_version": "1.1.0-demo.1",
+  "cases": [
+    {"id": "BRIEF-01", "scenario": "verified_fresh_realtime_quote_optional_financial_missing", "expect": "limited_with_quote_evidence_and_missing_data"},
+    {"id": "BRIEF-02", "scenario": "unknown_or_delayed_quote", "expect": "abstain_no_fixture_fallback"},
+    {"id": "BRIEF-03", "scenario": "missing_quote_permission_or_expired_quote", "expect": "abstain_no_fixture_fallback"},
+    {"id": "BRIEF-04", "scenario": "financial_disclosure_or_revision_unverified", "expect": "omit_financial_fact_and_explain"},
+    {"id": "BRIEF-05", "scenario": "restart_after_snapshot_freeze", "expect": "reuse_exact_snapshot"},
+    {"id": "BRIEF-06", "scenario": "untraceable_number_or_investment_advice", "expect": "remove_claim"}
+  ]
+}

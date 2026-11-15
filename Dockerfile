@@ -12,8 +12,8 @@ COPY contracts/ /build/contracts/
 RUN npm run build
 
 # Stage 2: Build Go backend
-FROM golang:${GO_VERSION}-alpine AS go-builder
-RUN apk add --no-cache git ca-certificates
+FROM golang:${GO_VERSION}-bookworm AS go-builder
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev ca-certificates git && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY backend/go.mod backend/go.sum ./backend/
 # go.mod replaces tdewolff/font with a local copy, so it must exist before go mod download.
@@ -24,12 +24,17 @@ COPY contracts/ ./contracts/
 COPY deploy/config/ ./deploy/config/
 COPY tests/fixtures/ ./tests/fixtures/
 COPY --from=web-builder /build/web/dist ./web/dist/
-RUN cd backend && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /vera ./cmd/vera
+RUN cd backend && CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /vera ./cmd/vera
+
+# Exercise dynamic SDK loading in the same libc/toolchain environment used to
+# build the release executable. The fixture is synthetic and never deployed.
+FROM go-builder AS native-check
+RUN cd backend && CGO_ENABLED=1 go test ./internal/dataservice/emquant -run 'TestNativeLifecycleAndResponse|TestOpenRejectsInvalidAndMissingLibrary' -count=1
 
 # Stage 3: Final minimal image
 # debian-slim, not alpine: embedded PostgreSQL ships glibc binaries.
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata curl && rm -rf /var/lib/apt/lists/* && \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata curl libstdc++6 libgcc-s1 && rm -rf /var/lib/apt/lists/* && \
     groupadd -g 10001 vera && useradd -u 10001 -g vera -m -d /home/vera vera && \
     mkdir -p /data && chown vera:vera /data
 # Relative defaults (../contracts, ../deploy/config, ../tests/fixtures) resolve from /app/backend.

@@ -18,6 +18,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/check"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
@@ -28,6 +29,7 @@ import (
 
 // Engine wires the data service, model gateway, policy and skills. One per process.
 type Engine struct {
+	Brief     *emquant.BriefService
 	Pool      *pgxpool.Pool
 	Store     *dataservice.Store
 	Gateway   *model.Gateway
@@ -75,6 +77,7 @@ type Plan struct {
 	P95Seconds   int                   `json:"p95_seconds"`
 	QuotaCost    int                   `json:"quota_cost"`
 	ExpiresAt    time.Time             `json:"expires_at"`
+	SnapshotMode string                `json:"-"`
 }
 
 const planTTL = 30 * time.Minute
@@ -95,6 +98,9 @@ func planHash(skill, version string, subject uuid.UUID, p Params, asOf time.Time
 func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, subject dataservice.EntityRow, raw map[string]any) (*Plan, error) {
 	if !e.Synthetic && !e.RealResearch {
 		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
+	}
+	if e.Brief != nil && skillID != "stock_analysis" {
+		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "真实数据模式当前仅提供成交数据简报")
 	}
 	sk, ok := e.Skills[skillID]
 	if !ok {
@@ -138,12 +144,16 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 	plan.P95Seconds = min(b.DeadlineSeconds, 60+writers*25)
 	plan.QuotaCost = 1
 	plan.Hash = planHash(sk.ID, sk.Version, subject.ID, p, asOf, plan.Sections)
+	plan.SnapshotMode = "fixed_legacy"
+	if sk.Version == emquant.ObservationBriefVersion {
+		plan.SnapshotMode = "collect_latest"
+	}
 	params, _ := json.Marshal(p)
 	secs, _ := json.Marshal(plan.Sections)
 	err = db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO research_plans(id,workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,reason_code,expires_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, plan.ID, ws, sk.ID, sk.Version, subject.ID, params, secs, asOf, plan.Hash,
-			plan.Executable, plan.ReasonCode, plan.ExpiresAt)
+		_, err := tx.Exec(ctx, `INSERT INTO research_plans(id,workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,reason_code,expires_at,snapshot_mode)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, plan.ID, ws, sk.ID, sk.Version, subject.ID, params, secs, asOf, plan.Hash,
+			plan.Executable, plan.ReasonCode, plan.ExpiresAt, plan.SnapshotMode)
 		return err
 	})
 	return plan, err
@@ -155,9 +165,9 @@ func (e *Engine) LoadPlan(ctx context.Context, ws, id uuid.UUID) (*Plan, error) 
 	var params, secs []byte
 	var subject uuid.UUID
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT id, plan_hash, skill_id, skill_version, subject_id, params, sections, as_of, executable, reason_code, expires_at
+		return tx.QueryRow(ctx, `SELECT id, plan_hash, skill_id, skill_version, subject_id, params, sections, as_of, executable, reason_code, expires_at, snapshot_mode
 			FROM research_plans WHERE id=$1`, id).Scan(&p.ID, &p.Hash, &p.SkillID, &p.SkillVersion, &subject, &params, &secs, &p.AsOf,
-			&p.Executable, &p.ReasonCode, &p.ExpiresAt)
+			&p.Executable, &p.ReasonCode, &p.ExpiresAt, &p.SnapshotMode)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errs.NotFound()
@@ -171,7 +181,11 @@ func (e *Engine) LoadPlan(ctx context.Context, ws, id uuid.UUID) (*Plan, error) 
 	if err != nil {
 		return nil, err
 	}
-	p.Subject = ents[subject]
+	var found bool
+	p.Subject, found = ents[subject]
+	if !found {
+		return nil, errs.NotFound()
+	}
 	sk := e.Skills[p.SkillID]
 	b := e.Policy.Budgets[p.SkillID]
 	w := 0
@@ -275,6 +289,8 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 	}
 	sk := e.Skills[plan.SkillID]
 	switch {
+	case plan.SnapshotMode != "fixed_legacy" && (plan.SnapshotMode != "collect_latest" || plan.SkillVersion != emquant.ObservationBriefVersion || e.Brief == nil):
+		return uuid.Nil, errs.Conflict("PLAN_VERSION_MISMATCH", "该计划需要新版确认流程")
 	case plan.Hash != hash:
 		return uuid.Nil, errs.Conflict("PLAN_CHANGED", "研究计划已变更，请重新确认")
 	case time.Now().After(plan.ExpiresAt):
@@ -292,7 +308,7 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 	}
 	budget := e.Policy.Budgets[sk.ID]
 	var taskID uuid.UUID
-	err = db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
+	err = e.confirmTransaction(ctx, ws, plan, func(tx pgx.Tx) error {
 		if KillSwitch(ctx, tx) {
 			return errs.Unavailable("RESEARCH_PAUSED", "平台暂停接受新的研究任务")
 		}
@@ -301,7 +317,7 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 			return err
 		}
 		var consumed *uuid.UUID
-		if err := tx.QueryRow(ctx, `SELECT consumed_task_id FROM research_plans WHERE id=$1 FOR UPDATE`, planID).Scan(&consumed); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT consumed_task_id FROM research_plans WHERE id=$1 AND workspace_id=$2 AND expires_at>clock_timestamp() FOR UPDATE`, planID, ws).Scan(&consumed); err != nil {
 			return err
 		}
 		if consumed != nil {
@@ -339,9 +355,9 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 		sb, _ := json.Marshal(secs)
 		bb, _ := json.Marshal(budget)
 		deadline := time.Now().Add(time.Duration(budget.DeadlineSeconds) * time.Second)
-		if err := tx.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,'QUEUED',$9,$10) RETURNING id`, ws, planID, sk.ID, sk.Version, plan.Subject.ID, params, sb, plan.AsOf,
-			deadline, bb).Scan(&taskID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget,snapshot_mode)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,'QUEUED',$9,$10,$11) RETURNING id`, ws, planID, sk.ID, sk.Version, plan.Subject.ID, params, sb, plan.AsOf,
+			deadline, bb, plan.SnapshotMode).Scan(&taskID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE research_plans SET consumed_task_id=$2 WHERE id=$1`, planID, taskID); err != nil {
@@ -401,6 +417,7 @@ type taskRow struct {
 	Budget                 policy.Budget
 	Snapshot               *string
 	PlanHash               string
+	SnapshotMode           string
 }
 
 func (e *Engine) loadTask(ctx context.Context, ws, id uuid.UUID) (*taskRow, error) {
@@ -408,9 +425,9 @@ func (e *Engine) loadTask(ctx context.Context, ws, id uuid.UUID) (*taskRow, erro
 	var params, secs, budget []byte
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT t.id, t.workspace_id, t.subject_id, t.skill_id, t.skill_version, t.status, t.epoch, t.params, t.sections,
-			t.as_of, t.deadline, t.budget, t.snapshot_hash, p.plan_hash FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id WHERE t.id=$1`, id).
+			t.as_of, t.deadline, t.budget, t.snapshot_hash, p.plan_hash, t.snapshot_mode FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id WHERE t.id=$1`, id).
 			Scan(&t.ID, &t.Workspace, &t.Subject, &t.Skill, &t.Version, &t.Status, &t.Epoch, &params, &secs, &t.AsOf, &t.Deadline, &budget,
-				&t.Snapshot, &t.PlanHash)
+				&t.Snapshot, &t.PlanHash, &t.SnapshotMode)
 	})
 	if err != nil {
 		return nil, err
@@ -422,6 +439,10 @@ func (e *Engine) loadTask(ctx context.Context, ws, id uuid.UUID) (*taskRow, erro
 }
 
 var errStale = errors.New("task epoch or status changed")
+
+// ErrSnapshotModeUnsupported prevents a legacy worker from using preview time
+// as a collect_latest cutoff. A newer worker must implement the full protocol.
+var ErrSnapshotModeUnsupported = errors.New("task snapshot mode is not supported by this worker")
 
 // transition moves a task between states only if epoch and from-status still match.
 func (e *Engine) transition(ctx context.Context, t *taskRow, from []string, to string, code, msg string) error {
@@ -611,6 +632,9 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	if t.Epoch != epoch || IsTerminal(t.Status) || t.Status == "CANCEL_REQUESTED" {
 		return nil
 	}
+	if t.SnapshotMode != "fixed_legacy" && (t.Version != emquant.ObservationBriefVersion || e.Brief == nil) {
+		return ErrSnapshotModeUnsupported
+	}
 	sk := e.Skills[t.Skill]
 	if sk == nil || sk.Version != t.Version {
 		return e.finish(ctx, t, "FAILED", "SKILL_VERSION_MISSING", "技能版本不可用")
@@ -619,7 +643,11 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	runCtx, cancel := context.WithDeadline(ctx, t.Deadline.Add(-30*time.Second))
 	defer cancel()
 	go e.watchCancel(runCtx, cancel, t)
-	err = e.pipeline(runCtx, ctx, t, sk)
+	if t.Version == emquant.ObservationBriefVersion {
+		err = e.observationPipeline(runCtx, ctx, t, sk)
+	} else {
+		err = e.pipeline(runCtx, ctx, t, sk)
+	}
 	var ab *abstainError
 	switch {
 	case err == nil:
@@ -696,7 +724,7 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 		return err
 	}
 	sheet, err := step(ctx, e, t, "compute", func() (*facts.Sheet, error) {
-		b, err := e.bundleFromSnapshot(ctx, subject, co)
+		b, err := e.bundleFromSnapshot(ctx, subject, co, t.AsOf)
 		if err != nil {
 			return nil, err
 		}
@@ -821,10 +849,13 @@ func (e *Engine) sectionReason(t *taskRow, id string) string {
 }
 
 // bundleFromSnapshot rebuilds the bundle exactly from the frozen record set and the frozen member/peer lists.
-func (e *Engine) bundleFromSnapshot(ctx context.Context, subject dataservice.EntityRow, co collectOut) (*Bundle, error) {
+func (e *Engine) bundleFromSnapshot(ctx context.Context, subject dataservice.EntityRow, co collectOut, expectedAsOf time.Time) (*Bundle, error) {
 	asOf, recs, err := e.Store.Snapshot(ctx, co.Snapshot)
 	if err != nil {
 		return nil, err
+	}
+	if !asOf.Equal(expectedAsOf.UTC().Truncate(time.Microsecond)) {
+		return nil, errors.New("snapshot cutoff does not match research task")
 	}
 	ids := map[uuid.UUID]bool{subject.ID: true}
 	for _, r := range recs {

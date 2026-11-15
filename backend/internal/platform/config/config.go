@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/modelguard"
 )
 
 type ModelProfile struct {
@@ -161,6 +163,9 @@ func loadProfile(name string) (ModelProfile, []string) {
 			if _, ok := p.ExtraBody[k]; ok {
 				bad("EXTRA_BODY", fmt.Sprintf("may not set %q (use the dedicated MODEL_<PROFILE>_* variable)", k))
 			}
+		}
+		if err := modelguard.ValidateExtraBody(p.ExtraBody); err != nil {
+			bad("EXTRA_BODY", "must not enable model tools or search")
 		}
 	}
 	if v := env(u+"TEMPERATURE", ""); v != "" {

@@ -1,0 +1,292 @@
+//go:build linux && cgo
+
+package emquant
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
+)
+
+func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
+	pool := dbtest.New(t)
+	ctx := context.Background()
+	lib := filepath.Join(t.TempDir(), "fake.so")
+	if output, err := exec.Command("cc", "-shared", "-fPIC", "-o", lib, "testdata/fake.c").CombinedOutput(); err != nil {
+		t.Fatalf("compile fake library: %v: %s", err, output)
+	}
+	archived := make(chan []byte, 1)
+	var mu sync.Mutex
+	var object []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			mu.Lock()
+			defer mu.Unlock()
+			_, _ = w.Write(object)
+			return
+		}
+		if r.Method != http.MethodPut || r.Header.Get("If-None-Match") != "*" {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		object = append([]byte(nil), body...)
+		mu.Unlock()
+		archived <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	cfg := RuntimeConfig{Library: lib, Username: "user", Password: "pass", Database: pool, ObjectClient: testS3Client(server.URL, "test", "test"), Bucket: "test-bucket", AccountScope: "synthetic-account", MinInterval: 90 * time.Millisecond, RateLimitCooldown: 200 * time.Millisecond}
+	if strings.Contains(fmt.Sprintf("%v %#v", cfg, cfg), "pass") {
+		t.Fatal("credentials appeared in config formatting")
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE emquant_rate_state RENAME TO emquant_rate_state_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	if runtime, err := OpenRuntime(ctx, cfg); err == nil {
+		_ = runtime.Close()
+		t.Fatal("runtime opened without persistent rate state")
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE emquant_rate_state_unavailable RENAME TO emquant_rate_state`); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := OpenRuntime(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = runtime.Close() }()
+	usage, err := runtime.UsageStatistics(ctx, "EM_CSD", "2026-11-01", "2026-11-13")
+	if err != nil || usage.Rows != 1 {
+		t.Fatalf("gated usage diagnostic: %v", err)
+	}
+	select {
+	case <-archived:
+		t.Fatal("account usage diagnostic was archived")
+	default:
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if data, err := runtime.UsageStatistics(cancelled, "EM_CSD", "2026-11-01", "2026-11-13"); err == nil || len(data.Values) != 0 {
+		t.Fatal("cancelled usage diagnostic returned data")
+	}
+	quote, ref, err := runtime.CollectQuote(ctx, "A,B", "X,Y", "")
+	if err != nil || len(quote.Data.Values) != 8 || ref.BodyRef == "" || ref.BodySHA256 == "" {
+		t.Fatalf("runtime collection: %v", err)
+	}
+	body := <-archived
+	if replay, _, err := DecodeArchive(body, ref.BodySHA256); err != nil || len(replay.Values) != 8 {
+		t.Fatalf("runtime archive replay: %v", err)
+	}
+	if replay, err := runtime.ReadArchive(ctx, ref); err != nil || !bytes.Equal(replay, body) {
+		t.Fatalf("runtime object read: %v", err)
+	}
+	bad := ref
+	bad.BodyRef = "s3://test-bucket/wrong-object"
+	if _, err := runtime.ReadArchive(ctx, bad); err == nil {
+		t.Fatal("wrong object reference accepted")
+	}
+	bad = ref
+	bad.RequestFingerprint = strings.Repeat("0", 64)
+	if _, err := runtime.ReadArchive(ctx, bad); err == nil {
+		t.Fatal("wrong request fingerprint accepted")
+	}
+	mu.Lock()
+	object = []byte("corrupt")
+	mu.Unlock()
+	if _, err := runtime.ReadArchive(ctx, ref); err == nil {
+		t.Fatal("corrupt stored object accepted")
+	}
+	days, calendarRef, err := runtime.CollectOpenDates(ctx, "CNSESH", "2026-11-09", "2026-11-10")
+	if err != nil || len(days) != 2 {
+		t.Fatalf("calendar collection: %v", err)
+	}
+	<-archived
+	records, err := runtime.MapCalendarFromArchive(ctx, calendarRef, "CNSESH", "2026-11-09", "2026-11-10")
+	if err != nil || len(records) != 2 || records[0].RawSHA256 != calendarRef.BodySHA256 || records[0].Record.RecordKey != "2026-11-09" {
+		t.Fatalf("calendar archive mapping: %v", err)
+	}
+	if _, err := runtime.MapCalendarFromArchive(ctx, calendarRef, "CNSESZ", "2026-11-09", "2026-11-10"); err == nil {
+		t.Fatal("calendar archive accepted with the wrong market")
+	}
+	statementFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"IncomeStatement_9", "IncomeStatement_61"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 11, Value: 1000.0}, {Type: 11, Value: -20.0}}}}
+	_, statementRef, err := (Collector{Fetcher: statementFetcher, Store: runtime.store}).CollectCSS(ctx, "A.SH", statementIndicators, "ReportDate=20251231,Type=1")
+	if err != nil {
+		t.Fatalf("statement archive: %v", err)
+	}
+	fields, err := runtime.MapStatementFromArchive(ctx, statementRef, "A.SH", "2025-12-31", 1)
+	if err != nil || fields.RevenueCNY == nil || *fields.RevenueCNY != "1000" || fields.NetProfitCNY == nil || *fields.NetProfitCNY != "-20" {
+		t.Fatalf("statement archive mapping: %v", err)
+	}
+	if _, err := runtime.MapStatementFromArchive(ctx, statementRef, "A.SH", "2025-09-30", 1); err == nil {
+		t.Fatal("statement archive accepted with the wrong report period")
+	}
+	<-archived
+	marginFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"TRADINGBALANCEM", "PURCHASEWITHBORROWEDMONEYM", "REPAYMENTTOBROKERM", "SECLENDINGBALANCEVOLUMEM", "SECLENDINGBALANCEM"}, Dates: []string{"2026-11-02"}, Values: []Cell{{Type: 8, Value: int64(123)}, {Type: 0}, {Type: 0}, {Type: 0}, {Type: 0}}}}
+	margin, err := (Collector{Fetcher: marginFetcher, Store: runtime.store}).CollectMarginObservations(ctx, "A.SH", "2026-11-02", "2026-11-03")
+	if err != nil {
+		t.Fatalf("margin archive: %v", err)
+	}
+	replayedMargin, err := runtime.MapMarginFromArchive(ctx, margin.Source, "A.SH", "2026-11-02", "2026-11-03")
+	if err != nil || len(replayedMargin.Rows) != 1 || replayedMargin.Rows[0].Cells["TRADINGBALANCEM"].Value != int64(123) {
+		t.Fatalf("margin replay: %v", err)
+	}
+	if _, err := runtime.MapMarginFromArchive(ctx, margin.Source, "A.SH", "2026-11-02", "2026-11-04"); err == nil {
+		t.Fatal("margin archive accepted with wrong range")
+	}
+	<-archived
+	disclosureFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"STMTACTDATE", "CORRECTANNCNUM", "CORRECTANNCDATE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "2026-04-01"}, {Type: 8, Value: int64(1)}, {Type: 0}}}}
+	disclosure, err := (Collector{Fetcher: disclosureFetcher, Store: runtime.store}).CollectDisclosureObservation(ctx, "A.SH", "2025-12-31")
+	if err != nil {
+		t.Fatalf("disclosure archive: %v", err)
+	}
+	replayedDisclosure, err := runtime.MapDisclosureFromArchive(ctx, disclosure.Source, "A.SH", "2025-12-31")
+	if err != nil || replayedDisclosure.Cells["CORRECTANNCNUM"].Value != int64(1) {
+		t.Fatalf("disclosure replay: %v", err)
+	}
+	if _, err := runtime.MapDisclosureFromArchive(ctx, disclosure.Source, "A.SH", "2025-09-30"); err == nil {
+		t.Fatal("disclosure archive accepted with wrong period")
+	}
+	<-archived
+	industryFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"HISSW2021", "HISSW2021CODE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "模拟行业"}, {Type: 13, Value: "synthetic-code"}}}}
+	industry, err := (Collector{Fetcher: industryFetcher, Store: runtime.store}).CollectIndustryLevel(ctx, "A.SH", "2025-12-31", 2)
+	if err != nil {
+		t.Fatalf("industry archive: %v", err)
+	}
+	replayedIndustry, err := runtime.MapIndustryFromArchive(ctx, industry.Source, "A.SH", "2025-12-31", 2)
+	if err != nil || replayedIndustry.IndustryCode != "synthetic-code" || replayedIndustry.IndustryName != "模拟行业" {
+		t.Fatalf("industry archive mapping: %v", err)
+	}
+	if _, err := runtime.MapIndustryFromArchive(ctx, industry.Source, "A.SH", "2025-12-31", 1); err == nil {
+		t.Fatal("industry archive accepted with the wrong level")
+	}
+	<-archived
+	securityFetcher := &testFetcher{cube: Cube{Codes: []string{"A.SH"}, Indicators: []string{"NAME", "LISTDATE", "DELISTDATE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "模拟证券"}, {Type: 13, Value: "2010-01-02"}, {Type: 0}}}}
+	security, err := (Collector{Fetcher: securityFetcher, Store: runtime.store}).CollectSecurityBasics(ctx, "A.SH")
+	if err != nil {
+		t.Fatalf("security archive: %v", err)
+	}
+	replayedSecurity, err := runtime.MapSecurityFromArchive(ctx, security.Source, "A.SH")
+	if err != nil || replayedSecurity.ShortName != "模拟证券" || replayedSecurity.FirstListingDate != "2010-01-02" || replayedSecurity.DelistingDate != nil {
+		t.Fatalf("security archive mapping: %v", err)
+	}
+	if _, err := runtime.MapSecurityFromArchive(ctx, security.Source, "B.SZ"); err == nil {
+		t.Fatal("security archive accepted with the wrong security")
+	}
+	<-archived
+	candidates, codeRef, err := runtime.CollectStockCodeCandidates(ctx, "000001")
+	if err != nil || candidates.Rows != 1 {
+		t.Fatalf("code lookup archive: %v", err)
+	}
+	replayedCodes, err := runtime.ReadCodeTableArchive(ctx, codeRef, "000001")
+	if err != nil || len(replayedCodes.Values) != 2 || replayedCodes.Values[1].Value != "000001.SZ,000001.SH" {
+		t.Fatalf("code lookup replay: %v", err)
+	}
+	if _, err := runtime.ReadCodeTableArchive(ctx, codeRef, "000002"); err == nil {
+		t.Fatal("code archive accepted with the wrong query")
+	}
+	<-archived
+	names, nameRef, err := runtime.CollectStockNameCandidates(ctx, "模拟证券")
+	if err != nil || names.Rows != 1 {
+		t.Fatalf("name lookup archive: %v", err)
+	}
+	replayedNames, err := runtime.ReadNameTableArchive(ctx, nameRef, "模拟证券")
+	if err != nil || len(replayedNames.Values) != 2 || replayedNames.Values[1].Value != "600000.SH" {
+		t.Fatalf("name replay: %v", err)
+	}
+	if _, err := runtime.ReadNameTableArchive(ctx, nameRef, "另一证券"); err == nil {
+		t.Fatal("name archive accepted with wrong query")
+	}
+	<-archived
+	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,kind) VALUES('runtime-test','Runtime test','vendor')`); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := dataservice.LoadCatalog("../../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	license := syntheticStorageLicense(t, pool, "runtime-test", "mkt.daily_bar", "CSD", []string{"X", "Y"})
+	rc, err := runtime.RegisteredCollector(cat, "runtime-test", "synthetic-product", license)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cube, source, err := rc.CollectCSD(ctx, "mkt.daily_bar", "A,B", "X,Y", "2026-11-01", "2026-11-13", "")
+	if err != nil || len(cube.Values) != 8 || source.ID == uuid.Nil {
+		t.Fatalf("registered runtime collection: %v", err)
+	}
+	<-archived
+	if err := runtime.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runtime.CollectQuote(ctx, "A,B", "X,Y", ""); err == nil {
+		t.Fatal("closed runtime accepted a vendor call")
+	}
+}
+
+// TestLiveRuntime consumes vendor quota and writes to the specified S3 bucket.
+// It requires an isolated account not in use by other applications, since the
+// test database is not their shared gate. A passing query does not establish
+// price units, realtime latency or product license.
+func TestLiveRuntime(t *testing.T) {
+	if os.Getenv("EMQUANT_INTEGRATION") != "1" || os.Getenv("EMQUANT_LIVE_RUNTIME") != "1" {
+		t.Skip("live vendor runtime test not requested")
+	}
+	if os.Getenv("EMQUANT_TEST_S3_ENDPOINT") == "" || os.Getenv("EMQUANT_TEST_S3_BUCKET") == "" {
+		t.Fatal("an explicit test S3 endpoint and bucket are required")
+	}
+	interval, err := time.ParseDuration(os.Getenv("EMQUANT_TEST_MIN_INTERVAL"))
+	if err != nil {
+		t.Fatal("EMQUANT_TEST_MIN_INTERVAL must be explicitly configured")
+	}
+	cooldown, err := time.ParseDuration(os.Getenv("EMQUANT_TEST_RATE_COOLDOWN"))
+	if err != nil {
+		t.Fatal("EMQUANT_TEST_RATE_COOLDOWN must be explicitly configured")
+	}
+	pool := dbtest.New(t)
+	ctx := context.Background()
+	s3Client := testS3Client(os.Getenv("EMQUANT_TEST_S3_ENDPOINT"), os.Getenv("EMQUANT_TEST_S3_ACCESS"), os.Getenv("EMQUANT_TEST_S3_SECRET"))
+	cfg := RuntimeConfig{Library: os.Getenv("EMQUANT_LIBRARY"), Username: os.Getenv("EMQUANT_USER"), Password: os.Getenv("EMQUANT_PASSWORD"), Database: pool, ObjectClient: s3Client, Bucket: os.Getenv("EMQUANT_TEST_S3_BUCKET"), Prefix: "runtime-integration", AccountScope: "isolated-integration-account", MinInterval: interval, RateLimitCooldown: cooldown}
+	runtime, err := OpenRuntime(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := runtime.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	_, ref, err := runtime.CollectQuote(ctx, "300059.SZ", "TIME,NOW", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewS3RawStore(s3Client, cfg.Bucket, cfg.Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := store.Get(ctx, ref.BodySHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, observed, err := DecodeArchive(body, ref.BodySHA256); err != nil || !observed.Equal(ref.ReceivedAt) {
+		t.Fatalf("live runtime archive replay: %v", err)
+	}
+}

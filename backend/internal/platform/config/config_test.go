@@ -92,6 +92,19 @@ func TestProfileSwitches(t *testing.T) {
 	}
 }
 
+func TestProfileRejectsModelTools(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("VERA_DEV_OIDC", "true")
+	for _, body := range []string{`{"tools":[{"type":"deepseek_web_search"}]}`, `{"ToOlS":[]}`, `{"tool_choice":"auto"}`, `{"functions":[]}`, `{"web_search_options":{}}`} {
+		t.Run(body, func(t *testing.T) {
+			t.Setenv("MODEL_WRITER_EXTRA_BODY", body)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "EXTRA_BODY") {
+				t.Fatalf("tool configuration was accepted: %v", err)
+			}
+		})
+	}
+}
+
 func TestRecordAdapterNeedsRealCredentialsAndIsRefusedInProduction(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://x")
 	t.Setenv("VERA_DEV_OIDC", "true")

@@ -17,6 +17,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/shopspring/decimal"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/modelguard"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/policy"
 )
 
@@ -51,6 +52,7 @@ func LoadSchemas(dir string) (Schemas, error) {
 
 // Request is one logical model call from a harness step.
 type Request struct {
+	WithSend  func(context.Context, func() (Raw, error)) (Raw, error) // holds source rights only during the actual adapter call
 	Workspace uuid.UUID
 	Task      *uuid.UUID
 	StepKey   string
@@ -82,8 +84,10 @@ type Gateway struct {
 	DailyLimit decimal.Decimal
 	sem        chan struct{}
 	profSem    map[string]chan struct{}
-	sleep      func(time.Duration)
-	now        func() time.Time
+	// wait is injectable so retry tests do not sleep, while production waits
+	// remain interruptible when a task is cancelled or reaches its deadline.
+	wait func(context.Context, time.Duration) error
+	now  func() time.Time
 }
 
 func NewGateway(pool *pgxpool.Pool, profiles map[string]Profile, adapters map[string]Adapter, prices *PriceTable,
@@ -99,7 +103,18 @@ func NewGateway(pool *pgxpool.Pool, profiles map[string]Profile, adapters map[st
 		}
 	}
 	return &Gateway{Pool: pool, Profiles: profiles, Adapters: adapters, Prices: prices, Schemas: schemas, Policy: pol,
-		DailyLimit: daily, sem: make(chan struct{}, n), profSem: ps, sleep: time.Sleep, now: time.Now}
+		DailyLimit: daily, sem: make(chan struct{}, n), profSem: ps, wait: waitContext, now: time.Now}
+}
+
+func waitContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // billable reports whether an adapter may reach a paid vendor.
@@ -136,6 +151,9 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 	if !ok {
 		return nil, Meta{}, fmt.Errorf("unknown model profile %q", r.Profile)
 	}
+	if err := modelguard.ValidateExtraBody(prof.ExtraBody); err != nil {
+		return nil, Meta{}, err
+	}
 	ad, ok := g.Adapters[prof.Adapter]
 	if !ok {
 		return nil, Meta{}, fmt.Errorf("adapter %q not configured", prof.Adapter)
@@ -159,7 +177,24 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			g.finish(context.WithoutCancel(ctx), callID, "FAILED", nil, Usage{}, decimal.Zero, "", "cancelled before send")
 			return nil, Meta{}, err
 		}
-		raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Simulate: r.Simulate, Hash: hash})
+
+		sentSuccessfully := false
+		send := func() (Raw, error) {
+			raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Simulate: r.Simulate, Hash: hash})
+			sentSuccessfully = err == nil
+			return raw, err
+		}
+		var raw Raw
+		if r.WithSend != nil {
+			raw, err = r.WithSend(ctx, send)
+		} else {
+			raw, err = send()
+		}
+		if err != nil && sentSuccessfully {
+			// A permission transaction may fail to commit after the paid
+			// request completed. Preserve the reservation for reconciliation.
+			err = &Error{Unknown: true, Msg: "source transaction failed after model response"}
+		}
 		release()
 		if err != nil {
 			var me *Error
@@ -176,7 +211,9 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 				if me.RetryIn > wait {
 					wait = me.RetryIn
 				}
-				g.sleep(wait)
+				if err := g.wait(ctx, wait); err != nil {
+					return nil, Meta{}, err
+				}
 				continue
 			}
 			return nil, Meta{}, lastErr

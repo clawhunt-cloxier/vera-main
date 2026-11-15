@@ -20,6 +20,7 @@ type Store struct {
 	pool             *pgxpool.Pool
 	cat              *Catalog
 	excludeSynthetic bool
+	allowedCodes     []string
 }
 
 func NewStore(pool *pgxpool.Pool, cat *Catalog) *Store { return &Store{pool: pool, cat: cat} }
@@ -222,9 +223,11 @@ const visibleAtCutoff = `r.available_at <= $2
 		AND (r.published_at IS NULL OR r.published_at <= $2)
 		AND (r.dataset_id NOT IN ('fin.statement','fin.segment') OR r.published_at IS NOT NULL)`
 
-// A real-data store must also exclude a vendor record attached to a synthetic
-// entity: entity identity participates in the facts presented to the model.
+// A real-data store must exclude a vendor record attached to a synthetic
+// entity. Intraday records are also withheld from this legacy query path until
+// it is replaced by publication-aware MVCC selection and current-use checks.
 const realSourceFilter = ` AND (NOT %s::bool OR (NOT p.synthetic AND p.kind='vendor' AND
+ r.dataset_id NOT IN ('mkt.intraday_quote','mkt.intraday_index_quote') AND
  (r.entity_id IS NULL OR EXISTS (SELECT 1 FROM entities real_entity WHERE real_entity.id=r.entity_id AND NOT real_entity.synthetic))))`
 
 func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
@@ -463,7 +466,7 @@ func scanEntity(row pgx.CollectableRow) (EntityRow, error) {
 }
 
 func (s *Store) Entities(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE id = ANY($1) AND (NOT $2::bool OR NOT synthetic)`, ids, s.excludeSynthetic)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE id = ANY($1) AND (NOT $2::bool OR NOT synthetic) AND ($3::text[] IS NULL OR code=ANY($3))`, ids, s.excludeSynthetic, s.allowedCodes)
 	if err != nil {
 		return nil, err
 	}
@@ -476,7 +479,7 @@ func (s *Store) Entities(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]En
 }
 
 func (s *Store) EntityByCode(ctx context.Context, code string) (EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE code=$1 AND (NOT $2::bool OR NOT synthetic)`, code, s.excludeSynthetic)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE code=$1 AND (NOT $2::bool OR NOT synthetic) AND ($3::text[] IS NULL OR code=ANY($3))`, code, s.excludeSynthetic, s.allowedCodes)
 	if err != nil {
 		return EntityRow{}, err
 	}
@@ -484,7 +487,7 @@ func (s *Store) EntityByCode(ctx context.Context, code string) (EntityRow, error
 }
 
 func (s *Store) EntitiesByKind(ctx context.Context, kind string) ([]EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE kind=$1 AND (NOT $2::bool OR NOT synthetic) ORDER BY code`, kind, s.excludeSynthetic)
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE kind=$1 AND (NOT $2::bool OR NOT synthetic) AND ($3::text[] IS NULL OR code=ANY($3)) ORDER BY code`, kind, s.excludeSynthetic, s.allowedCodes)
 	if err != nil {
 		return nil, err
 	}
@@ -494,10 +497,10 @@ func (s *Store) EntitiesByKind(ctx context.Context, kind string) ([]EntityRow, e
 // Search matches names, codes and aliases (trigram similarity plus substring), best first.
 func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]EntityRow, error) {
 	q = strings.ToLower(strings.TrimSpace(q))
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2 = '' OR kind = $2) AND (NOT $4::bool OR NOT e.synthetic) AND EXISTS (
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2 = '' OR kind = $2) AND (NOT $4::bool OR NOT e.synthetic) AND ($5::text[] IS NULL OR code=ANY($5)) AND EXISTS (
 		SELECT 1 FROM entity_aliases a WHERE a.entity_id = e.id AND (a.alias LIKE '%' || $1 || '%' OR similarity(a.alias, $1) > 0.3))
 		ORDER BY (SELECT max(CASE WHEN a.alias = $1 THEN 2 ELSE similarity(a.alias, $1) END) FROM entity_aliases a WHERE a.entity_id = e.id) DESC, code
-		LIMIT $3`, q, kind, limit, s.excludeSynthetic)
+		LIMIT $3`, q, kind, limit, s.excludeSynthetic, s.allowedCodes)
 	if err != nil {
 		return nil, err
 	}
@@ -508,10 +511,12 @@ func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]Entity
 func (s *Store) Mentioned(ctx context.Context, text string) ([]EntityRow, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e JOIN LATERAL (
 		SELECT max(length(alias)) AS l FROM entity_aliases a WHERE a.entity_id = e.id AND length(a.alias) >= 2 AND strpos(lower($1), a.alias) > 0) m ON m.l IS NOT NULL
-        WHERE NOT $2::bool OR NOT e.synthetic
-		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic)
+        WHERE (NOT $2::bool OR NOT e.synthetic) AND ($3::text[] IS NULL OR code=ANY($3))
+		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic, s.allowedCodes)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, scanEntity)
 }
+
+func (s *Store) RestrictCodes(codes []string) { s.allowedCodes = append([]string(nil), codes...) }

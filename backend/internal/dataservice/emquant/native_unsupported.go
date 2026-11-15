@@ -1,0 +1,45 @@
+//go:build !linux || !cgo
+
+package emquant
+
+import "errors"
+
+type Client struct{}
+
+func Open(_, _, _ string) (*Client, error) {
+	return nil, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) CSD(_, _, _, _, _ string) (Cube, error) {
+	return Cube{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) CSS(_, _, _ string) (Cube, error) {
+	return Cube{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) QuoteSnapshot(_, _, _ string) (Quote, error) {
+	return Quote{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) TradeDates(_, _, _ string) (Cube, error) {
+	return Cube{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) CFN(_, _ string, _ int, _ string) (Cube, error) {
+	return Cube{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) CheckStockCodes(_ string) (Table, error) {
+	return Table{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) MatchStockName(_ string) (Table, error) {
+	return Table{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) UsageStatistics(_, _, _ string) (Table, error) {
+	return Table{}, errors.New("emquant: native SDK requires Linux and cgo")
+}
+
+func (*Client) Close() error { return nil }

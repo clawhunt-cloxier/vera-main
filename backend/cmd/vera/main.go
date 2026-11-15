@@ -22,6 +22,7 @@ const usage = `用法: vera <command> [args]
   worker     启动研究任务与定时作业 Worker
   migrate    执行数据库迁移
   sync       从配置的数据提供方同步数据（幂等）
+  emquant    受控 Choice 行情采集（emquant help）
   admin      管理命令（vera admin help）
   harness    评测与重放（vera harness help）
   demo       本地一键演示：内嵌 PostgreSQL + API + Worker + 开发登录（仅 development）
@@ -45,6 +46,8 @@ func main() {
 		err = withApp(ctx, func(*app.App) error { return nil }) // New() migrates
 	case "sync":
 		err = withApp(ctx, func(a *app.App) error { return a.Sync(ctx) })
+	case "emquant":
+		err = emquantCommand(ctx, os.Args[2:], os.Stdout, os.Getenv)
 	case "admin":
 		err = withApp(ctx, func(a *app.App) error { return admin(ctx, a, os.Args[2:]) })
 	case "harness":

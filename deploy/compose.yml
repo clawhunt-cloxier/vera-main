@@ -18,6 +18,8 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - vera-data:/data
+      - /opt/vera/sdk:/opt/choice-sdk
+    networks: [default, archive]
     stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
@@ -28,3 +30,8 @@ services:
 
 volumes:
   vera-data:
+
+networks:
+  archive:
+    external: true
+    name: vera-archive

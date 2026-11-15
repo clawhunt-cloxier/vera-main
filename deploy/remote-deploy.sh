@@ -8,6 +8,8 @@ if ! printf '%s' "$PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin;
   exit 1
 fi
 unset PAT
+docker network inspect vera-archive >/dev/null 2>&1 || docker network create vera-archive >/dev/null
+mkdir -p /opt/vera/sdk
 prev="$(cat .current_image 2>/dev/null || true)"
 deploy() {
   VERA_IMAGE="$1" docker compose -f compose.yml pull || return 1
