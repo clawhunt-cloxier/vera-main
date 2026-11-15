@@ -3,6 +3,7 @@ package emquant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -658,6 +659,46 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if _, err := runtime.PublishStagedQuote(ctx, secondStage); err != nil {
 		t.Fatal(err)
 	}
+	// Exercise the complete ingestion path with a synthetic SDK; the result is
+	// still only a published candidate and cannot stand in for a task snapshot.
+	runtime.client = &Client{}
+	runtime.collector = collector.Collector
+	fresh := time.Now().UTC()
+	freshLocal := fresh.In(time.FixedZone("CST", 8*60*60))
+	f.quote.ObservedAt = fresh
+	f.quote.Data.Dates = []string{freshLocal.Format("2006-01-02")}
+	f.quote.Data.Values[1].Value = int64(freshLocal.Hour()*10000 + freshLocal.Minute()*100 + freshLocal.Second())
+	beforeCalls := f.calls
+	if _, err := runtime.CollectAndPublishQuote(ctx, cat, "stage-test", "synthetic-product", license, uuid.New(), entityID, "A"); err == nil || f.calls != beforeCalls {
+		t.Fatal("invalid policy consumed a vendor request")
+	}
+	if _, err := runtime.CollectAndPublishQuote(ctx, cat, "stage-test", "synthetic-product", license, secondPolicy, entityID, "B"); err == nil || f.calls != beforeCalls {
+		t.Fatal("mismatched entity consumed a vendor request")
+	}
+	ingested, err := runtime.CollectAndPublishQuote(ctx, cat, "stage-test", "synthetic-product", license, secondPolicy, entityID, "A")
+	if err != nil || ingested.StageID == uuid.Nil || ingested.AvailableAt.IsZero() || f.calls != beforeCalls+1 {
+		t.Fatalf("collect and publish quote: %v", err)
+	}
+	var sourceLicense uuid.UUID
+	var availableAt time.Time
+	if err := pool.QueryRow(ctx, `SELECT o.source_license_id,p.available_at FROM quote_publications p JOIN staged_quotes s ON s.id=p.staged_quote_id JOIN raw_objects o ON o.id=s.raw_object_id WHERE s.id=$1`, ingested.StageID).Scan(&sourceLicense, &availableAt); err != nil || sourceLicense != license || !availableAt.Equal(ingested.AvailableAt) {
+		t.Fatalf("published quote lost its licensed archive: %v", err)
+	}
+	viewTx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingestedView, err := runtime.SelectPublishedQuotes(ctx, viewTx, []uuid.UUID{entityID}, QuoteLatestAvailable, dataservice.SourceDisplay)
+	if err != nil || len(ingestedView.Quotes) != 1 || ingestedView.Quotes[0].StageID != ingested.StageID {
+		t.Fatalf("newly ingested quote unavailable in fixed view: %v", err)
+	}
+	_ = viewTx.Rollback(ctx)
+	f.err = errors.New("synthetic upstream failure")
+	failed, err := runtime.CollectAndPublishQuote(ctx, cat, "stage-test", "synthetic-product", license, secondPolicy, entityID, "A")
+	if err == nil || failed.StageID != uuid.Nil || !failed.AvailableAt.IsZero() {
+		t.Fatal("upstream failure was presented as a published quote")
+	}
+	f.err = nil
 	if _, err := pool.Exec(ctx, `UPDATE quote_mapping_policies SET revoked_at=clock_timestamp() WHERE id=$1`, policyID); err != nil {
 		t.Fatal(err)
 	}
