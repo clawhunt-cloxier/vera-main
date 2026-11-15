@@ -503,19 +503,10 @@ func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"success": true,
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":   true,
 		"return_to": returnTo,
 	})
-}
-
-// hashPassword creates a password hash using PBKDF2-like iterations. Format: salt$hash (base64)
-func hashPassword(password string) string {
-	salt := make([]byte, 16)
-	rand.Read(salt)
-	// PBKDF2-like: 100k iterations, SHA256
-	hash := pbkdf2Hash([]byte(password), salt, 100000, 32)
-	return base64.StdEncoding.EncodeToString(salt) + "$" + base64.StdEncoding.EncodeToString(hash)
 }
 
 // verifyPasswordHash checks if password matches the stored hash
