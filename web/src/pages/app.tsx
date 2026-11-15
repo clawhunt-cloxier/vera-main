@@ -18,7 +18,7 @@ import {
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
-import { Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
+import { Empty, ErrorBox, Loading, Skeleton, SyntheticBanner, Tag } from '../components/ui';
 
 export function App() {
   const me = useMe();
@@ -34,7 +34,6 @@ export function App() {
     refetchInterval: 5000,
   });
   const [text, setText] = useState('');
-  const qc = useQueryClient();
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
@@ -45,6 +44,14 @@ export function App() {
     onSuccess: () => setText(''),
   });
   const synthetic = me.data?.synthetic ?? false;
+  const placeholders = [
+    '分析宁德时代最近的资金面',
+    '深度研究贵州茅台',
+    '看看半导体行业最近的资金动向',
+    '个股分析：比亚迪',
+  ];
+  const [placeholderIdx, setPlaceholderIdx] = useState(0);
+
   return (
     <main>
       {synthetic && <SyntheticBanner />}
@@ -71,109 +78,143 @@ export function App() {
           </details>
         </nav>
       </header>
+
       <section className="quick">
-        <h1>研究</h1>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            plan.mutate();
-          }}
-        >
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="输入研究需求，例如：深度研究演示制造"
-            rows={2}
-            required
-          />
-          <button type="submit" disabled={plan.isPending || !text.trim()}>
-            {plan.isPending ? '识别中…' : '开始研究'}
-          </button>
-        </form>
-        {plan.error && <ErrorBox error={plan.error} />}
-        {plan.data?.kind === 'choose' && (
-          <p className="muted">需求对应多个可能的研究对象，请使用下方“快速启动”选择具体对象。</p>
-        )}
-        {plan.data?.kind === 'unsupported' && (
-          <p className="muted">这个任务暂不支持：{plan.data.unsupported_reason}</p>
-        )}
+        <h1>发起研究</h1>
+        <div className="card">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              plan.mutate();
+            }}
+          >
+            <label htmlFor="queryInput" className="form-label">
+              描述你想要的研究
+            </label>
+            <textarea
+              id="queryInput"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={placeholders[placeholderIdx] || '输入研究需求…'}
+              onFocus={() => setPlaceholderIdx((i) => (i + 1) % placeholders.length)}
+              rows={3}
+              required
+              maxLength={500}
+              className="form-input"
+            />
+            <div className="meta" style={{ marginTop: 12 }}>
+              <span className="muted">{text.length}/500</span>
+            </div>
+            <div className="actions">
+              <button type="submit" disabled={plan.isPending || !text.trim()} className="primary">
+                {plan.isPending ? '识别中…' : '开始研究'}
+              </button>
+            </div>
+          </form>
+          {plan.error && <ErrorBox error={plan.error} />}
+          {plan.data?.kind === 'choose' && (
+            <p className="notice">
+              您的需求对应多个可能的研究对象，请在下方快速启动中选择具体对象。
+            </p>
+          )}
+          {plan.data?.kind === 'unsupported' && (
+            <p className="error">
+              <strong>不支持的需求：</strong> {plan.data.unsupported_reason}
+            </p>
+          )}
+        </div>
       </section>
+
       <section className="skills">
         <h2>快速启动</h2>
         <div className="grid">
-          {skills.data?.items.map((sk) => (
-            <Link
-              key={sk.id}
-              to="/app/quick/$skill"
-              params={{ skill: sk.id as any }}
-              className="card"
-            >
-              <h3>{sk.title}</h3>
-              {!sk.available && <p className="muted">暂不可用</p>}
-            </Link>
-          ))}
+          {skills.isLoading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="card small">
+                <Skeleton height={24} />
+                <Skeleton height={16} style={{ marginTop: 12 }} />
+              </div>
+            ))
+          ) : skills.data?.items.length === 0 ? (
+            <Empty>暂无可用技能</Empty>
+          ) : (
+            skills.data?.items.map((sk) => (
+              <Link
+                key={sk.id}
+                to="/app/quick/$skill"
+                params={{ skill: sk.id as any }}
+                className="card interactive"
+              >
+                <h3>{sk.title}</h3>
+                {!sk.available && <Tag tone="warn">暂不可用</Tag>}
+              </Link>
+            ))
+          )}
         </div>
       </section>
+
       <section className="recent">
-        <h2>进行中与最近完成</h2>
-        {tasks.isLoading && <Loading />}
-        {tasks.data?.items.length === 0 && <Empty>尚未发起研究任务。</Empty>}
+        <h2>最近任务</h2>
+        {tasks.isLoading && <Loading label="加载任务中…" />}
+        {tasks.data?.items.length === 0 && (
+          <Empty>尚未发起研究任务。在上方输入需求或选择快速启动试试。</Empty>
+        )}
         {tasks.data && tasks.data.items.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>对象</th>
-                <th>技能</th>
-                <th>状态</th>
-                <th>创建时间</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.data.items.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.subject.name}</td>
-                  <td>{skillTitle[t.skill_id]}</td>
-                  <td>
-                    <Tag
-                      tone={
-                        t.status === 'COMPLETED'
-                          ? 'ok'
-                          : terminal.includes(t.status)
-                            ? 'bad'
-                            : 'info'
-                      }
-                    >
-                      {statusLabel[t.status]}
-                    </Tag>
-                  </td>
-                  <td>{fmtTime(t.created_at)}</td>
-                  <td>
-                    {t.status === 'COMPLETED' && t.report_ref && (
-                      <Link to="/app/reports/$id" params={{ id: t.report_ref.id }}>
-                        查看报告
-                      </Link>
-                    )}
-                    {!terminal.includes(t.status) && (
-                      <Link to="/app/tasks/$id" params={{ id: t.id }}>
-                        详情
-                      </Link>
-                    )}
-                    {terminal.includes(t.status) && t.status !== 'COMPLETED' && (
-                      <button
-                        className="ghost small"
-                        onClick={() => {
-                          if (confirm('重新运行？')) qc.invalidateQueries({ queryKey: ['tasks'] });
-                        }}
-                      >
-                        重试
-                      </button>
-                    )}
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>研究对象</th>
+                  <th>技能</th>
+                  <th>状态</th>
+                  <th>创建时间</th>
+                  <th style={{ width: 100 }}>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {tasks.data.items.map((t) => (
+                  <tr key={t.id}>
+                    <td>
+                      <strong>{t.subject.name}</strong>
+                    </td>
+                    <td>{skillTitle[t.skill_id]}</td>
+                    <td>
+                      <Tag
+                        tone={
+                          t.status === 'COMPLETED'
+                            ? 'ok'
+                            : terminal.includes(t.status)
+                              ? 'bad'
+                              : 'info'
+                        }
+                      >
+                        {statusLabel[t.status]}
+                      </Tag>
+                    </td>
+                    <td>{fmtTime(t.created_at)}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {t.status === 'COMPLETED' && t.report_ref && (
+                          <Link
+                            to="/app/reports/$id"
+                            params={{ id: t.report_ref.id }}
+                            className="btn-link"
+                          >
+                            查看
+                          </Link>
+                        )}
+                        {!terminal.includes(t.status) && (
+                          <Link to="/app/tasks/$id" params={{ id: t.id }} className="btn-link">
+                            详情
+                          </Link>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </main>
