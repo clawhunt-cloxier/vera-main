@@ -1,5 +1,4 @@
 import { Link } from '@tanstack/react-router';
-import { SyntheticBanner } from '../components/ui';
 
 export function Landing() {
   return (

@@ -34,7 +34,6 @@ export function App() {
     refetchInterval: 5000,
   });
   const [text, setText] = useState('');
-  const qc = useQueryClient();
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
