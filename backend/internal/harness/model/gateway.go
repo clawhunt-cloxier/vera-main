@@ -17,6 +17,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/shopspring/decimal"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/modelguard"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/policy"
 )
 
@@ -135,6 +136,9 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 	prof, ok := g.Profiles[r.Profile]
 	if !ok {
 		return nil, Meta{}, fmt.Errorf("unknown model profile %q", r.Profile)
+	}
+	if err := modelguard.ValidateExtraBody(prof.ExtraBody); err != nil {
+		return nil, Meta{}, err
 	}
 	ad, ok := g.Adapters[prof.Adapter]
 	if !ok {

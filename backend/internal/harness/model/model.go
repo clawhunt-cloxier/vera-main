@@ -20,6 +20,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/modelguard"
 )
 
 type Message struct {
@@ -121,6 +123,9 @@ type OpenAI struct{ HTTP *http.Client }
 func (OpenAI) Name() string { return "openai" }
 
 func (a OpenAI) Do(ctx context.Context, c Call) (Raw, error) {
+	if err := modelguard.ValidateExtraBody(c.Profile.ExtraBody); err != nil {
+		return Raw{}, err
+	}
 	b, _ := json.Marshal(c.Profile.body(c.Messages, c.MaxOutput))
 	timeout := c.Profile.Timeout
 	if timeout == 0 {

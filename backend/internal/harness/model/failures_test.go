@@ -209,6 +209,24 @@ func TestRequestBodyAndProfileCaps(t *testing.T) {
 	}
 }
 
+func TestModelToolsNeverReachVendor(t *testing.T) {
+	var calls atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		reply(w, okSummary, "stop")
+	}, Profile{ExtraBody: map[string]any{"tools": []any{map[string]any{"type": "deepseek_web_search"}}}})
+	if _, _, err := x.g.Complete(context.Background(), x.req()); err == nil {
+		t.Fatal("gateway accepted model tool configuration")
+	}
+	if calls.Load() != 0 || len(x.ledger(t)) != 0 {
+		t.Fatal("tool request reached vendor or reserved a model call")
+	}
+	profile := x.g.Profiles["writer"]
+	if _, err := (OpenAI{}).Do(context.Background(), Call{Profile: profile}); err == nil || calls.Load() != 0 {
+		t.Fatal("direct adapter accepted model tool configuration")
+	}
+}
+
 func TestPeakAndOffPeakPricing(t *testing.T) {
 	p := prices()
 	p.PeakWindowsUTC = append(p.PeakWindowsUTC, struct {
