@@ -23,6 +23,24 @@ python3 scripts/check_docs.py
 
 全量竞态测试覆盖临时 PostgreSQL、HTTP 对象存储、迁移、Harness、HTTP API、身份和 EMQuant 包，全部通过。状态映射专项测试也单独通过。
 
+本次重启会话在修复实时行情回退后的最新工作树再次完成：
+
+```text
+PATH=/home/cloxier/.local/toolchains/go1.27.3/bin:$PATH \
+GOCACHE=/tmp/vera-gocache GOFLAGS=-p=1 go test -race ./...   # PASS
+PATH=/home/cloxier/.local/toolchains/go1.27.3/bin:$PATH \
+/home/cloxier/.local/bin/golangci-lint run -c ../.golangci.yml ./... # 0 issues
+PATH=/home/cloxier/.local/toolchains/go1.27.3/bin:$PATH go vet ./... # PASS
+python3 scripts/check_docs.py                                  # PASS
+/tmp/vera-contract-check-venv/bin/python scripts/check_contracts.py # PASS
+python3 scripts/check_contract_compat.py                       # PASS, 0 warnings
+cd web && npm run check:api && npm run lint && npm run format:check && npm run build # PASS
+/tmp/vera-contract-check-venv/bin/python scripts/test_branch_cleanup.py # 9 passed
+/tmp/vera-contract-check-venv/bin/python scripts/test_contract_compat.py # 15 passed
+```
+
+`npm ci` 与检查按顺序执行；安装日志报告现有依赖的 6 个 moderate audit advisories，未修改锁文件或依赖版本。GitHub Verify 的最新 `native-image` 已通过；同一 workflow 的 `bootstrap` 仍在运行，需以远端最终结果为准。
+
 ## 仍未完成
 
 - Choice `TIME` 的正式时区/事件含义、交易状态字段是否可由 `csqsnapshot` 同时返回、状态编码与实时权限仍需厂商资料或受控账号实测；当前代码不会凭字段存在推断实时。

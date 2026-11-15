@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
-	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
 )
 
 // All states and policies here are synthetic. They establish no Choice field
