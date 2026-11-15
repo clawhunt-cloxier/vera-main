@@ -35,11 +35,25 @@
 - `TestObservationBriefDelivery`：通过，含原生 ABI 合成库→S3 HTTP→DB→计划/确认→模型→报告；重复交付、跨 workspace、旧协议、API/证据/PDF、归档破坏、证券范围、并发读取、撤销、取消与幂等、fixture 回退拒绝。
 - `TestAuthorizationRecheckedBeforeEachSend`：通过，重试前撤权不产生第二次上游调用，预留释放。
 - 前端 API 类型漂移、lint、format、build；文档、契约、兼容检查；分支清理 9 项与契约兼容脚本 15 项通过。
-- 提交 `34da841` 的完整 `go test -race ./...`、`go vet ./...`、Go lint（0 issues）均通过；临时 PostgreSQL 改用 home 磁盘，`GOFLAGS=-p=1` 避免先前 tmpfs 空间不足。此前失败尝试不记为成功。包含 HTTP 契约小修的最终工作树再次通过完整 race/vet/lint，前端类型/lint/format/build 同样通过；远端 Verify 尚待最终结果。
+- 提交 `34da841` 的完整 `go test -race ./...`、`go vet ./...`、Go lint（0 issues）均通过；临时 PostgreSQL 改用 home 磁盘，`GOFLAGS=-p=1` 避免先前 tmpfs 空间不足。此前失败尝试不记为成功。包含 HTTP 契约小修的最终工作树再次通过完整 race/vet/lint，前端类型/lint/format/build 同样通过；PR 与合并提交的远端 Verify 均已通过，见下方记录。
 
-## 下一步与边界
+## 后续边界
 
-1. 完成最终 race/lint 与远端 Verify，更新确切提交与测试结果。
-2. PR squash 合入 dev，经 CI/CD 部署新镜像；显式登记来源许可，停止旧 worker 后切换真实模式。不能同时运行两个 Choice 账号进程。
-3. 网站完成真实用户流程、证据和 PDF 验收，记录镜像 SHA、报告 ID、采集日期；届时才确认用户可试用。
-4. 实时 TIME/交易状态/延迟及财报版本、全部技能覆盖、正式身份与运维验收仍未完成；盘中独立验收后扩展。
+休市真实简报交付完成。T014b 全范围仍 IN_PROGRESS：盘中实时 TIME/交易状态/延迟及财报版本、全部技能覆盖、正式身份与运维验收仍未完成；盘中独立验收后扩展。当前受控证券仅东方财富 300059.SZ。不要同时启动第二个 Choice 采集进程；当前显式来源许可有效期至 2026-11-30T15:59:59Z，需依据真实授权续期，不自动重授。
+
+## 集成与部署跟踪
+
+- PR #17 最终头 `4e22c19`：Verify [43730794352](https://github.com/clawhunt-cloxier/vera-main/actions/runs/43730794352) 完整通过，bootstrap 17m57s，native-image 2m26s，branch-policy 通过。
+- 2026-11-15T15:54:53Z squash 合入 dev：`e9513e6b4ad22e5581a90a6e6dcbe6ad827014aa`。合并树与已验证任务头一致，无额外文件差异。
+- 后续文档/部署验收分支 `agent/codex/T014b-observation-acceptance`，不复用已合入任务分支。dev Verify [43732507273](https://github.com/clawhunt-cloxier/vera-main/actions/runs/43732507273) 与 CD [43732507315](https://github.com/clawhunt-cloxier/vera-main/actions/runs/43732507315) 均成功，随后显式登记许可并切换真实模式。
+- 服务器已保存原数据库、配置和镜像备份；当前无在途任务；SDK 动态依赖检查通过。浏览器独立测试账号完成完整真实流程，验收见下。
+
+## 网站最终验收（2026-11-15T16:18 UTC / 北京时间 2026-11-16 00:18）
+
+- 网站：<https://vera.touziagent.com>，输入“分析东方财富的成交数据”；当前仅 300059.SZ 开放真实简报。
+- 实际运行镜像：`ghcr.io/clawhunt-cloxier/vera-main:sha-e9513e6b4ad2`，digest `sha256:1fac4dd301b8ccf098ed71f22ed3497b256e25670e57294ddef2fa1684705ad7`，healthy。
+- 原生 Choice→持久 S3→River worker→deepseek-flash→核验→报告全部由部署服务实际执行，未注入模拟数据。task `01a1e000-8195-71ed-82b7-4d79c21af7c7`，report `b1ee2f1f-7694-5a42-9f9b-e6e88eb3cfc1`（私人验收 workspace，不公开授权报告访问）。
+- 数据采集/冻结：2026-11-16 00:18:13 北京时间；最新返回日期 2026-11-13。`synthetic=false`、`limited`、非实时；6 条结论均带证据，来源仅 Choice；4 次 deepseek-flash 调用全部 SUCCEEDED，任务表完成耗时约 7.10 秒（单次，不是 P95）。
+- Playwright 浏览器：登录→邀请码开通→一句话→确认计划→任务进度→报告→证据侧栏→PDF 下载通过；前端无 pageerror。桌面 1440×1000、手机 390×844 截图已查看。工具 CUA 浏览器访问服务不可用，因此使用仓库 TESTING 指定的 Playwright 验收。
+- PDF 为 3 页 A4、171184 bytes，Poppler 渲染逐页核对：中文可读、表格跨页重复表头、来源/非实时限制/页码完整，无截断。文件、截图、会话、原始数据及秘密仅保存在操作机权限受控目录与持久对象存储，不进入 Git。
+- 上线前数据库/配置/镜像备份已保存，真实模式用单个 worker；SDK/S3 凭证来自服务器秘密配置。仍为邀请制测试环境开发登录，不宣称生产身份、安全或全面投研能力验收完成。

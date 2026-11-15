@@ -4,7 +4,7 @@ Vera 是可信金融投研 Agent 的网页应用。用户登录后在私人 work
 
 首版模块：研报生成（深度研究）、个股分析、资金动向、自选股，面向 A 股。它重构了 [finance-suite](https://github.com/jinny280401-glitch/finance-suite) 与 [Linmeimei-Agent](https://github.com/jinny280401-glitch/Linmeimei-Agent)，目标是用 Flash 级模型（默认 DeepSeek `deepseek-flash`）完成投研。
 
-**当前状态：规范已定，尚未开始业务开发。** 仓库里只有健康检查 API 和一个起始页；登录、数据接入和研究功能都未实现，页面会如实显示。
+**当前状态（2026-11-16）：测试网站已可生成单股真实成交数据简报。** 登录 <https://vera.touziagent.com>，输入“分析东方财富的成交数据”。当前真实范围仅东方财富 300059.SZ 的成交量、成交额与换手率，报告明确非实时，支持证据查看和 PDF。完整财务研究与盘中实时验收尚未完成；其余技能仍保留本地 fixture 演示能力。实现、测试和部署证据见 [交接](docs/handoffs/2026-11-15-T014b-observation-brief-codex.md)。
 
 ## 开始开发
 
