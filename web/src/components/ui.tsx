@@ -15,9 +15,10 @@ export function ErrorBox({ error }: { error: unknown }) {
 
 export function Loading({ label = '加载中…' }: { label?: string }) {
   return (
-    <p className="muted" role="status" aria-live="polite">
-      {label}
-    </p>
+    <div className="loading" role="status" aria-live="polite">
+      <div className="spinner" aria-hidden="true"></div>
+      <p className="muted">{label}</p>
+    </div>
   );
 }
 
@@ -80,7 +81,59 @@ export function Dialog({
 export function SyntheticBanner() {
   return (
     <div className="banner" role="note">
-      演示环境：数据或模型输出为模拟内容，报告不对应任何真实公司或市场，仅用于演示功能。
+      <strong>演示环境</strong> — 数据或模型输出为模拟内容，报告不对应任何真实公司或市场，仅用于演示功能。
+    </div>
+  );
+}
+
+/* ========================================================================
+   增强型按钮组件
+   ======================================================================== */
+
+export function Button({
+  children,
+  variant = 'default',
+  size = 'md',
+  disabled,
+  className,
+  ...props
+}: {
+  children: ReactNode;
+  variant?: 'default' | 'primary' | 'ghost' | 'warn' | 'ok';
+  size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  className?: string;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const classList = [
+    'btn',
+    `btn--${variant}`,
+    `btn--${size}`,
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <button {...props} disabled={disabled} className={classList}>
+      {children}
+    </button>
+  );
+}
+
+/* ========================================================================
+   加载骨架屏
+   ======================================================================== */
+
+export function Skeleton({ height = 20, style }: { height?: number; style?: React.CSSProperties }) {
+  return <div className="skeleton" style={{ height: `${height}px`, ...style }} aria-hidden="true" />;
+}
+
+export function SkeletonCard() {
+  return (
+    <div className="card">
+      <Skeleton height={24} />
+      <Skeleton height={16} style={{ marginTop: 12 }} />
+      <Skeleton height={16} style={{ marginTop: 8 }} />
     </div>
   );
 }
