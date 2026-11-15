@@ -16,7 +16,7 @@ export function Onboarding() {
       const resp = await post<{ success: boolean; return_to: string }>('/auth/login', {
         username,
         password,
-        return_to: '/app'
+        return_to: '/app',
       });
       if (resp.success) {
         nav({ to: resp.return_to || '/app' });
