@@ -19,3 +19,4 @@ __pycache__/
 bin/
 .DS_Store
 .claude/
+backend/dbmigrate

@@ -49,6 +49,15 @@ func TestModelProcessingLicenceIsEnforced(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A routine sync must not silently re-grant a revoked permission.
+	if _, err := st.Sync(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	var allowed bool
+	if err := pool.QueryRow(ctx, `SELECT allow_model_processing FROM providers WHERE id=$1`, p.ID()).Scan(&allowed); err != nil || allowed {
+		t.Fatalf("sync restored revoked model permission: %v", err)
+	}
+
 	// Not licensed: research paths see nothing.
 	if recs, err := st.Query(ctx, q); err != nil || len(recs) != 0 {
 		t.Fatalf("unlicensed provider leaked %d records into a model-bound query (err %v)", len(recs), err)
