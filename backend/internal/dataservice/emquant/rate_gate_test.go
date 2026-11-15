@@ -111,7 +111,7 @@ func TestRateStateMigrationProtectsAccountState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.Down(ctx); err == nil {
+	if _, err := provider.DownTo(ctx, 9); err == nil {
 		t.Fatal("rollback discarded persistent account fencing state")
 	}
 	var inFlight bool

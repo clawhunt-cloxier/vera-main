@@ -17,6 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
 )
 
@@ -213,6 +216,23 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	if _, err := runtime.ReadNameTableArchive(ctx, nameRef, "另一证券"); err == nil {
 		t.Fatal("name archive accepted with wrong query")
 	}
+	<-archived
+	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,kind) VALUES('runtime-test','Runtime test','vendor')`); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := dataservice.LoadCatalog("../../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, err := runtime.RegisteredCollector(cat, "runtime-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cube, source, err := rc.CollectCSD(ctx, "mkt.daily_bar", "A,B", "X,Y", "2026-11-01", "2026-11-13", "")
+	if err != nil || len(cube.Values) != 8 || source.ID == uuid.Nil {
+		t.Fatalf("registered runtime collection: %v", err)
+	}
+	<-archived
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}

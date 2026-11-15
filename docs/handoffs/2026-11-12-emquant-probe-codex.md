@@ -112,8 +112,9 @@
 
 - PR #26 与 PR #28 已合入 `dev`（`be172a4`），T014b 分支已合并该基线并解决 `store.go` 冲突。对照两侧保留 T014 的质量过滤、冻结锁、血缘冲突比较与 Choice 分支的事务、时点和模拟隔离；合并提交 `c479b46`。T014b 继续领取记录见 TASKS。数据服务竞态测试、文档及契约检查通过；全包测试结果以本次后续验证为准。
 - 交易日历 `MappedRecord` 现携带完整 `ArchiveRef`，保留请求指纹及接收、归档时间；定向竞态测试通过。它仍只是待发布的映射结果，不能代替 `raw_objects` 登记、厂商授权校验、可见时间和事务安全入库。
-- 数据服务映射版本是整数，Choice 采用字符串标识；请求指纹目前位于归档元数据且没有对应独立数据库列，仍须协调持久化方案。`collect_latest`、行情口径和真实报告端到端未完成；不能把分支合并或局部映射通过当作 V02 验收。
+- 数据服务映射版本是整数，Choice 采用字符串标识；合并时请求指纹位于归档元数据且没有对应独立数据库列，后续登记进展见下文。`collect_latest`、行情口径和真实报告端到端未完成；不能把分支合并或局部映射通过当作 V02 验收。
 - 新增迁移 `00010_emquant_rate_state.sql`，为现有限流门禁提供正式持久表；工作区角色不能更新账户级状态，非空表的回滚被拒绝，避免丢失未完成请求的隔离标记。使用 `go test -race ./internal/dataservice/emquant -run 'Test(PostgreSQLRateGate|RateStateMigration|Runtime)' -count=1` 验证正常迁移、跨调用限流、会话丢失后拒绝调用、缺表失败、回滚保护及模拟 SDK 归档；账户权限、共享 scope 覆盖所有外部程序与生产部署仍未验证。
+- 新增迁移 `00011_raw_object_request.sql` 与原始归档登记：S3 内容必须回读并核对对象路径、哈希、请求指纹及观察时间，已登记的相同身份不同元数据拒绝覆盖，禁用或模拟厂商不能登记；旧记录的未知请求元数据保持 NULL。Runtime 的 CSD 与行情 `RegisteredCollector` 只有对象归档及数据库登记都成功才返回数据。`go test -race ./internal/dataservice/emquant ./internal/platform/db -count=1` 通过，覆盖模拟 SDK、HTTP 对象服务、真实临时 PostgreSQL、并发登记、篡改、登记失败、非空回滚保护与缺失限流表。登记不证明来源、授权或真实可见时点；尚未接入应用研究流程，也没有实现统一记录发布、财报 PIT 或对象清理。
 
 ### 2026-11-14 UTC 真实 SDK 局部复验
 

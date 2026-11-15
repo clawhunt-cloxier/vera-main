@@ -9,6 +9,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 )
 
 // RuntimeConfig connects the real vendor SDK, durable archive and shared
@@ -39,6 +41,7 @@ type Runtime struct {
 	client    *Client
 	collector Collector
 	store     *S3RawStore
+	database  *pgxpool.Pool
 }
 
 // OpenRuntime requires real SDK, S3-compatible archive and persistent rate
@@ -63,7 +66,21 @@ func OpenRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 		}
 		return nil, fmt.Errorf("emquant: open runtime: %w", err)
 	}
-	return &Runtime{client: client, collector: Collector{Fetcher: client, Store: store, Gate: gate}, store: store}, nil
+	return &Runtime{client: client, collector: Collector{Fetcher: client, Store: store, Gate: gate}, store: store, database: cfg.Database}, nil
+}
+
+// RegisteredCollector uses this runtime's own gated SDK, object store and
+// database. It does not register products, enable the application research
+// path, validate permissions, or publish normalized records.
+func (r *Runtime) RegisteredCollector(catalog *dataservice.Catalog, providerID string) (RegisteredCollector, error) {
+	if r == nil || r.client == nil {
+		return RegisteredCollector{}, errors.New("emquant: runtime unavailable")
+	}
+	c := RegisteredCollector{Collector: r.collector, Registry: ArchiveRegistry{Pool: r.database, Store: r.store, Catalog: catalog, ProviderID: providerID}}
+	if err := c.validateConfig(); err != nil {
+		return RegisteredCollector{}, err
+	}
+	return c, nil
 }
 
 // ReadArchive reads back the exact object addressed by the source reference,
