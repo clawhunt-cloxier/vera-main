@@ -11,10 +11,43 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
 )
+
+func syntheticQuoteTask(t *testing.T, pool *pgxpool.Pool, entity uuid.UUID) (uuid.UUID, uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	var user, workspace, plan, task uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO users(issuer,subject) VALUES('synthetic',$1) RETURNING id`, uuid.NewString()).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO workspaces(owner_user_id) VALUES($1) RETURNING id`, user).Scan(&workspace); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO research_plans(workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,expires_at)
+		VALUES($1,'synthetic-skill','0.4',$2,'{}','[]',clock_timestamp(),'synthetic-plan-hash',true,clock_timestamp()+interval '1 hour') RETURNING id`, workspace, entity).Scan(&plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget)
+		VALUES($1,$2,'synthetic-skill','0.4',$3,'{}','[]',clock_timestamp(),'COLLECTING',clock_timestamp()+interval '1 hour','{}') RETURNING id`, workspace, plan, entity).Scan(&task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE research_plans SET consumed_task_id=$2 WHERE id=$1`, plan, task); err != nil {
+		t.Fatal(err)
+	}
+	return workspace, task
+}
+
+func syntheticQuoteIntent(t *testing.T, pool *pgxpool.Pool, workspace, task, entity uuid.UUID) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `INSERT INTO quote_task_intents(workspace_id,task_id,epoch,plan_hash,protocol,requirement,entity_ids)
+		VALUES($1,$2,1,'synthetic-plan-hash','0.4','latest_available',ARRAY[$3]::uuid[])`, workspace, task, entity); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	ctx := context.Background()
@@ -34,6 +67,10 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	}
 	var mu sync.Mutex
 	objects := map[string][]byte{}
+	var blockNextGet bool
+	getStarted := make(chan struct{}, 1)
+	releaseGet := make(chan struct{})
+	var releaseOnce sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -51,12 +88,18 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 				http.NotFound(w, r)
 				return
 			}
+			if blockNextGet {
+				blockNextGet = false
+				getStarted <- struct{}{}
+				<-releaseGet
+			}
 			_, _ = w.Write(body)
 		default:
 			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
 		}
 	}))
 	defer server.Close()
+	defer releaseOnce.Do(func() { close(releaseGet) })
 	store, err := NewS3RawStore(testS3Client(server.URL, "test", "test"), "test-bucket", "stage")
 	if err != nil {
 		t.Fatal(err)
@@ -194,6 +237,186 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err := latest.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
+	workspace, task := syntheticQuoteTask(t, pool, entityID)
+	noIntent, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer noIntent.Rollback(context.Background())
+	noIntentBoundary, err := BeginQuoteBoundary(ctx, noIntent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.FreezeQuoteComponent(ctx, noIntent, noIntentBoundary, workspace, task, 1, 1); err == nil {
+		t.Fatal("legacy task without confirmed 0.4 quote intent was accepted")
+	}
+	_ = noIntent.Rollback(ctx)
+	syntheticQuoteIntent(t, pool, workspace, task, entityID)
+	if _, err := pool.Exec(ctx, `UPDATE research_plans SET plan_hash='changed-plan' WHERE id=(SELECT plan_id FROM research_tasks WHERE id=$1)`, task); err != nil {
+		t.Fatal(err)
+	}
+	changedPlan, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer changedPlan.Rollback(context.Background())
+	changedBoundary, err := BeginQuoteBoundary(ctx, changedPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.FreezeQuoteComponent(ctx, changedPlan, changedBoundary, workspace, task, 1, 1); err == nil {
+		t.Fatal("changed plan was accepted by the original quote intent")
+	}
+	_ = changedPlan.Rollback(ctx)
+	if _, err := pool.Exec(ctx, `UPDATE research_plans SET plan_hash='synthetic-plan-hash' WHERE id=(SELECT plan_id FROM research_tasks WHERE id=$1)`, task); err != nil {
+		t.Fatal(err)
+	}
+	aborted, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer aborted.Rollback(context.Background())
+	abortedBoundary, err := BeginQuoteBoundary(ctx, aborted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.FreezeQuoteComponent(ctx, aborted, abortedBoundary, workspace, task, 2, 1); err == nil {
+		t.Fatal("stale epoch was accepted")
+	}
+	if _, err := runtime.FreezeQuoteComponent(ctx, aborted, abortedBoundary, workspace, task, 1, 2); err == nil {
+		t.Fatal("stale revision was accepted")
+	}
+	if _, err := runtime.FreezeQuoteComponent(ctx, aborted, abortedBoundary, uuid.New(), task, 1, 1); err == nil {
+		t.Fatal("cross-workspace component was accepted")
+	}
+	provisional, err := runtime.FreezeQuoteComponent(ctx, aborted, abortedBoundary, workspace, task, 1, 1)
+	if err != nil || provisional.ContentHash == "" {
+		t.Fatalf("freeze quote component: %v", err)
+	}
+	repeated, err := runtime.FreezeQuoteComponent(ctx, aborted, abortedBoundary, workspace, task, 1, 1)
+	if err != nil || repeated.ContentHash != provisional.ContentHash || !repeated.Cutoff.Equal(provisional.Cutoff) {
+		t.Fatalf("same-view retry changed quote component: %v", err)
+	}
+	var components int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM quote_task_components WHERE task_id=$1`, task).Scan(&components); err != nil || components != 0 {
+		t.Fatalf("uncommitted component became visible: %d %v", components, err)
+	}
+	if err := aborted.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM quote_task_components WHERE task_id=$1`, task).Scan(&components); err != nil || components != 0 {
+		t.Fatalf("rolled-back component persisted: %d %v", components, err)
+	}
+	binding, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer binding.Rollback(context.Background())
+	bindingBoundary, err := BeginQuoteBoundary(ctx, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := runtime.FreezeQuoteComponent(ctx, binding, bindingBoundary, workspace, task, 1, 1)
+	if err != nil || bound.ContentHash == "" {
+		t.Fatalf("bind quote component: %v", err)
+	}
+	if err := binding.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE quote_task_components SET manifest='tampered'::bytea WHERE task_id=$1`, task); err == nil {
+		t.Fatal("frozen quote component was modified")
+	}
+	newView, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newView.Rollback(context.Background())
+	newBoundary, err := BeginQuoteBoundary(ctx, newView)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshPart, err := runtime.FreezeQuoteComponent(ctx, newView, newBoundary, workspace, task, 1, 1)
+	if err != nil || freshPart.ContentHash == bound.ContentHash || freshPart.Cutoff.Equal(bound.Cutoff) {
+		t.Fatalf("a new MVCC view reused an old unbound component: %v", err)
+	}
+	_ = newView.Rollback(ctx)
+	staleWS, staleTask := syntheticQuoteTask(t, pool, entityID)
+	syntheticQuoteIntent(t, pool, staleWS, staleTask, entityID)
+	staleTaskView, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer staleTaskView.Rollback(context.Background())
+	staleBoundary, err := BeginQuoteBoundary(ctx, staleTaskView)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE research_tasks SET epoch=epoch+1,revision=revision+1,status='CANCEL_REQUESTED' WHERE id=$1`, staleTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.FreezeQuoteComponent(ctx, staleTaskView, staleBoundary, staleWS, staleTask, 1, 1); err == nil {
+		t.Fatal("stale MVCC view froze a cancelled epoch")
+	}
+	_ = staleTaskView.Rollback(ctx)
+	cancelWS, cancelTask := syntheticQuoteTask(t, pool, entityID)
+	syntheticQuoteIntent(t, pool, cancelWS, cancelTask, entityID)
+	cancelCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	cancelView, err := pool.BeginTx(cancelCtx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelView.Rollback(context.Background())
+	defer releaseOnce.Do(func() { close(releaseGet) })
+	cancelBoundary, err := BeginQuoteBoundary(cancelCtx, cancelView)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	blockNextGet = true
+	mu.Unlock()
+	freezeDone := make(chan error, 1)
+	go func() {
+		_, err := runtime.FreezeQuoteComponent(cancelCtx, cancelView, cancelBoundary, cancelWS, cancelTask, 1, 1)
+		freezeDone <- err
+	}()
+	select {
+	case <-getStarted:
+	case err := <-freezeDone:
+		t.Fatalf("freeze did not reach object read: %v", err)
+	case <-cancelCtx.Done():
+		t.Fatal(cancelCtx.Err())
+	}
+	cancelDone := make(chan error, 1)
+	go func() {
+		_, err := pool.Exec(cancelCtx, `UPDATE research_tasks SET epoch=epoch+1,revision=revision+1,status='CANCEL_REQUESTED' WHERE id=$1`, cancelTask)
+		cancelDone <- err
+	}()
+	select {
+	case err := <-cancelDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-cancelCtx.Done():
+		t.Fatal("cancellation was blocked by the object read")
+	}
+	releaseOnce.Do(func() { close(releaseGet) })
+	select {
+	case err := <-freezeDone:
+		if err == nil {
+			t.Fatal("in-flight freeze committed a cancelled epoch")
+		}
+	case <-cancelCtx.Done():
+		t.Fatal(cancelCtx.Err())
+	}
+	_ = cancelView.Rollback(context.Background())
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM quote_task_components WHERE task_id=$1`, cancelTask).Scan(&components); err != nil || components != 0 {
+		t.Fatalf("cancelled in-flight freeze stored a component: %d %v", components, err)
+	}
+	var appCanRead, appCanInsert bool
+	if err := pool.QueryRow(ctx, `SELECT has_table_privilege('vera_app','quote_task_components','SELECT'),has_table_privilege('vera_app','quote_task_intents','INSERT')`).Scan(&appCanRead, &appCanInsert); err != nil || appCanRead || appCanInsert {
+		t.Fatalf("workspace role can bypass quote component controls: %v", err)
+	}
 	mu.Lock()
 	objects[objectKey] = []byte("corrupt")
 	mu.Unlock()
@@ -221,7 +444,7 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	}
 	var recoveryPolicy uuid.UUID
 	if err := pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,max_age_ms,verified_by,verified_at,valid_from)
-		SELECT source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,5000,verified_by,verified_at,valid_from FROM quote_mapping_policies WHERE id=$1 RETURNING id`, policyID).Scan(&recoveryPolicy); err != nil {
+		SELECT source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,15000,verified_by,verified_at,valid_from FROM quote_mapping_policies WHERE id=$1 RETURNING id`, policyID).Scan(&recoveryPolicy); err != nil {
 		t.Fatal(err)
 	}
 	recoveryStage, err := runtime.StageQuote(ctx, cat, source, recoveryPolicy, entityID, "A")
@@ -232,10 +455,10 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("publish recovery quote: %v", err)
 	}
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(18 * time.Second)
 	for {
 		var stale bool
-		if err := pool.QueryRow(ctx, `SELECT clock_timestamp() > event_at + interval '5 seconds' FROM staged_quotes WHERE id=$1`, recoveryStage).Scan(&stale); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT clock_timestamp() > event_at + interval '15 seconds' FROM staged_quotes WHERE id=$1`, recoveryStage).Scan(&stale); err != nil {
 			t.Fatal(err)
 		}
 		if stale {

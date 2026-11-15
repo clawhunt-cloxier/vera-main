@@ -64,6 +64,20 @@ type QuoteBoundary struct {
 
 func (b QuoteBoundary) Cutoff() time.Time { return b.cutoff }
 
+func (b QuoteBoundary) verify(ctx context.Context, tx pgx.Tx) error {
+	if tx == nil {
+		return errors.New("emquant: missing quote view transaction")
+	}
+	var snapshot, xid string
+	if err := tx.QueryRow(ctx, `SELECT pg_current_snapshot()::text,pg_current_xact_id()::text`).Scan(&snapshot, &xid); err != nil {
+		return fmt.Errorf("emquant: check quote view identity: %w", err)
+	}
+	if b.cutoff.IsZero() || b.snapshot == "" || b.xid == "" || snapshot != b.snapshot || xid != b.xid {
+		return errors.New("emquant: quote boundary belongs to another transaction")
+	}
+	return nil
+}
+
 // BeginQuoteBoundary acquires a database-clock cutoff in a fixed, read-write
 // MVCC transaction. It does not freeze a task or approve a plan.
 func BeginQuoteBoundary(ctx context.Context, tx pgx.Tx) (QuoteBoundary, error) {
@@ -109,12 +123,8 @@ func (r *Runtime) SelectPublishedQuotesAt(ctx context.Context, tx pgx.Tx, bounda
 	if ids[0] == uuid.Nil || len(slices.Compact(slices.Clone(ids))) != len(ids) {
 		return QuoteView{}, errors.New("emquant: invalid or duplicate quote entity")
 	}
-	var snapshot, xid string
-	if err := tx.QueryRow(ctx, `SELECT pg_current_snapshot()::text,pg_current_xact_id()::text`).Scan(&snapshot, &xid); err != nil {
-		return QuoteView{}, fmt.Errorf("emquant: check quote view identity: %w", err)
-	}
-	if boundary.cutoff.IsZero() || boundary.snapshot == "" || boundary.xid == "" || snapshot != boundary.snapshot || xid != boundary.xid {
-		return QuoteView{}, errors.New("emquant: quote boundary belongs to another transaction")
+	if err := boundary.verify(ctx, tx); err != nil {
+		return QuoteView{}, err
 	}
 	cutoff := boundary.cutoff
 	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (s.entity_id)

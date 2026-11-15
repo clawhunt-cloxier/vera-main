@@ -17,7 +17,7 @@ concurrency:
 jobs:
   bootstrap:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -43,6 +43,10 @@ jobs:
       - run: make setup
       - run: make verify
         env:
+          # Database-heavy packages each start PostgreSQL. Limit package-level
+          # concurrency so deadline tests are not starved on small runners;
+          # every test and the Go race detector still run.
+          GOFLAGS: -p=1
           # PRs compare with the target base; pushes with the previous tip (empty on new branches -> merge-base with origin/dev).
           CONTRACT_BASE_REF: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '' }}
       - name: Check Go formatting and static analysis
