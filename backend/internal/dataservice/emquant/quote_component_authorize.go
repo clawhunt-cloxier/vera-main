@@ -41,6 +41,7 @@ func (r *Runtime) ReauthorizeQuoteComponent(ctx context.Context, tx pgx.Tx, work
 		JOIN research_tasks t ON t.id=c.task_id AND t.workspace_id=c.workspace_id AND t.epoch=c.epoch
 		JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id AND p.plan_hash=c.plan_hash AND p.consumed_task_id=t.id
 		WHERE c.workspace_id=$1 AND c.task_id=$2 AND c.epoch=$3 AND c.content_hash=$4 AND i.plan_hash=c.plan_hash AND i.protocol='0.4'
+		AND t.snapshot_mode='collect_latest' AND p.snapshot_mode=t.snapshot_mode
 		AND t.status NOT IN ('CANCEL_REQUESTED','CANCELLED') FOR SHARE OF c,i`, workspace, task, epoch, hash).
 		Scan(&body, &cutoff, &planHash, &revision, &requirement, &entities)
 	if err != nil {

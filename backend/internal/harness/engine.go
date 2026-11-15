@@ -401,6 +401,7 @@ type taskRow struct {
 	Budget                 policy.Budget
 	Snapshot               *string
 	PlanHash               string
+	SnapshotMode           string
 }
 
 func (e *Engine) loadTask(ctx context.Context, ws, id uuid.UUID) (*taskRow, error) {
@@ -408,9 +409,9 @@ func (e *Engine) loadTask(ctx context.Context, ws, id uuid.UUID) (*taskRow, erro
 	var params, secs, budget []byte
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT t.id, t.workspace_id, t.subject_id, t.skill_id, t.skill_version, t.status, t.epoch, t.params, t.sections,
-			t.as_of, t.deadline, t.budget, t.snapshot_hash, p.plan_hash FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id WHERE t.id=$1`, id).
+			t.as_of, t.deadline, t.budget, t.snapshot_hash, p.plan_hash, t.snapshot_mode FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id WHERE t.id=$1`, id).
 			Scan(&t.ID, &t.Workspace, &t.Subject, &t.Skill, &t.Version, &t.Status, &t.Epoch, &params, &secs, &t.AsOf, &t.Deadline, &budget,
-				&t.Snapshot, &t.PlanHash)
+				&t.Snapshot, &t.PlanHash, &t.SnapshotMode)
 	})
 	if err != nil {
 		return nil, err
@@ -422,6 +423,10 @@ func (e *Engine) loadTask(ctx context.Context, ws, id uuid.UUID) (*taskRow, erro
 }
 
 var errStale = errors.New("task epoch or status changed")
+
+// ErrSnapshotModeUnsupported prevents a legacy worker from using preview time
+// as a collect_latest cutoff. A newer worker must implement the full protocol.
+var ErrSnapshotModeUnsupported = errors.New("task snapshot mode is not supported by this worker")
 
 // transition moves a task between states only if epoch and from-status still match.
 func (e *Engine) transition(ctx context.Context, t *taskRow, from []string, to string, code, msg string) error {
@@ -610,6 +615,9 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	}
 	if t.Epoch != epoch || IsTerminal(t.Status) || t.Status == "CANCEL_REQUESTED" {
 		return nil
+	}
+	if t.SnapshotMode != "fixed_legacy" {
+		return ErrSnapshotModeUnsupported
 	}
 	sk := e.Skills[t.Skill]
 	if sk == nil || sk.Version != t.Version {

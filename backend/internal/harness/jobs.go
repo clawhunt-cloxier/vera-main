@@ -30,6 +30,11 @@ func (w *runWorker) Work(ctx context.Context, j *river.Job[RunArgs]) error {
 		// consume an attempt; the lease expires if that worker died.
 		return river.JobSnooze(15 * time.Second)
 	}
+	if errors.Is(err, ErrSnapshotModeUnsupported) {
+		// Do not consume attempts or mark a new-mode task failed merely because
+		// this worker has not implemented its snapshot protocol yet.
+		return river.JobSnooze(30 * time.Second)
+	}
 	if err != nil && j.Attempt >= j.MaxAttempts {
 		slog.ErrorContext(ctx, "research run exhausted retries", "task", j.Args.TaskID, "err", err)
 		t, lerr := w.e.loadTask(ctx, j.Args.Workspace, j.Args.TaskID)

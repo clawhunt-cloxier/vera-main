@@ -45,7 +45,8 @@ func quoteComponentDigest(b []byte) string {
 func checkQuoteTask(ctx context.Context, tx pgx.Tx, workspace, task uuid.UUID, epoch, revision int64, lock bool) (string, error) {
 	query := `SELECT t.epoch,t.revision,t.status,p.plan_hash,t.snapshot_hash,t.deadline>clock_timestamp()
 		FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
-		WHERE t.id=$1 AND t.workspace_id=$2 AND p.consumed_task_id=t.id AND p.executable`
+		WHERE t.id=$1 AND t.workspace_id=$2 AND p.consumed_task_id=t.id AND p.executable
+		AND t.snapshot_mode='collect_latest' AND p.snapshot_mode=t.snapshot_mode AND t.snapshot_as_of IS NULL`
 	if lock {
 		query += ` FOR UPDATE OF t FOR SHARE OF p`
 	}
@@ -144,6 +145,7 @@ func (r *Runtime) FreezeQuoteComponent(ctx context.Context, tx pgx.Tx, boundary 
 	tag, err := tx.Exec(ctx, `INSERT INTO quote_task_components(workspace_id,task_id,epoch,task_revision,plan_hash,cutoff,content_hash,manifest)
 		SELECT $1,$2,$3,$4,$5,$6,$7,$8 FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
 		WHERE t.id=$2 AND t.workspace_id=$1 AND t.epoch=$3 AND t.revision=$4 AND t.status='COLLECTING' AND t.snapshot_hash IS NULL
+		AND t.snapshot_mode='collect_latest' AND p.snapshot_mode=t.snapshot_mode AND t.snapshot_as_of IS NULL
 		AND t.deadline>clock_timestamp() AND p.plan_hash=$5 AND p.consumed_task_id=t.id AND p.executable
 		ON CONFLICT (workspace_id,task_id,epoch,content_hash) DO NOTHING`, workspace, task, epoch, revision, planHash, view.Cutoff, hash, body)
 	if err != nil {

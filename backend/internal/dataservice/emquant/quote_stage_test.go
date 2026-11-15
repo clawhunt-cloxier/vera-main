@@ -29,12 +29,12 @@ func syntheticQuoteTask(t *testing.T, pool *pgxpool.Pool, entity uuid.UUID) (uui
 	if err := pool.QueryRow(ctx, `INSERT INTO workspaces(owner_user_id) VALUES($1) RETURNING id`, user).Scan(&workspace); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `INSERT INTO research_plans(workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,expires_at)
-		VALUES($1,'synthetic-skill','0.4',$2,'{}','[]',clock_timestamp(),'synthetic-plan-hash',true,clock_timestamp()+interval '1 hour') RETURNING id`, workspace, entity).Scan(&plan); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO research_plans(workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,expires_at,snapshot_mode)
+		VALUES($1,'synthetic-skill','0.4',$2,'{}','[]',clock_timestamp(),'synthetic-plan-hash',true,clock_timestamp()+interval '1 hour','collect_latest') RETURNING id`, workspace, entity).Scan(&plan); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget)
-		VALUES($1,$2,'synthetic-skill','0.4',$3,'{}','[]',clock_timestamp(),'COLLECTING',clock_timestamp()+interval '1 hour','{}') RETURNING id`, workspace, plan, entity).Scan(&task); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget,snapshot_mode)
+		VALUES($1,$2,'synthetic-skill','0.4',$3,'{}','[]',clock_timestamp(),'COLLECTING',clock_timestamp()+interval '1 hour','{}','collect_latest') RETURNING id`, workspace, plan, entity).Scan(&task); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE research_plans SET consumed_task_id=$2 WHERE id=$1`, plan, task); err != nil {
