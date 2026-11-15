@@ -45,6 +45,20 @@ type Runtime struct {
 	database  *pgxpool.Pool
 }
 
+// OpenArchiveRuntime opens only the database and archive side of the service.
+// It permits recovery of an already staged publication without an SDK login
+// or another vendor request; it cannot collect new observations.
+func OpenArchiveRuntime(database *pgxpool.Pool, client *s3.Client, bucket, prefix string) (*Runtime, error) {
+	if database == nil {
+		return nil, errors.New("emquant: missing archive database")
+	}
+	store, err := NewS3RawStore(client, bucket, prefix)
+	if err != nil {
+		return nil, err
+	}
+	return &Runtime{database: database, store: store}, nil
+}
+
 // OpenRuntime requires real SDK, S3-compatible archive and persistent rate
 // gate configuration. It performs the vendor login through the same shared
 // gate and fails if the gate's state table is missing or unresolved. A

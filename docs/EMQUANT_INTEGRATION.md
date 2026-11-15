@@ -87,6 +87,8 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 
 ### 独立行情采集命令
 
-`vera emquant quote --entity <entity-uuid> --code <证券代码> --license <license-uuid> --policy <policy-uuid>` 使用已登记的真实厂商、产品、证券和政策采集并发布一个行情候选；成功输出候选 ID 和数据库可用时间，不生成研究快照。发布过程中出错时若已产生候选会输出其 ID，供受控恢复，不应将错误当作成功。数据库连接成功后的采集尝试写入成功或失败审计，不记录账号密码、对象存储密钥或返回值；参数、配置或数据库连接失败时无法写入数据库审计。
+`vera emquant quote --entity <entity-uuid> --code <证券代码> --license <license-uuid> --policy <policy-uuid>` 使用已登记的真实厂商、产品、证券和政策采集并发布一个行情候选；成功输出候选 ID 和数据库可用时间，不生成研究快照。发布过程中出错时若已产生候选会输出其 ID，不应将错误当作成功。执行 `vera emquant publish --candidate <候选-uuid>` 可重新验证来源及当前存储许可并恢复发布；该操作无需 SDK 登录或重新请求厂商，已提交的发布会保留原可用时间。数据库连接成功后的采集尝试写入成功或失败审计，不记录账号密码、对象存储密钥或返回值；参数、配置或数据库连接失败时无法写入数据库审计。
 
 进程环境必须提供 `DATABASE_URL`、`EMQUANT_LIBRARY`（SDK 库绝对路径）、`EMQUANT_USER`、`EMQUANT_PASSWORD`、`EMQUANT_ACCOUNT_SCOPE`、`EMQUANT_S3_ENDPOINT`、`EMQUANT_S3_REGION`、`EMQUANT_S3_ACCESS_KEY`、`EMQUANT_S3_SECRET_KEY`、`EMQUANT_S3_BUCKET`、`EMQUANT_PROVIDER_ID`、`EMQUANT_PRODUCT`、`VERA_CONTRACTS_DIR`、`EMQUANT_MIN_INTERVAL` 和 `EMQUANT_RATE_COOLDOWN`；可选 `EMQUANT_S3_PREFIX`。限流间隔至少 90ms，冷却时间不得短于间隔；实际账号、方法和其他程序共享的限额仍须独立核验。数据库需预先迁移并由受控人员登记经核实的许可、证券及映射政策；不要把凭证放进命令参数或仓库。该命令不会替代当前缺失的 0.4 应用接线，也不能单凭调用成功证明实时权限或时效。
+
+恢复发布只需上述数据库和 `EMQUANT_S3_*` 对象存储配置，无需 SDK 路径、Choice 账号密码或限流参数。连接数据库后的恢复尝试会写入成功或失败审计；权限撤销、来源损坏或尚未发布的候选过期等情况不会伪报成功。

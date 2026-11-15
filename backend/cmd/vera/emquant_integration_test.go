@@ -122,4 +122,25 @@ func TestEmquantCommandPublishesLicensedQuote(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT result FROM audit_events WHERE action='emquant.quote.collect'`).Scan(&auditResult); err != nil || auditResult != "success" {
 		t.Fatalf("missing success audit: %v", err)
 	}
+	for _, key := range []string{"EMQUANT_LIBRARY", "EMQUANT_USER", "EMQUANT_PASSWORD", "EMQUANT_ACCOUNT_SCOPE", "EMQUANT_MIN_INTERVAL", "EMQUANT_RATE_COOLDOWN"} {
+		delete(env, key)
+	}
+	var recovered bytes.Buffer
+	if err := emquantCommand(ctx, []string{"publish", "--candidate", stage.String()}, &recovered, func(k string) string { return env[k] }); err != nil || recovered.String() != out.String() {
+		t.Fatalf("publication recovery changed its result or required SDK credentials: %v", err)
+	}
+	var publications int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM quote_publications WHERE staged_quote_id=$1`, stage).Scan(&publications); err != nil || publications != 1 {
+		t.Fatalf("publication retry was not idempotent: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, license); err != nil {
+		t.Fatal(err)
+	}
+	recovered.Reset()
+	if err := emquantCommand(ctx, []string{"publish", "--candidate", stage.String()}, &recovered, func(k string) string { return env[k] }); err == nil || recovered.Len() != 0 {
+		t.Fatal("revoked source was recovered as a successful publication")
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action='emquant.quote.publish' AND result='failure'`).Scan(&publications); err != nil || publications != 1 {
+		t.Fatalf("missing failed recovery audit: %v", err)
+	}
 }
