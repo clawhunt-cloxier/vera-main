@@ -5,7 +5,6 @@ package identity
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -471,7 +470,7 @@ func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 		strings.ToLower(req.Username)).Scan(&uid, &pwHash, &disabled)
 
 	if err != nil || pwHash == "" {
-		httpx.Error(w, r, errs.Unauthorized("INVALID_CREDENTIALS", "账号或密码不正确"))
+		httpx.Error(w, r, errs.BadRequest("INVALID_CREDENTIALS", "账号或密码不正确"))
 		return
 	}
 
@@ -482,7 +481,7 @@ func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Verify password using PBKDF2 (salt is stored with hash in format: salt$hash)
 	if !verifyPasswordHash(req.Password, pwHash) {
-		httpx.Error(w, r, errs.Unauthorized("INVALID_CREDENTIALS", "账号或密码不正确"))
+		httpx.Error(w, r, errs.BadRequest("INVALID_CREDENTIALS", "账号或密码不正确"))
 		return
 	}
 
@@ -510,12 +509,12 @@ func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// hashPassword creates a password hash using PBKDF2. Format: salt$hash (base64)
+// hashPassword creates a password hash using PBKDF2-like iterations. Format: salt$hash (base64)
 func hashPassword(password string) string {
 	salt := make([]byte, 16)
 	rand.Read(salt)
-	// PBKDF2: 100k iterations, 32-byte key, SHA256
-	hash := pbkdf2.Key([]byte(password), salt, 100000, 32, sha256.New)
+	// PBKDF2-like: 100k iterations, SHA256
+	hash := pbkdf2Hash([]byte(password), salt, 100000, 32)
 	return base64.StdEncoding.EncodeToString(salt) + "$" + base64.StdEncoding.EncodeToString(hash)
 }
 
@@ -533,6 +532,27 @@ func verifyPasswordHash(password, storedHash string) bool {
 	if err != nil {
 		return false
 	}
-	hash := pbkdf2.Key([]byte(password), salt, 100000, 32, sha256.New)
+	hash := pbkdf2Hash([]byte(password), salt, 100000, 32)
 	return subtle.ConstantTimeCompare(hash, storedHashBytes) == 1
+}
+
+// pbkdf2Hash implements PBKDF2 using HMAC-SHA256
+func pbkdf2Hash(password, salt []byte, iterations, keyLen int) []byte {
+	h := hmac.New(sha256.New, password)
+	h.Write(salt)
+	h.Write([]byte{0, 0, 0, 1}) // block counter
+	u := h.Sum(nil)
+	result := make([]byte, len(u))
+	copy(result, u)
+
+	for i := 1; i < iterations; i++ {
+		h.Reset()
+		h.Write(u)
+		u = h.Sum(nil)
+		for j := range result {
+			result[j] ^= u[j]
+		}
+	}
+
+	return result[:keyLen]
 }

@@ -14,7 +14,7 @@ VALUES (
   '演示管理员',
   'analyst',
   'password',
-  'xCQITNssEmuvWIOtNQD0Zw==$Y+2ohWs0id+hMdNi7/NJtWA8Nc/L/xKRJzb5HI5/H0o=',
+  '6jeXPaHYQFReNeRl6dLJ9w==$lZainjaod9Fj/VTZms1hKG2xo1DfZX0qyjxw7fz9qe8=',
   now()
 )
 ON CONFLICT (issuer, subject) DO UPDATE SET
