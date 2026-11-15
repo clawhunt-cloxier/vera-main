@@ -34,41 +34,45 @@ export function Reports() {
           <Link to="/app/watchlist">自选股</Link>
         </nav>
       </header>
-      <h1>历史报告</h1>
-      {reports.isLoading && <Loading />}
-      {reports.data?.items.length === 0 && <Empty>尚未生成报告。</Empty>}
-      {reports.data && reports.data.items.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>对象</th>
-              <th>技能</th>
-              <th>类型</th>
-              <th>交付时间</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {reports.data.items.map((r) => (
-              <tr key={r.id}>
-                <td>{r.subject.name}</td>
-                <td>{skillTitle[r.skill_id]}</td>
-                <td>
-                  <Tag tone={r.result_kind === 'full' ? 'ok' : 'warn'}>
-                    {r.result_kind === 'full' ? '完整' : '受限'}
-                  </Tag>
-                </td>
-                <td>{fmtTime(r.delivered_at)}</td>
-                <td>
-                  <Link to="/app/reports/$id" params={{ id: r.id }}>
-                    查看
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <section className="content">
+        <h1>历史报告</h1>
+        {reports.isLoading && <Loading />}
+        {reports.data?.items.length === 0 && <Empty>尚未生成报告。</Empty>}
+        {reports.data && reports.data.items.length > 0 && (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>对象</th>
+                  <th>技能</th>
+                  <th>类型</th>
+                  <th>交付时间</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {reports.data.items.map((r) => (
+                  <tr key={r.id}>
+                    <td><strong>{r.subject.name}</strong></td>
+                    <td className="muted">{skillTitle[r.skill_id]}</td>
+                    <td>
+                      <Tag tone={r.result_kind === 'full' ? 'ok' : 'warn'}>
+                        {r.result_kind === 'full' ? '完整' : '受限'}
+                      </Tag>
+                    </td>
+                    <td className="muted">{fmtTime(r.delivered_at)}</td>
+                    <td>
+                      <Link to="/app/reports/$id" params={{ id: r.id }} className="btn-link">
+                        查看
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </main>
   );
 }
