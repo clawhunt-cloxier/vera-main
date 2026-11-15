@@ -99,6 +99,21 @@ func (r *Runtime) ReauthorizeQuoteComponent(ctx context.Context, tx pgx.Tx, work
 	if currentEpoch != epoch || currentPlan != planHash || status == "CANCEL_REQUESTED" || status == "CANCELLED" {
 		return errors.New("emquant: task changed during quote authorization")
 	}
+	// Waiting for the task lock can outlast a previously checked grant. The
+	// source and policy rows remain locked; recheck their time windows before
+	// returning without performing any further remote reads under this lock.
+	for _, quote := range doc.View.Quotes {
+		grant := dataservice.SourceUseRequest{LicenseID: quote.LicenseID, ProviderID: quote.ProviderID, Product: quote.Product,
+			DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: []string{"TIME", "NOW"}, Codes: []string{quote.Code}, Use: use}
+		if err := dataservice.RequireSourceUse(ctx, tx, grant); err != nil {
+			return err
+		}
+		var current uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT id FROM quote_mapping_policies WHERE id=$1 AND revoked_at IS NULL
+			AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp() AND (valid_until IS NULL OR valid_until>clock_timestamp())`, quote.PolicyID).Scan(&current); err != nil {
+			return fmt.Errorf("emquant: quote policy expired before authorization: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -133,11 +148,22 @@ func (r *Runtime) reauthorizeQuote(ctx context.Context, tx pgx.Tx, original Publ
 	if err := dataservice.RequireSourceUse(ctx, tx, grant); err != nil {
 		return err
 	}
+	// The original cutoff proves that the mapping was valid when frozen. A
+	// historical cutoff does not make an expired mapping valid for use now.
+	var current uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM quote_mapping_policies WHERE id=$1 AND revoked_at IS NULL
+		AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp() AND (valid_until IS NULL OR valid_until>clock_timestamp())`, q.PolicyID).Scan(&current); err != nil {
+		return fmt.Errorf("emquant: quote policy no longer current: %w", err)
+	}
 	if err := r.verifyPublishedQuote(ctx, &q, fingerprint, fetched, archived, policy, maxAgeMS, payload, locators, cutoff); err != nil {
 		return err
 	}
 	if err := dataservice.RequireSourceUse(ctx, tx, grant); err != nil {
 		return err
+	}
+	if err := tx.QueryRow(ctx, `SELECT id FROM quote_mapping_policies WHERE id=$1 AND revoked_at IS NULL
+		AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp() AND (valid_until IS NULL OR valid_until>clock_timestamp())`, q.PolicyID).Scan(&current); err != nil {
+		return fmt.Errorf("emquant: quote policy expired during verification: %w", err)
 	}
 	if q.StageID != original.StageID || q.EntityID != original.EntityID || q.RawObjectID != original.RawObjectID || q.PolicyID != original.PolicyID || q.LicenseID != original.LicenseID || q.ProviderID != original.ProviderID || q.Product != original.Product || q.Code != original.Code || q.Price != original.Price || !q.EventAt.Equal(original.EventAt) || !q.ReceivedAt.Equal(original.ReceivedAt) || !q.AvailableAt.Equal(original.AvailableAt) || q.LatencyMode != original.LatencyMode || q.MarketState != original.MarketState || q.RawSHA256 != original.RawSHA256 || q.RawRef != original.RawRef || !maps.Equal(q.Locators, original.Locators) {
 		return errors.New("emquant: frozen quote differs from its immutable source")

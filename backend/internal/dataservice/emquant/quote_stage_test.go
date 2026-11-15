@@ -2,6 +2,7 @@ package emquant
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -522,6 +523,96 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 		t.Fatalf("frozen quote was reselected using current freshness: %v", err)
 	}
 	_ = historicalAuthorization.Rollback(ctx)
+	// Freeze a component under a short-lived mapping policy. Its historical
+	// validity must not authorize display after that policy has expired.
+	var expiringPolicy uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,max_age_ms,verified_by,verified_at,valid_from,valid_until)
+		SELECT source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,max_age_ms,verified_by,verified_at,valid_from,clock_timestamp()+interval '5 seconds' FROM quote_mapping_policies WHERE id=$1 RETURNING id`, policyID).Scan(&expiringPolicy); err != nil {
+		t.Fatal(err)
+	}
+	expiringStage, err := runtime.StageQuote(ctx, cat, source, expiringPolicy, entityID, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.PublishStagedQuote(ctx, expiringStage); err != nil {
+		t.Fatal(err)
+	}
+	expiringWS, expiringTask := syntheticQuoteTask(t, pool, entityID)
+	syntheticQuoteIntent(t, pool, expiringWS, expiringTask, entityID)
+	expiringTx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiringBoundary, err := BeginQuoteBoundary(ctx, expiringTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiringComponent, err := runtime.FreezeQuoteComponent(ctx, expiringTx, expiringBoundary, expiringWS, expiringTask, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := expiringTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Verify the newly published policy is the one frozen in the component.
+	var manifest []byte
+	if err := pool.QueryRow(ctx, `SELECT manifest FROM quote_task_components WHERE task_id=$1 AND content_hash=$2`, expiringTask, expiringComponent.ContentHash).Scan(&manifest); err != nil {
+		t.Fatal(err)
+	}
+	var expiringDoc quoteComponentDocument
+	if err := json.Unmarshal(manifest, &expiringDoc); err != nil || len(expiringDoc.View.Quotes) != 1 || expiringDoc.View.Quotes[0].PolicyID != expiringPolicy {
+		t.Fatal("component did not select expiring policy")
+	}
+	expiryCtx, expiryCancel := context.WithTimeout(ctx, 12*time.Second)
+	defer expiryCancel()
+	inFlightTx, err := pool.BeginTx(expiryCtx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inFlightTx.Rollback(context.Background())
+	mu.Lock()
+	releaseGet = make(chan struct{})
+	blockNextGet = true
+	mu.Unlock()
+	defer func() {
+		select {
+		case <-releaseGet:
+		default:
+			close(releaseGet)
+		}
+	}()
+	inFlightDone := make(chan error, 1)
+	go func() {
+		inFlightDone <- runtime.ReauthorizeQuoteComponent(expiryCtx, inFlightTx, expiringWS, expiringTask, 1, expiringComponent.ContentHash, dataservice.SourceDisplay)
+	}()
+	select {
+	case <-getStarted:
+	case err := <-inFlightDone:
+		t.Fatalf("authorization did not reach archive read: %v", err)
+	case <-expiryCtx.Done():
+		t.Fatal(expiryCtx.Err())
+	}
+	if _, err := pool.Exec(expiryCtx, `SELECT pg_sleep(GREATEST(0,EXTRACT(EPOCH FROM (SELECT valid_until-clock_timestamp() FROM quote_mapping_policies WHERE id=$1)))+0.05)`, expiringPolicy); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseGet)
+	select {
+	case err := <-inFlightDone:
+		if err == nil {
+			t.Fatal("mapping expired during archive read but authorization succeeded")
+		}
+	case <-expiryCtx.Done():
+		t.Fatal(expiryCtx.Err())
+	}
+	_ = inFlightTx.Rollback(ctx)
+	expiredTx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.ReauthorizeQuoteComponent(ctx, expiredTx, expiringWS, expiringTask, 1, expiringComponent.ContentHash, dataservice.SourceDisplay); err == nil {
+		t.Fatal("expired mapping authorized frozen quote")
+	}
+	_ = expiredTx.Rollback(ctx)
 	var records int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM records`).Scan(&records); err != nil || records != 0 {
 		t.Fatalf("unpublished quote entered research records: %d %v", records, err)
