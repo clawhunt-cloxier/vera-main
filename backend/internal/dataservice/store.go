@@ -222,9 +222,11 @@ const visibleAtCutoff = `r.available_at <= $2
 		AND (r.published_at IS NULL OR r.published_at <= $2)
 		AND (r.dataset_id NOT IN ('fin.statement','fin.segment') OR r.published_at IS NOT NULL)`
 
-// A real-data store must also exclude a vendor record attached to a synthetic
-// entity: entity identity participates in the facts presented to the model.
+// A real-data store must exclude a vendor record attached to a synthetic
+// entity. Intraday records are also withheld from this legacy query path until
+// it is replaced by publication-aware MVCC selection and current-use checks.
 const realSourceFilter = ` AND (NOT %s::bool OR (NOT p.synthetic AND p.kind='vendor' AND
+ r.dataset_id NOT IN ('mkt.intraday_quote','mkt.intraday_index_quote') AND
  (r.entity_id IS NULL OR EXISTS (SELECT 1 FROM entities real_entity WHERE real_entity.id=r.entity_id AND NOT real_entity.synthetic))))`
 
 func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {

@@ -42,6 +42,14 @@ func TestArchiveRegistryVerifiesAndPreservesProvenance(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,kind,synthetic) VALUES('choice-test','Choice test','vendor',false)`); err != nil {
 		t.Fatal(err)
 	}
+	var legacyID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO raw_objects(provider_id,dataset_id,object_key,content_hash,size_bytes,stored_path,fetched_at)
+		VALUES('choice-test','mkt.daily_bar','legacy','synthetic',0,'synthetic-path',clock_timestamp()) RETURNING id`).Scan(&legacyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE raw_objects SET request_fingerprint=$2,archive_format='emquant-sdk-decoded-v2',registered_at=clock_timestamp() WHERE id=$1`, legacyID, digest([]byte("synthetic"))); err == nil {
+		t.Fatal("legacy object was promoted to verified lineage")
+	}
 	var mu sync.Mutex
 	var stored []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

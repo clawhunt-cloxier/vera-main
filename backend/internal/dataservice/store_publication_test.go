@@ -13,6 +13,53 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
 )
 
+func TestVendorStoreWithholdsIntradayFromLegacyPath(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.New(t)
+	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing) VALUES('intraday-test','synthetic test','vendor',true)`); err != nil {
+		t.Fatal(err)
+	}
+	var entityID, recordID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO entities(kind,code,name,synthetic) VALUES('stock','INTRADAY.TEST','Synthetic',false) RETURNING id`).Scan(&entityID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO records(dataset_id,entity_id,record_key,logical_key,available_at,provider_id,origin,source_tier,payload,content_hash)
+		VALUES('mkt.intraday_quote',$1,'intraday-test','intraday-test',clock_timestamp()-interval '1 minute','intraday-test','exchange','L2','{}','synthetic') RETURNING id`, entityID).Scan(&recordID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO records(dataset_id,record_key,logical_key,available_at,provider_id,origin,source_tier,payload,content_hash)
+		VALUES('mkt.intraday_index_quote','intraday-index','intraday-index',clock_timestamp()-interval '1 minute','intraday-test','exchange','L2','{}','synthetic')`); err != nil {
+		t.Fatal(err)
+	}
+	store := dataservice.NewVendorStore(pool, nil)
+	cutoff := time.Now().Add(time.Minute)
+	rows, err := store.Query(ctx, dataservice.Query{DatasetIDs: []string{"mkt.intraday_quote"}, EntityIDs: []uuid.UUID{entityID}, AsOf: cutoff, ModelUse: true})
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("legacy query exposed intraday data: rows=%d err=%v", len(rows), err)
+	}
+	coverage, err := store.Coverage(ctx, []uuid.UUID{entityID}, cutoff)
+	if err != nil || coverage[entityID]["mkt.intraday_quote"] {
+		t.Fatalf("legacy coverage exposed intraday data: %v", err)
+	}
+	if ok, err := store.HasGlobal(ctx, "mkt.intraday_index_quote", cutoff); err != nil || ok {
+		t.Fatalf("legacy global coverage exposed intraday data: %v", err)
+	}
+	if _, err := store.Freeze(ctx, cutoff, []uuid.UUID{recordID}); err == nil {
+		t.Fatal("legacy freeze accepted an intraday record without a publication-aware snapshot")
+	}
+	legacyHash, err := dataservice.NewStore(pool, nil).Freeze(ctx, cutoff, []uuid.UUID{recordID})
+	if err != nil {
+		t.Fatalf("construct historical test snapshot: %v", err)
+	}
+	if _, _, err := store.Snapshot(ctx, legacyHash); err == nil {
+		t.Fatal("legacy snapshot replay exposed an intraday record")
+	}
+	got, err := store.Get(ctx, []uuid.UUID{recordID})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("legacy evidence lookup exposed intraday data: %v", err)
+	}
+}
+
 func TestQueryRespectsDisclosureTimeBeforeSelectingRevision(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.New(t)
