@@ -15,6 +15,22 @@ validate_spec(draft)
 draft_schemas = draft['components']['schemas']
 assert 'snapshot_mode' not in schemas['ResearchPlan']['properties']
 assert 'snapshot_mode' in draft_schemas['ResearchPlan']['required']
+assert 'quote_requirement' not in schemas['ResearchPlan']['properties']
+assert 'quote_requirement' in draft_schemas['ResearchPlan']['required']
+plan_request_04 = Draft202012Validator(draft_schemas['CreatePlanV04'], format_checker=FormatChecker())
+assert not list(plan_request_04.iter_errors({'text': '研究该公司', 'quote_requirement': 'realtime_trade'}))
+assert not list(plan_request_04.iter_errors({'skill_id': 'stock_analysis', 'subject_id': '00000000-0000-4000-8000-000000000001', 'params': {}, 'quote_requirement': 'latest_available'}))
+assert list(plan_request_04.iter_errors({'text': '研究该公司'}))
+assert list(plan_request_04.iter_errors({'text': '研究该公司', 'quote_requirement': 'unknown'}))
+assert list(plan_request_04.iter_errors({'text': '研究该公司', 'quote_requirement': 'realtime_trade', 'workspace_id': 'forged'}))
+plan_mode_04 = Draft202012Validator({'type': 'object', 'properties': {k: draft_schemas['ResearchPlan']['properties'][k] for k in ('snapshot_mode', 'quote_requirement')},
+                                   'required': ['snapshot_mode', 'quote_requirement'], 'allOf': draft_schemas['ResearchPlan']['allOf']})
+assert not list(plan_mode_04.iter_errors({'snapshot_mode': 'collect_latest', 'quote_requirement': 'realtime_trade'}))
+assert list(plan_mode_04.iter_errors({'snapshot_mode': 'collect_latest', 'quote_requirement': None}))
+assert not list(plan_mode_04.iter_errors({'snapshot_mode': 'fixed_legacy', 'quote_requirement': None}))
+assert list(plan_mode_04.iter_errors({'snapshot_mode': 'fixed_legacy', 'quote_requirement': 'realtime_trade'}))
+for path in ('/api/v1/research-plans', '/api/v1/research-tasks'):
+    assert 'application/vnd.vera.v0.4+json' in draft['paths'][path]['post']['requestBody']['content']
 assert {'snapshot_mode', 'snapshot_as_of'} <= set(draft_schemas['Task']['required'])
 assert 'available_at' in draft_schemas['SourceFreshness']['required']
 report_rule = Draft202012Validator({
