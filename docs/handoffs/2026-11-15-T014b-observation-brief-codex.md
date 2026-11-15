@@ -43,3 +43,10 @@
 2. PR squash 合入 dev，经 CI/CD 部署新镜像；显式登记来源许可，停止旧 worker 后切换真实模式。不能同时运行两个 Choice 账号进程。
 3. 网站完成真实用户流程、证据和 PDF 验收，记录镜像 SHA、报告 ID、采集日期；届时才确认用户可试用。
 4. 实时 TIME/交易状态/延迟及财报版本、全部技能覆盖、正式身份与运维验收仍未完成；盘中独立验收后扩展。
+
+## 集成与部署跟踪
+
+- PR #17 最终头 `4e22c19`：Verify [43730794352](https://github.com/clawhunt-cloxier/vera-main/actions/runs/43730794352) 完整通过，bootstrap 17m57s，native-image 2m26s，branch-policy 通过。
+- 2026-11-15T15:54:53Z squash 合入 dev：`e9513e6b4ad22e5581a90a6e6dcbe6ad827014aa`。合并树与已验证任务头一致，无额外文件差异。
+- 后续文档/部署验收分支 `agent/codex/T014b-observation-acceptance`，不复用已合入任务分支。dev Verify 43732507273 与 CD 43732507315 正在运行，尚未切换真实模式。
+- 服务器已保存原数据库、配置和镜像备份；当前无在途任务；SDK 动态依赖检查通过。浏览器独立测试账号已登录并开通私人 workspace；真实任务提交、证据与 PDF 验收待新镜像上线后执行。

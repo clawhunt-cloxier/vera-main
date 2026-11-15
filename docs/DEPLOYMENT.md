@@ -60,7 +60,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 `VERA_DATA_PROVIDER=emquant` 接入真实 SDK 和受控证券范围，使用独立 `observation.v1` 协议。仍是测试环境开发登录；报告只覆盖已核实的日成交观察，非实时，完整范围见 [简报技能](skills/stock-observation-brief.md)。
 
-1. 独立部署持久 S3，测试配置见 `deploy/storage.compose.yml`（SeaweedFS 4.00，镜像固定摘要）。配置身份 JSON 放 `/opt/vera/storage/s3.json`，宿主父目录仅 deploy 可访问，容器只读挂载；凭证不入 Git。创建 `vera-objects` volume、`vera-archive` network 和 `vera-raw` bucket。S3 只绑定宿主 loopback，应用经私有 Docker network 访问。原 MinIO 固定下载已不可用。
+1. 独立部署持久 S3，测试配置见 `deploy/storage.compose.yml`（SeaweedFS 4.00，镜像固定摘要）。配置身份 JSON 放 `/opt/vera/storage/s3.json`，宿主父目录仅 deploy 可访问，容器只读挂载；凭证不入 Git。创建 `vera-objects` volume、`vera-archive` network 和 `vera-raw` bucket。以独立项目运行 `docker compose -p vera-archive -f storage.compose.yml up -d`，不可与应用共享默认 Compose 项目，否则应用部署的 `--remove-orphans` 会移除存储容器。现有 docker-run 存储实例须先在维护窗口按同一 volume 迁移，不能同时创建同名容器。S3 只绑定宿主 loopback，应用经私有 Docker network 访问。原 MinIO 固定下载已不可用。
 2. 持久保存 SDK 及运行配置于 `/opt/vera/sdk`，容器挂载 `/opt/choice-sdk`，属主 uid/gid 10001；保留设备标识，不同时运行两个使用该 Choice 账号的采集进程。
 3. 准备服务器秘密配置，变量见 `.env.example`。使用已核实的产品、字段、证券和用途依据显式运行 `vera emquant init-brief`；它拒绝改写旧许可或恢复撤销。不要依据 SDK 调用成功推断实时权利。
 4. 先经过 dev Verify/CD 发布支持新版本的镜像，再停旧 worker、保留 `.env` 和镜像回滚副本，切换 `VERA_DATA_PROVIDER=emquant` 并重建容器。库加载、归档、许可、实体同步任一步失败应停服排查或回退兼容真实模式的镜像，不展示模拟回退。同库存在真实证券身份时 fixture 启动会拒绝；切换前应保留独立数据库备份。来源许可和真实对象留存不随应用回滚删除。
