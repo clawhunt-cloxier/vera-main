@@ -202,6 +202,142 @@ func TestArchiveRegistryVerifiesAndPreservesProvenance(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT source_license_id,vendor_method,vendor_fields,vendor_codes FROM raw_objects WHERE id=$1`, registeredRef.ID).Scan(&savedLicense, &savedMethod, &savedFields, &savedCodes); err != nil || savedLicense != registeredCollector.LicenseID || savedMethod != "CSD" || len(savedFields) != 1 || savedFields[0] != "X" || len(savedCodes) != 1 || savedCodes[0] != "A" {
 		t.Fatalf("registered raw scope does not match grant: %v", err)
 	}
+	originalCube := f.cube
+	f.cube = Cube{Codes: []string{"A"}, Indicators: []string{"IncomeStatement_61", "IncomeStatement_9"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 11, Value: -20.0}, {Type: 8, Value: int64(1000)}}}
+	statementCollector := registeredCollector
+	statementCollector.LicenseID = syntheticStorageLicense(t, pool, "choice-test", "fin.statement", "CSS", []string{"INCOMESTATEMENT_9", "INCOMESTATEMENT_61"})
+	before = f.calls
+	if _, _, err := registeredCollector.CollectStatementFields(ctx, "A", "2025-12-31", 1); err == nil || f.calls != before {
+		t.Fatal("financial fields were requested under a different product scope")
+	}
+	statement, statementRef, err := statementCollector.CollectStatementFields(ctx, "A", "2025-12-31", 1)
+	if err != nil || statementRef.ID == uuid.Nil || statementRef.LicenseID != statementCollector.LicenseID || statement.Source != statementRef.Source || statement.RevenueCNY == nil || *statement.RevenueCNY != "1000" || statement.NetProfitCNY == nil || *statement.NetProfitCNY != "-20" || statement.RequestedPeriod != "2025-12-31" || statement.RequestedType != 1 {
+		t.Fatalf("registered statement fields: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT source_license_id,vendor_method FROM raw_objects WHERE id=$1`, statementRef.ID).Scan(&savedLicense, &savedMethod); err != nil || savedLicense != statementCollector.LicenseID || savedMethod != "CSS" {
+		t.Fatalf("statement source lost its licensed CSS scope: %v", err)
+	}
+	var statements int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM records WHERE dataset_id='fin.statement'`).Scan(&statements); err != nil || statements != 0 {
+		t.Fatalf("partial financial fields became a complete research statement: %d %v", statements, err)
+	}
+	before = f.calls
+	if _, _, err := statementCollector.CollectStatementFields(ctx, "A", "2025-11-30", 1); err == nil || f.calls != before {
+		t.Fatal("invalid report period reached vendor")
+	}
+	f.cube.Indicators[0] = "UNEXPECTED"
+	badStatement, badSource, err := statementCollector.CollectStatementFields(ctx, "A", "2025-12-31", 1)
+	if err == nil || badStatement.RevenueCNY != nil || badStatement.NetProfitCNY != nil || badSource.ID != uuid.Nil {
+		t.Fatal("unrequested financial field was returned")
+	}
+	f.cube.Indicators[0] = "IncomeStatement_61"
+	revokedStatement := statementCollector
+	revokedStatement.Collector.Gate = testGateFunc(func(ctx context.Context, call func() error) error {
+		if err := call(); err != nil {
+			return err
+		}
+		_, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, statementCollector.LicenseID)
+		return err
+	})
+	badStatement, badSource, err = revokedStatement.CollectStatementFields(ctx, "A", "2025-12-31", 1)
+	if err == nil || badStatement.RevenueCNY != nil || badStatement.NetProfitCNY != nil || badSource.ID != uuid.Nil {
+		t.Fatal("financial source revoked during collection was returned")
+	}
+	f.cube = Cube{Codes: []string{"A"}, Indicators: []string{"NAME", "LISTDATE", "DELISTDATE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "Synthetic"}, {Type: 13, Value: "2010-01-02"}, {Type: 0}}}
+	securityCollector := registeredCollector
+	securityCollector.LicenseID = syntheticStorageLicense(t, pool, "choice-test", "ref.security", "CSS", []string{"NAME", "LISTDATE", "DELISTDATE"})
+	security, securityRef, err := securityCollector.CollectSecurityBasics(ctx, "A")
+	if err != nil || securityRef.ID == uuid.Nil || security.Source != securityRef.Source || security.ShortName != "Synthetic" || security.FirstListingDate != "2010-01-02" || security.DelistingDate != nil {
+		t.Fatalf("registered partial security basics: %v", err)
+	}
+	before = f.calls
+	if _, _, err := securityCollector.CollectSecurityBasics(ctx, "A,B"); err == nil || f.calls != before {
+		t.Fatal("ambiguous security basics request reached vendor")
+	}
+	f.cube = Cube{Codes: []string{"A"}, Indicators: []string{"HISSW2021CODE", "HISSW2021"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "synthetic-code"}, {Type: 13, Value: "Synthetic industry"}}}
+	industryCollector := registeredCollector
+	industryCollector.LicenseID = syntheticStorageLicense(t, pool, "choice-test", "ref.industry", "CSS", []string{"HISSW2021", "HISSW2021CODE"})
+	industry, industryRef, err := industryCollector.CollectIndustryLevel(ctx, "A", "2025-12-31", 2)
+	if err != nil || industryRef.ID == uuid.Nil || industry.Source != industryRef.Source || industry.IndustryCode != "synthetic-code" || industry.RequestedLevel != 2 {
+		t.Fatalf("registered industry observation: %v", err)
+	}
+	f.cube = Cube{Codes: []string{"A"}, Indicators: []string{"STMTACTDATE", "CORRECTANNCNUM", "CORRECTANNCDATE"}, Dates: []string{"2026-11-13"}, Values: []Cell{{Type: 13, Value: "2026-04-01"}, {Type: 8, Value: int64(1)}, {Type: 0}}}
+	disclosureCollector := registeredCollector
+	disclosureCollector.LicenseID = syntheticStorageLicense(t, pool, "choice-test", "fin.statement", "CSS", []string{"STMTACTDATE", "CORRECTANNCNUM", "CORRECTANNCDATE"})
+	disclosure, disclosureRef, err := disclosureCollector.CollectDisclosureObservation(ctx, "A", "2025-12-31")
+	if err != nil || disclosureRef.ID == uuid.Nil || disclosure.Source != disclosureRef.Source || disclosure.Cells["CORRECTANNCNUM"].Value != int64(1) || disclosure.RequestedPeriod != "2025-12-31" {
+		t.Fatalf("registered disclosure observation: %v", err)
+	}
+	var partialRecords int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM records WHERE dataset_id IN ('ref.security','ref.industry','fin.statement')`).Scan(&partialRecords); err != nil || partialRecords != 0 {
+		t.Fatalf("partial observations entered canonical research records: %d %v", partialRecords, err)
+	}
+	var calendarLicense uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage)
+		VALUES('choice-test','synthetic-product','ref.trading_calendar','TRADEDATES',ARRAY['TRADEDATE'],'listed',ARRAY['CNSESH'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 day',true) RETURNING id`).Scan(&calendarLicense); err != nil {
+		t.Fatal(err)
+	}
+	f.cube = Cube{Codes: []string{""}, Indicators: []string{"TRADEDATE"}, Dates: []string{"2026/11/9", "2026/11/10"}, Values: []Cell{{Type: 13, Value: "2026/11/9"}, {Type: 13, Value: "2026/11/10"}}}
+	calendarCollector := registeredCollector
+	calendarCollector.LicenseID = calendarLicense
+	before = f.calls
+	if _, _, err := calendarCollector.CollectOpenDates(ctx, "CNSESZ", "2026-11-09", "2026-11-15"); err == nil || f.calls != before {
+		t.Fatal("unlicensed market calendar reached vendor")
+	}
+	if _, _, err := calendarCollector.CollectOpenDates(ctx, "CNSESH", "2026-11-15", "2026-11-09"); err == nil || f.calls != before {
+		t.Fatal("invalid calendar range reached vendor")
+	}
+	days, calendarRef, err := calendarCollector.CollectOpenDates(ctx, "CNSESH", "2026-11-09", "2026-11-15")
+	if err != nil || calendarRef.ID == uuid.Nil || len(days) != 2 || days[0] != "2026-11-09" || days[1] != "2026-11-10" {
+		t.Fatalf("registered calendar collection: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT source_license_id,vendor_method,vendor_fields,vendor_codes FROM raw_objects WHERE id=$1`, calendarRef.ID).Scan(&savedLicense, &savedMethod, &savedFields, &savedCodes); err != nil || savedLicense != calendarLicense || savedMethod != "TRADEDATES" || len(savedFields) != 1 || savedFields[0] != "TRADEDATE" || len(savedCodes) != 1 || savedCodes[0] != "CNSESH" {
+		t.Fatalf("calendar source lost market-specific license: %v", err)
+	}
+	calendarBody, err := store.Get(ctx, calendarRef.Source.BodySHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calendarRecords, err := MapOpenDates(calendarBody, calendarRef.Source, "CNSESH", "2026-11-09", "2026-11-15")
+	if err != nil || len(calendarRecords) != 2 || calendarRecords[0].Source != calendarRef.Source {
+		t.Fatalf("registered calendar source could not be replayed: %v", err)
+	}
+	revokedCalendar := calendarCollector
+	revokedCalendar.Collector.Gate = testGateFunc(func(ctx context.Context, call func() error) error {
+		if err := call(); err != nil {
+			return err
+		}
+		_, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, calendarLicense)
+		return err
+	})
+	badDays, badCalendarRef, err := revokedCalendar.CollectOpenDates(ctx, "CNSESH", "2026-11-09", "2026-11-15")
+	if err == nil || len(badDays) != 0 || badCalendarRef.ID != uuid.Nil {
+		t.Fatal("calendar source revoked during collection was returned")
+	}
+	f.cube = Cube{Codes: []string{"A"}, Indicators: []string{"TURN", "VOLUME", "AMOUNT"}, Dates: []string{"2026-11-09"}, Values: []Cell{{Type: 11, Value: 1.25}, {Type: 8, Value: int64(10000)}, {Type: 11, Value: 123400.5}}}
+	liquidityCollector := registeredCollector
+	liquidityCollector.LicenseID = syntheticStorageLicense(t, pool, "choice-test", "mkt.daily_bar", "CSD", []string{"VOLUME", "AMOUNT", "TURN"})
+	liquidity, liquidityRef, err := liquidityCollector.CollectDailyLiquidity(ctx, "A", "2026-11-09", "2026-11-10")
+	if err != nil || liquidityRef.ID == uuid.Nil || len(liquidity) != 1 || liquidity[0].VolumeShares != "10000" || liquidity[0].AmountCNY != "123400.5" || liquidity[0].TurnoverRatio == nil || *liquidity[0].TurnoverRatio != "0.0125" || liquidity[0].Source != liquidityRef.Source {
+		t.Fatalf("registered daily liquidity mapping: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT source_license_id,vendor_method FROM raw_objects WHERE id=$1`, liquidityRef.ID).Scan(&savedLicense, &savedMethod); err != nil || savedLicense != liquidityCollector.LicenseID || savedMethod != "CSD" {
+		t.Fatalf("daily liquidity source lost its licensed CSD scope: %v", err)
+	}
+	before = f.calls
+	if _, _, err := liquidityCollector.CollectDailyLiquidity(ctx, "A,B", "2026-11-09", "2026-11-10"); err == nil || f.calls != before {
+		t.Fatal("ambiguous daily liquidity request reached vendor")
+	}
+	f.cube.Values[1].Value = int64(-1)
+	badLiquidity, badLiquidityRef, err := liquidityCollector.CollectDailyLiquidity(ctx, "A", "2026-11-09", "2026-11-10")
+	if err == nil || len(badLiquidity) != 0 || badLiquidityRef.ID != uuid.Nil {
+		t.Fatal("invalid daily liquidity observation was returned")
+	}
+	var dailyBars int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM records WHERE dataset_id='mkt.daily_bar'`).Scan(&dailyBars); err != nil || dailyBars != 0 {
+		t.Fatalf("partial liquidity became a complete daily bar: %d %v", dailyBars, err)
+	}
+	f.cube = originalCube
 	f.quote = Quote{Data: f.cube, ObservedAt: time.Now().UTC()}
 	quoteCollector := registeredCollector
 	quoteCollector.LicenseID = syntheticStorageLicense(t, pool, "choice-test", "mkt.intraday_quote", "CSQSNAPSHOT", []string{"X"})

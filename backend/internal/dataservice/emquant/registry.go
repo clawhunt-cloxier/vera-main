@@ -69,6 +69,27 @@ func (r ArchiveRegistry) registerCube(ctx context.Context, dataset string, ref A
 		encoded, err := json.Marshal(expected)
 		requested := strings.Split(expected.Indicators, ",")
 		requestedCodes := strings.Split(expected.Codes, ",")
+		calendar := grant.Method == "TRADEDATES"
+		if calendar {
+			market := ""
+			for _, candidate := range []string{"CNSESH", "CNSESZ"} {
+				if expected.Options == "Market="+candidate+",Period=1,Order=1" {
+					market = candidate
+				}
+			}
+			if dataset != "ref.trading_calendar" || expected.Codes != "" || expected.Indicators != "" || market == "" {
+				return uuid.Nil, errors.New("emquant: raw calendar request scope mismatch")
+			}
+			start, end, err := calendarRange(market, expected.From, expected.To)
+			if err != nil {
+				return uuid.Nil, err
+			}
+			if _, err := openDates(cube, start, end); err != nil {
+				return uuid.Nil, err
+			}
+			requested = []string{"TRADEDATE"}
+			requestedCodes = []string{market}
+		}
 		if err != nil || digest(encoded) != ref.RequestFingerprint || grant.ProviderID != r.ProviderID || grant.DatasetID != dataset || grant.Use != dataservice.SourceStorage || !strings.EqualFold(expected.Method, grant.Method) || len(cube.Indicators) != len(grant.Fields) || len(requested) != len(grant.Fields) || len(requestedCodes) != len(grant.Codes) {
 			return uuid.Nil, errors.New("emquant: raw registration request scope mismatch")
 		}
@@ -100,12 +121,14 @@ func (r ArchiveRegistry) registerCube(ctx context.Context, dataset string, ref A
 				return uuid.Nil, errors.New("emquant: raw registration request instrument mismatch")
 			}
 		}
-		for _, code := range cube.Codes {
-			key := strings.ToUpper(strings.TrimSpace(code))
-			if !codes[key] {
-				return uuid.Nil, errors.New("emquant: raw registration returned unpermitted instrument")
+		if !calendar {
+			for _, code := range cube.Codes {
+				key := strings.ToUpper(strings.TrimSpace(code))
+				if !codes[key] {
+					return uuid.Nil, errors.New("emquant: raw registration returned unpermitted instrument")
+				}
+				delete(codes, key)
 			}
-			delete(codes, key)
 		}
 	}
 	var id uuid.UUID

@@ -67,22 +67,30 @@ func decimalCell(cell Cell) (decimal.Decimal, error) {
 // been archived and its response shape, source and units checked. An empty
 // result does not prove the market was closed or the security was suspended.
 func (c Collector) CollectDailyLiquidity(ctx context.Context, code, from, to string) ([]DailyLiquidity, error) {
-	if code == "" || strings.TrimSpace(code) != code || strings.ContainsAny(code, ",\x00") {
-		return nil, errors.New("emquant: invalid security")
-	}
-	start, err := time.Parse("2006-01-02", from)
+	start, end, err := dailyLiquidityRange(code, from, to)
 	if err != nil {
-		return nil, errors.New("emquant: invalid start date")
-	}
-	end, err := time.Parse("2006-01-02", to)
-	if err != nil || end.Before(start) || end.Sub(start) > 3660*24*time.Hour {
-		return nil, errors.New("emquant: invalid end date")
+		return nil, err
 	}
 	cube, ref, err := c.CollectCSD(ctx, code, dailyIndicators, from, to, dailyOptions)
 	if err != nil {
 		return nil, err
 	}
 	return mapDailyLiquidity(cube, ref, code, start, end)
+}
+
+func dailyLiquidityRange(code, from, to string) (time.Time, time.Time, error) {
+	if code == "" || strings.TrimSpace(code) != code || strings.ContainsAny(code, ",\x00") {
+		return time.Time{}, time.Time{}, errors.New("emquant: invalid security")
+	}
+	start, err := time.Parse("2006-01-02", from)
+	if err != nil {
+		return time.Time{}, time.Time{}, errors.New("emquant: invalid start date")
+	}
+	end, err := time.Parse("2006-01-02", to)
+	if err != nil || end.Before(start) || end.Sub(start) > 3660*24*time.Hour {
+		return time.Time{}, time.Time{}, errors.New("emquant: invalid end date")
+	}
+	return start, end, nil
 }
 
 func mapDailyLiquidity(c Cube, ref ArchiveRef, code string, start, end time.Time) ([]DailyLiquidity, error) {

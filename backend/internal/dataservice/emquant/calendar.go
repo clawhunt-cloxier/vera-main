@@ -1,10 +1,26 @@
 package emquant
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+func calendarRange(market, from, to string) (time.Time, time.Time, error) {
+	if market != "CNSESH" && market != "CNSESZ" {
+		return time.Time{}, time.Time{}, errors.New("emquant: unsupported calendar market")
+	}
+	start, err := time.Parse("2006-01-02", from)
+	if err != nil {
+		return time.Time{}, time.Time{}, errors.New("emquant: invalid calendar start")
+	}
+	end, err := time.Parse("2006-01-02", to)
+	if err != nil || end.Before(start) || end.Sub(start) > 3660*24*time.Hour {
+		return time.Time{}, time.Time{}, errors.New("emquant: invalid calendar end")
+	}
+	return start, end, nil
+}
 
 func parseVendorDate(s string) (time.Time, error) {
 	for _, layout := range []string{"2006/1/2", "2006-01-02"} {

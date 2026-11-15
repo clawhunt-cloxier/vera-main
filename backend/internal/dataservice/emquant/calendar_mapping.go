@@ -26,19 +26,12 @@ type MappedRecord struct {
 // archived request, content and observation time before creating records.
 // Missing days are not mapped to closed days, and no coverage is declared.
 func MapOpenDates(body []byte, ref ArchiveRef, market, from, to string) ([]MappedRecord, error) {
-	if market != "CNSESH" && market != "CNSESZ" {
-		return nil, errors.New("emquant: unsupported calendar market")
-	}
 	if ref.BodyRef == "" || ref.ReceivedAt.IsZero() || ref.ArchivedAt.IsZero() || ref.ArchivedAt.Before(ref.ReceivedAt) {
 		return nil, errors.New("emquant: missing archive provenance")
 	}
-	start, err := time.Parse("2006-01-02", from)
+	start, end, err := calendarRange(market, from, to)
 	if err != nil {
-		return nil, errors.New("emquant: invalid calendar start")
-	}
-	end, err := time.Parse("2006-01-02", to)
-	if err != nil || end.Before(start) || end.Sub(start) > 3660*24*time.Hour {
-		return nil, errors.New("emquant: invalid calendar end")
+		return nil, err
 	}
 	req, err := json.Marshal(request{Method: "tradedates", From: from, To: to, Options: "Market=" + market + ",Period=1,Order=1"})
 	if err != nil || ref.RequestFingerprint != digest(req) {

@@ -394,16 +394,9 @@ func (c Collector) CollectOpenDates(ctx context.Context, market, from, to string
 	if !ok || c.Store == nil {
 		return nil, ArchiveRef{}, errors.New("emquant: calendar fetcher and raw store are required")
 	}
-	if market != "CNSESH" && market != "CNSESZ" {
-		return nil, ArchiveRef{}, errors.New("emquant: unsupported calendar market")
-	}
-	start, err := time.Parse("2006-01-02", from)
+	start, end, err := calendarRange(market, from, to)
 	if err != nil {
-		return nil, ArchiveRef{}, errors.New("emquant: invalid calendar start")
-	}
-	end, err := time.Parse("2006-01-02", to)
-	if err != nil || end.Before(start) || end.Sub(start) > 3660*24*time.Hour {
-		return nil, ArchiveRef{}, errors.New("emquant: invalid calendar end")
+		return nil, ArchiveRef{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, ArchiveRef{}, err
