@@ -102,3 +102,5 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 用户于 2026-11-15 允许先交付非实时真实简报。`BriefService` 现已作为 Provider 接入应用，独立版本 demo.2 使用已确认单位的 VOLUME/AMOUNT/TURN 与当前证券名称观察。原有严格实时行情链路保持原门槛，未知字段不参与模型。新路径的原始归档、许可、不可变清单及每次模型/展示授权见 [技能规格](skills/stock-observation-brief.md) 和 [API](../API.md)。Canonical Records/Capabilities 仍不伪造完整覆盖；原登记的 ref.security/mkt.daily_bar 数据集仅分类原始对象，不宣称具备全部字段。
 
 2026-11-15 UTC 已用真实 Choice SDK、持久 SeaweedFS S3 与 deepseek-flash 完成应用链路验证：东方财富单股 limited 非实时简报，synthetic=false，4 次模型调用，报告数据最近日期为 2026-11-13。验收通过命令 `VERA_LIVE_BRIEF=1 go test ./internal/app -run TestLiveObservationBrief -count=1 -v`（其他秘密/授权变量单独注入）；真实原始数据与报告仅保存在受控本地/对象存储，不提交 Git。网站部署验收另记交接，不以本次进程内测试替代网站结果。
+
+网站也已于北京时间 2026-11-16 00:18 完成真实验收并保持启用：东方财富 300059.SZ 的非实时成交简报，网页提交、证据、PDF 均通过。范围和限制见 [最终交接](handoffs/2026-11-15-T014b-observation-brief-codex.md)。
