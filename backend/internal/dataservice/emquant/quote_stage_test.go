@@ -699,6 +699,34 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 		t.Fatal("upstream failure was presented as a published quote")
 	}
 	f.err = nil
+	taskWS, collectTask := syntheticQuoteTask(t, pool, entityID)
+	beforeCalls = f.calls
+	if _, err := runtime.CollectTaskQuotes(ctx, cat, "stage-test", "synthetic-product", license, secondPolicy, taskWS, collectTask, 1, 1); err == nil || f.calls != beforeCalls {
+		t.Fatal("unconfirmed task reached vendor")
+	}
+	syntheticQuoteIntent(t, pool, taskWS, collectTask, entityID)
+	if _, err := runtime.CollectTaskQuotes(ctx, cat, "stage-test", "synthetic-product", license, secondPolicy, taskWS, collectTask, 2, 1); err == nil || f.calls != beforeCalls {
+		t.Fatal("stale task epoch reached vendor")
+	}
+	f.quote.ObservedAt = time.Now().UTC()
+	publications, err := runtime.CollectTaskQuotes(ctx, cat, "stage-test", "synthetic-product", license, secondPolicy, taskWS, collectTask, 1, 1)
+	if err != nil || len(publications) != 1 || publications[0].EntityID != entityID || publications[0].Result.StageID == uuid.Nil || publications[0].Result.AvailableAt.IsZero() {
+		t.Fatalf("confirmed task collection: %v", err)
+	}
+	cancelWS, collectCancel := syntheticQuoteTask(t, pool, entityID)
+	syntheticQuoteIntent(t, pool, cancelWS, collectCancel, entityID)
+	f.quote.ObservedAt = time.Now().UTC()
+	runtime.collector.Gate = testGateFunc(func(ctx context.Context, call func() error) error {
+		if err := call(); err != nil {
+			return err
+		}
+		_, err := pool.Exec(ctx, `UPDATE research_tasks SET epoch=epoch+1,revision=revision+1,status='CANCEL_REQUESTED' WHERE id=$1`, collectCancel)
+		return err
+	})
+	if _, err := runtime.CollectTaskQuotes(ctx, cat, "stage-test", "synthetic-product", license, secondPolicy, cancelWS, collectCancel, 1, 1); err == nil {
+		t.Fatal("cancelled task collection returned success")
+	}
+	runtime.collector.Gate = collector.Collector.Gate
 	if _, err := pool.Exec(ctx, `UPDATE quote_mapping_policies SET revoked_at=clock_timestamp() WHERE id=$1`, policyID); err != nil {
 		t.Fatal(err)
 	}
