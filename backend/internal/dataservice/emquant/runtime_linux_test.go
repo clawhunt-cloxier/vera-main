@@ -57,11 +57,14 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	if strings.Contains(fmt.Sprintf("%v %#v", cfg, cfg), "pass") {
 		t.Fatal("credentials appeared in config formatting")
 	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE emquant_rate_state RENAME TO emquant_rate_state_unavailable`); err != nil {
+		t.Fatal(err)
+	}
 	if runtime, err := OpenRuntime(ctx, cfg); err == nil {
 		_ = runtime.Close()
 		t.Fatal("runtime opened without persistent rate state")
 	}
-	if _, err := pool.Exec(ctx, `CREATE TABLE emquant_rate_state (scope text PRIMARY KEY, in_flight boolean NOT NULL, next_allowed timestamptz NOT NULL)`); err != nil {
+	if _, err := pool.Exec(ctx, `ALTER TABLE emquant_rate_state_unavailable RENAME TO emquant_rate_state`); err != nil {
 		t.Fatal(err)
 	}
 	runtime, err := OpenRuntime(ctx, cfg)
@@ -239,9 +242,6 @@ func TestLiveRuntime(t *testing.T) {
 	}
 	pool := dbtest.New(t)
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, `CREATE TABLE emquant_rate_state (scope text PRIMARY KEY, in_flight boolean NOT NULL, next_allowed timestamptz NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
 	s3Client := testS3Client(os.Getenv("EMQUANT_TEST_S3_ENDPOINT"), os.Getenv("EMQUANT_TEST_S3_ACCESS"), os.Getenv("EMQUANT_TEST_S3_SECRET"))
 	cfg := RuntimeConfig{Library: os.Getenv("EMQUANT_LIBRARY"), Username: os.Getenv("EMQUANT_USER"), Password: os.Getenv("EMQUANT_PASSWORD"), Database: pool, ObjectClient: s3Client, Bucket: os.Getenv("EMQUANT_TEST_S3_BUCKET"), Prefix: "runtime-integration", AccountScope: "isolated-integration-account", MinInterval: interval, RateLimitCooldown: cooldown}
 	runtime, err := OpenRuntime(ctx, cfg)

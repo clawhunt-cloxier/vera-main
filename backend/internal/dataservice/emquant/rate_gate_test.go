@@ -3,11 +3,15 @@ package emquant
 import (
 	"context"
 	"errors"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
 )
@@ -15,10 +19,6 @@ import (
 func TestPostgreSQLRateGateSerializesAndRecovers(t *testing.T) {
 	pool := dbtest.New(t)
 	ctx := context.Background()
-	// This is a test-only schema. Production must use an agreed migration.
-	if _, err := pool.Exec(ctx, `CREATE TABLE emquant_rate_state (scope text PRIMARY KEY, in_flight boolean NOT NULL, next_allowed timestamptz NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
 	gate := PostgreSQLRateGate{Pool: pool, Scope: "synthetic-account", MinInterval: 90 * time.Millisecond, RateLimitCooldown: 200 * time.Millisecond}
 	var mu sync.Mutex
 	var active atomic.Int32
@@ -85,10 +85,38 @@ func TestPostgreSQLRateGateSerializesAndRecovers(t *testing.T) {
 
 func TestPostgreSQLRateGateRequiresStateTable(t *testing.T) {
 	pool := dbtest.New(t)
+	if _, err := pool.Exec(context.Background(), `DROP TABLE emquant_rate_state`); err != nil {
+		t.Fatal(err)
+	}
 	called := false
 	gate := PostgreSQLRateGate{Pool: pool, Scope: "synthetic-account", MinInterval: time.Second, RateLimitCooldown: time.Second}
 	if err := gate.Do(context.Background(), func() error { called = true; return nil }); err == nil || called {
 		t.Fatal("missing persistent state allowed vendor call")
+	}
+}
+
+func TestRateStateMigrationProtectsAccountState(t *testing.T) {
+	pool := dbtest.New(t)
+	ctx := context.Background()
+	var allowed bool
+	if err := pool.QueryRow(ctx, `SELECT has_table_privilege('vera_app', 'emquant_rate_state', 'UPDATE')`).Scan(&allowed); err != nil || allowed {
+		t.Fatalf("workspace role can alter account gate: allowed=%v err=%v", allowed, err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO emquant_rate_state(scope,in_flight,next_allowed) VALUES('synthetic-account',true,clock_timestamp())`); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	defer sqlDB.Close()
+	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, os.DirFS("../../platform/db/migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Down(ctx); err == nil {
+		t.Fatal("rollback discarded persistent account fencing state")
+	}
+	var inFlight bool
+	if err := pool.QueryRow(ctx, `SELECT in_flight FROM emquant_rate_state WHERE scope='synthetic-account'`).Scan(&inFlight); err != nil || !inFlight {
+		t.Fatalf("rollback did not retain in-flight state: in_flight=%v err=%v", inFlight, err)
 	}
 }
 
@@ -99,9 +127,6 @@ func TestPostgreSQLRateGateSessionLossWhileCallRuns(t *testing.T) {
 	pool := dbtest.New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if _, err := pool.Exec(ctx, `CREATE TABLE emquant_rate_state (scope text PRIMARY KEY, in_flight boolean NOT NULL, next_allowed timestamptz NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
 	gate := PostgreSQLRateGate{Pool: pool, Scope: "synthetic-session-loss", MinInterval: 90 * time.Millisecond, RateLimitCooldown: 200 * time.Millisecond}
 	entered := make(chan struct{})
 	release := make(chan struct{})
