@@ -57,6 +57,9 @@ func TestLegacyWorkerRefusesCollectLatest(t *testing.T) {
 		FROM research_plans WHERE id=(SELECT plan_id FROM research_tasks WHERE id=$1) RETURNING id`, original.ID).Scan(&planID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := e.CreateTask(ctx, original.Workspace, planID, original.PlanHash, nil); err == nil {
+		t.Fatal("legacy confirmation accepted a collect_latest plan")
+	}
 	if _, err := e.Pool.Exec(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget)
 		SELECT workspace_id,$2,skill_id,skill_version,subject_id,params,sections,as_of,'QUEUED',deadline,budget FROM research_tasks WHERE id=$1`, original.ID, planID); err == nil {
 		t.Fatal("task mode different from plan was accepted")

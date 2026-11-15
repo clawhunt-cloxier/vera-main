@@ -75,6 +75,7 @@ type Plan struct {
 	P95Seconds   int                   `json:"p95_seconds"`
 	QuotaCost    int                   `json:"quota_cost"`
 	ExpiresAt    time.Time             `json:"expires_at"`
+	SnapshotMode string                `json:"-"`
 }
 
 const planTTL = 30 * time.Minute
@@ -155,9 +156,9 @@ func (e *Engine) LoadPlan(ctx context.Context, ws, id uuid.UUID) (*Plan, error) 
 	var params, secs []byte
 	var subject uuid.UUID
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT id, plan_hash, skill_id, skill_version, subject_id, params, sections, as_of, executable, reason_code, expires_at
+		return tx.QueryRow(ctx, `SELECT id, plan_hash, skill_id, skill_version, subject_id, params, sections, as_of, executable, reason_code, expires_at, snapshot_mode
 			FROM research_plans WHERE id=$1`, id).Scan(&p.ID, &p.Hash, &p.SkillID, &p.SkillVersion, &subject, &params, &secs, &p.AsOf,
-			&p.Executable, &p.ReasonCode, &p.ExpiresAt)
+			&p.Executable, &p.ReasonCode, &p.ExpiresAt, &p.SnapshotMode)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errs.NotFound()
@@ -275,6 +276,8 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 	}
 	sk := e.Skills[plan.SkillID]
 	switch {
+	case plan.SnapshotMode != "fixed_legacy":
+		return uuid.Nil, errs.Conflict("PLAN_VERSION_MISMATCH", "该计划需要新版确认流程")
 	case plan.Hash != hash:
 		return uuid.Nil, errs.Conflict("PLAN_CHANGED", "研究计划已变更，请重新确认")
 	case time.Now().After(plan.ExpiresAt):

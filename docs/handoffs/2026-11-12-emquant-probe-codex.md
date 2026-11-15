@@ -109,8 +109,9 @@
 ## 未完成与下一步
 
 - DeepSeek [官方更新](https://api-docs.deepseek.com/updates/)将 `deepseek-flash` 对应 V4.1 Flash，并说明服务端搜索需显式启用工具；模型网关与环境配置现在拒绝工具/搜索请求字段，避免绕开登记数据源。该保护不宣称验证厂商内部行为。
+- 简版计划定义 `stock_analysis` v1.1.0-demo.1 固定单股实时行情为必需，资料和财报为可选，并将主体、预览时点、实时要求、数据集及章节状态纳入哈希。`RegisterBriefIntent` 可在受信确认事务中重新推导并核验哈希、工作区和任务，检查行情的当前存储/展示/模型用途及实时映射政策，再原子登记行情意图及数据要求；测试覆盖回滚、重复确认、未知延迟和权限不足以及角色/工作区隔离。当前没有计划 API、真实能力登记、任务创建或 worker 接线，不能宣称可执行。简版规格和模拟评测样例见 docs/skills/stock-analysis-demo.md。
 - 单股简版事实准备：`BoundQuoteFacts` 在已有事务内从完整绑定快照读取经模型用途重新授权的行情，生成现有 Harness 事实并保留未舍入价格及归档字段位置；未知延迟和交易状态明确保留限制。它尚未连接任务、模型调用、证据 API 或报告，证据展示仍须重新授权。合成样本通过事实与禁用表达检查。
-- 2026-11-15 用户授权先做单股简版真实数据研报并部署测试网站，范围见 ADR-0005；三项完整技能和 V02 仍未完成。服务器模型配置存在，writer/verifier/router 的 model ID 均为 `deepseek-flash`；仅读取配置存在性与非密钥标识，未记录密钥。服务器当时运行 `vera demo`，数据提供方为默认 fixture，不能宣称已连接真实数据。最新 `origin/dev`（PR #29 前端）已合并至本工作分支。
+- 2026-11-15 用户授权先做单股简版真实数据研报并部署测试网站，范围见 ADR-0005；三项完整技能和 V02 仍未完成。服务器模型配置存在，writer/verifier/router 的 model ID 均为 `deepseek-flash`；三者附加配置未发现工具字段。仅读取配置存在性与非密钥标识，未记录密钥。服务器当时运行 `vera demo`，数据提供方为默认 fixture，不能宣称已连接真实数据。最新 `origin/dev`（PR #29 前端）已合并至本工作分支。
 - SDK 随附 `python3/EmQuantAPI.py` 将 `csq` 描述为异步实时行情、`csqsnapshot` 描述为同步快照（最多 64 指标）；`python3/demo.py` 在订阅示例中使用 `TIME,Now,Volume`，快照示例使用 `NOW`。随附 PDF 的 `cfc` 仅校验 CSS/CSD/CSES，不能据此证明行情快照的 `TIME` 时区或账户实时延迟。
 - 测试网站镜像原先以 `CGO_ENABLED=0` 构建，无法加载 Choice 原生库；本分支改为 Debian Bookworm 构建并启用 cgo，在运行镜像提供 C++ 运行时依赖。本地 cgo 构建与原生模拟 SDK 竞态测试通过；本地 Docker daemon 无访问权限，新增 CI 镜像构建任务及合成动态库加载测试；提交 `13933b8` 的 Verify run `43708630732` 中 `native-image` 已通过，完整 Verify 及部署环境真实 SDK 挂载仍需验证。
 
