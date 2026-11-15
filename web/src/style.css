@@ -1145,3 +1145,36 @@ tr:hover {
     margin: 15mm;
   }
 }
+
+/* Test responsive breakpoints */
+@media (min-width: 2560px) {
+  main {
+    max-width: 1600px;
+  }
+}
+
+@media (max-width: 1200px) {
+  main {
+    padding: clamp(16px, 3vw, 32px);
+  }
+
+  h1 {
+    font-size: clamp(28px, 4vw, 40px);
+  }
+}
+
+@media (max-width: 768px) {
+  .report {
+    grid-template-columns: 1fr;
+  }
+
+  .app-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
