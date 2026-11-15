@@ -76,3 +76,5 @@ OpenAPI 中的 Claim、Evidence 是报告页的读取投影，不是模型的输
 新计划版本 `stock_analysis/1.1.0-demo.2`，参数为空，`snapshot_mode=collect_latest`，`quote_requirement=null`。计划/任务 `as_of` 是预览时间；确认后采集，任务 `snapshot_as_of` 在冻结前为空、冻结后不可变。确认必须使用该协议；旧客户端不得创建或确认新计划。计划、任务与报告新增字段均为兼容的可选字段，旧任务仍用 fixed_legacy。报告 as_of 与 snapshot_as_of 均为实际冻结时间。
 
 报告只提供真实厂商日成交观察和完整来源追溯，标为 limited、非实时；证据的 received_at 是实际采集时间，event_at/published_at 为空表示未确认，不能由序列日期伪造。证据只对已交付且属于当前 workspace 的报告开放，每次读取（含 PDF/series）重新核验完整快照、原始对象及当前展示许可；模型每次发送也独立核验模型用途。未接入的财务/实时字段不送模型。
+
+真实成交观察的证券 `status` 可为 `unknown`，表示尚未核实交易状态；不得据此推断停牌或休市。证据 `origin` 使用既有 `vendor_derived`，不将厂商观察冒充交易所官方发布。

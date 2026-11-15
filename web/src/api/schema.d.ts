@@ -464,7 +464,7 @@ export interface components {
             symbol: string | null;
             venue: string | null;
             /** @enum {unknown} */
-            status: "listed" | "suspended" | "st" | "delisting" | "delisted" | "active";
+            status: "listed" | "suspended" | "st" | "delisting" | "delisted" | "active" | "unknown";
             /** @description Industry taxonomy and version, e.g. SW2021 L2 */
             classification: string | null;
             skills: {

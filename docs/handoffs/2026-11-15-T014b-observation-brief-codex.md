@@ -16,24 +16,26 @@
 
 ## 实际真实调用证据
 
-2026-11-15 UTC，显式 `VERA_LIVE_BRIEF=1 go test ./internal/app -run TestLiveObservationBrief -count=1 -v` 通过（随后有权限/并发回归修正，网站验收仍待完成）。
+2026-11-15 UTC，显式 `VERA_LIVE_BRIEF=1 go test ./internal/app -run TestLiveObservationBrief -count=1 -v` 通过（初次调用；最终提交复验及网站验收另见下文）。
 
 - 标的：东方财富 300059.SZ；Choice 原生 SDK、持久 SeaweedFS S3、DeepSeek `deepseek-flash`。
 - task：`01a1dfb1-a9bd-7cf2-a2e3-eee2c637a4a6`，synthetic=false，limited/非实时，4 次模型调用、10 条通过校验的结论，最后取得日成交日期 2026-11-13。
 - 原报告及日志仅保留于操作机私有目录，不提交厂商数据、凭证和授权原文。此次证明真实采集到报告的链路；不代表网站已切换。
 
+2026-11-15T15:27 UTC，提交 `34da841` 再次真实验收通过：task `01a1dfd2-0a75-77e8-b86b-9111b087cec1`，4 次 deepseek-flash 调用、6 条均带证据的结论，synthetic=false、limited，来源只有 Choice，最近日期仍为 2026-11-13。28.80 秒完成。一次本地 SSH S3 转发失效导致采集失败，恢复转发后通过，未修改数据或跳过归档。
+
 ## 独立工程复审
 
 由 `/root/review_brief` 独立只读检查当前改动（同 GitHub 操作账号，不伪造独立账号 approval）。范围包括契约、迁移、冻结绑定、授权、模型发送、HTTP/幂等、目录范围与部署。
 
-发现并修复：旧来源聚合污染、TURN 证据缺失、模型排队/重试授权过期、缓存目录与列表权限、取消被展示授权阻断及取消缓存重放、同库 fixture 回退，以及模型成功发送后许可事务提交失败被错误释放预算（现记 UNKNOWN 保留预留待对账）。审查未发现新的迁移/冻结/协议确定阻断。最终测试由主代理串行执行，审查代理不运行 DB 测试。
+发现并修复：旧来源聚合污染、TURN 证据缺失、模型排队/重试授权过期、缓存目录与列表权限、取消被展示授权阻断及取消缓存重放、同库 fixture 回退，以及模型成功发送后许可事务提交失败被错误释放预算（现记 UNKNOWN 保留预留待对账）。另补实际 HTTP 响应 Schema 校验，修复 Entity.status 缺 unknown 枚举和 Evidence.origin 错误枚举（改用既有 vendor_derived）；复审通过。兼容检查有 1 条提示：响应状态新增 unknown，客户端须容忍未知值，不以 listed/active 冒充验明状态。审查未发现新的迁移/冻结/协议确定阻断。最终测试由主代理串行执行，审查代理不运行 DB 测试。
 
 ## 验证进度
 
 - `TestObservationBriefDelivery`：通过，含原生 ABI 合成库→S3 HTTP→DB→计划/确认→模型→报告；重复交付、跨 workspace、旧协议、API/证据/PDF、归档破坏、证券范围、并发读取、撤销、取消与幂等、fixture 回退拒绝。
 - `TestAuthorizationRecheckedBeforeEachSend`：通过，重试前撤权不产生第二次上游调用，预留释放。
 - 前端 API 类型漂移、lint、format、build；文档、契约、兼容检查；分支清理 9 项与契约兼容脚本 15 项通过。
-- 最终 `go test -race ./...` 正在执行，临时 PostgreSQL 改用 home 磁盘，`GOFLAGS=-p=1` 避免先前 tmpfs 空间不足。此前失败尝试不记为成功。
+- 提交 `34da841` 的完整 `go test -race ./...`、`go vet ./...`、Go lint（0 issues）均通过；临时 PostgreSQL 改用 home 磁盘，`GOFLAGS=-p=1` 避免先前 tmpfs 空间不足。此前失败尝试不记为成功。包含 HTTP 契约小修的最终工作树再次通过完整 race/vet/lint，前端类型/lint/format/build 同样通过；远端 Verify 尚待最终结果。
 
 ## 下一步与边界
 

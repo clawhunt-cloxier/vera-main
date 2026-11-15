@@ -93,7 +93,7 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 		loc := "原始归档 SHA-256 " + raw.Source.BodySHA256 + "；$.data.Values（与 Codes/Indicators/Dates 轴对应）"
 		excerpt := strings.Join(lines, "；")
 		basis := "当前采集的 Choice 原始返回；不证明首次发布时间、历史版本或实时性"
-		httpx.JSON(w, r, 200, Evidence{ID: id, DatasetID: raw.DatasetID, Provider: "Choice / 东方财富", Origin: "vendor", SourceTier: "L2", Title: o.Name + " · " + label, Label: label, Basis: &basis, ReceivedAt: &raw.Source.ReceivedAt, AvailableAt: o.Cutoff, LatencyMode: "unknown", Locator: &loc, Excerpt: &excerpt, ContentHash: raw.Source.BodySHA256})
+		httpx.JSON(w, r, 200, Evidence{ID: id, DatasetID: raw.DatasetID, Provider: "Choice / 东方财富", Origin: "vendor_derived", SourceTier: "L2", Title: o.Name + " · " + label, Label: label, Basis: &basis, ReceivedAt: &raw.Source.ReceivedAt, AvailableAt: o.Cutoff, LatencyMode: "unknown", Locator: &loc, Excerpt: &excerpt, ContentHash: raw.Source.BodySHA256})
 		return nil
 	})
 	return true, err

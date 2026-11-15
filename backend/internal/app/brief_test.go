@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/shopspring/decimal"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
@@ -157,6 +159,37 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	schemaPath, err := filepath.Abs("../../../contracts/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaBody, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaDoc, err := jsonschema.UnmarshalJSON(strings.NewReader(string(schemaBody)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	compiler.AssertFormat()
+	if err := compiler.AddResource(schemaPath, schemaDoc); err != nil {
+		t.Fatal(err)
+	}
+	checkResponse := func(name string, body []byte) {
+		t.Helper()
+		schema, err := compiler.Compile(schemaPath + "#/components/schemas/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := jsonschema.UnmarshalJSON(strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := schema.Validate(value); err != nil {
+			t.Fatalf("%s response contract: %v", name, err)
+		}
+	}
 	const media = "application/vnd.vera.observation.v1+json"
 	request := func(method, path, body, accept, key string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -189,6 +222,8 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if rec := request("POST", "/api/v1/research-tasks", taskBody, media, key); rec.Code != 202 || rec.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("task replay: %d %s", rec.Code, rec.Body)
 	}
+	checkResponse("PlanResult", request("POST", "/api/v1/research-plans", planBody, media, "").Body.Bytes())
+	checkResponse("Task", request("GET", "/api/v1/research-tasks/"+id.String(), "", media, "").Body.Bytes())
 	var observation emquant.BriefObservation
 	if err := a.Brief.WithSnapshot(ctx, ws, id, dataservice.SourceDisplay, func(o emquant.BriefObservation) error { observation = o; return nil }); err != nil {
 		t.Fatal(err)
@@ -200,6 +235,8 @@ func TestObservationBriefDelivery(t *testing.T) {
 			t.Fatalf("read %s: %d %s", path, rec.Code, rec.Body)
 		}
 	}
+	checkResponse("Report", request("GET", reportPath, "", media, "").Body.Bytes())
+	checkResponse("Evidence", request("GET", evidencePath, "", media, "").Body.Bytes())
 	// Concurrent readers must not retain a connection while waiting for
 	// another database operation; the API's final authorization only flushes.
 	var readers sync.WaitGroup
