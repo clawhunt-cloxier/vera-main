@@ -13,5 +13,15 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': api, '/auth': api, '/dev-oidc': api, '/healthz': api, '/readyz': api },
   },
-  build: { target: 'es2022', sourcemap: false, chunkSizeWarningLimit: 1200 },
+  build: {
+    target: 'es2022',
+    sourcemap: false,
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      input: {
+        main: './index.html',
+        app: './app.html',
+      },
+    },
+  },
 });

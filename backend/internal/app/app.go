@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -160,14 +161,22 @@ func (a *App) HTTP() (http.Handler, error) {
 	return s.Handler(), nil
 }
 
-// spa serves the built web app with index.html fallback for client routes.
+// spa serves the built web app. The landing page (index.html) is served for
+// the root and marketing routes; the React SPA (app.html) is served as
+// fallback for /app/* and other authenticated routes.
 func spa(dir string) http.Handler {
 	fs := http.FileServer(http.Dir(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
 		if st, err := filepathStat(p); err != nil || st {
 			w.Header().Set("Cache-Control", "no-cache")
-			http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+			// Routes under /app belong to the React SPA (app.html).
+			// All other unknown paths fall back to the landing page (index.html).
+			fallback := "index.html"
+			if r.URL.Path == "/app" || strings.HasPrefix(r.URL.Path, "/app/") {
+				fallback = "app.html"
+			}
+			http.ServeFile(w, r, filepath.Join(dir, fallback))
 			return
 		}
 		if len(r.URL.Path) > 8 && r.URL.Path[:8] == "/assets/" {
