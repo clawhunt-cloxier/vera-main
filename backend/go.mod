@@ -17,7 +17,6 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/shopspring/decimal v1.5.0
 	github.com/tdewolff/canvas v0.0.0-20260923214215-09804640d00c
-	golang.org/x/crypto v0.44.0
 	golang.org/x/oauth2 v0.37.0
 )
 

@@ -5,7 +5,7 @@ ALTER TABLE users ADD COLUMN password_hash text;
 ALTER TABLE users ADD COLUMN auth_method text NOT NULL DEFAULT 'oidc' CHECK (auth_method IN ('oidc', 'password'));
 
 -- Demo account: administrator / administrator
--- Password hash for "administrator" using bcrypt with cost 12
+-- Password hash for "administrator" using PBKDF2-HMAC-SHA256 (100k iterations, 32-byte key)
 INSERT INTO users (issuer, subject, email, display_name, persona, auth_method, password_hash, created_at)
 VALUES (
   'local',
@@ -14,7 +14,7 @@ VALUES (
   '演示管理员',
   'analyst',
   'password',
-  '$2a$12$ZaJHO/L3DlKNz6GbEZV4wOLfxePRivBvJW8c/0W5M7wxILfnZdxz6',
+  'xCQITNssEmuvWIOtNQD0Zw==$Y+2ohWs0id+hMdNi7/NJtWA8Nc/L/xKRJzb5HI5/H0o=',
   now()
 )
 ON CONFLICT (issuer, subject) DO UPDATE SET

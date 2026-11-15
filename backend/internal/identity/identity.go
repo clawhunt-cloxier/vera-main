@@ -5,6 +5,7 @@ package identity
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -24,7 +25,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/audit"
@@ -480,7 +480,8 @@ func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(pwHash), []byte(req.Password)); err != nil {
+	// Verify password using PBKDF2 (salt is stored with hash in format: salt$hash)
+	if !verifyPasswordHash(req.Password, pwHash) {
 		httpx.Error(w, r, errs.Unauthorized("INVALID_CREDENTIALS", "账号或密码不正确"))
 		return
 	}
@@ -507,4 +508,31 @@ func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"return_to": returnTo,
 	})
+}
+
+// hashPassword creates a password hash using PBKDF2. Format: salt$hash (base64)
+func hashPassword(password string) string {
+	salt := make([]byte, 16)
+	rand.Read(salt)
+	// PBKDF2: 100k iterations, 32-byte key, SHA256
+	hash := pbkdf2.Key([]byte(password), salt, 100000, 32, sha256.New)
+	return base64.StdEncoding.EncodeToString(salt) + "$" + base64.StdEncoding.EncodeToString(hash)
+}
+
+// verifyPasswordHash checks if password matches the stored hash
+func verifyPasswordHash(password, storedHash string) bool {
+	parts := strings.Split(storedHash, "$")
+	if len(parts) != 2 {
+		return false
+	}
+	salt, err := base64.StdEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	storedHashBytes, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	hash := pbkdf2.Key([]byte(password), salt, 100000, 32, sha256.New)
+	return subtle.ConstantTimeCompare(hash, storedHashBytes) == 1
 }
