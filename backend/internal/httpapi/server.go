@@ -84,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	m.HandleFunc("GET /readyz", s.ready)
 	m.HandleFunc("GET /auth/login", s.ID.Login)
+	m.HandleFunc("POST /auth/login", s.ID.PasswordLogin)
 	m.HandleFunc("GET /auth/callback", s.ID.Callback)
 	m.Handle("POST /auth/logout", authNoWS(http.HandlerFunc(s.ID.Logout)))
 	m.Handle("GET /api/v1/me", authNoWS(h(s.me)))

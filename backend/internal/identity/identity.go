@@ -11,6 +11,7 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/audit"
@@ -440,4 +442,69 @@ func CreateInvites(ctx context.Context, pool *pgxpool.Pool, count, uses int, ttl
 		return audit.Record(ctx, tx, nil, actor, "invite.create", "", "success", map[string]any{"count": count, "uses": uses, "note": note})
 	})
 	return codes, err
+}
+
+// PasswordLogin authenticates using username and password, creates session and sets cookie
+func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		ReturnTo string `json:"return_to"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, r, errs.BadRequest("INVALID_REQUEST", "请求格式错误"))
+		return
+	}
+
+	if req.Username == "" || req.Password == "" {
+		httpx.Error(w, r, errs.BadRequest("EMPTY_CREDENTIALS", "账号和密码不能为空"))
+		return
+	}
+
+	var uid uuid.UUID
+	var pwHash string
+	var disabled *time.Time
+
+	err := r.Context().Value("pool").(*pgxpool.Pool).QueryRow(r.Context(),
+		`SELECT id, password_hash, disabled_at FROM users WHERE issuer='local' AND subject=$1`,
+		strings.ToLower(req.Username)).Scan(&uid, &pwHash, &disabled)
+
+	if err != nil || pwHash == "" {
+		httpx.Error(w, r, errs.Unauthorized("INVALID_CREDENTIALS", "账号或密码不正确"))
+		return
+	}
+
+	if disabled != nil {
+		httpx.Error(w, r, errs.Forbidden("ACCOUNT_DISABLED", "账号已停用"))
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(pwHash), []byte(req.Password)); err != nil {
+		httpx.Error(w, r, errs.Unauthorized("INVALID_CREDENTIALS", "账号或密码不正确"))
+		return
+	}
+
+	// Create session
+	sid, err := s.startSession(r.Context(), "local", strings.ToLower(req.Username), "", "")
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	s.setCookie(w, sid.token, SessionTTL)
+
+	returnTo := req.ReturnTo
+	if returnTo == "" || !strings.HasPrefix(returnTo, "/") {
+		returnTo = "/app"
+	}
+	if sid.workspace == nil {
+		returnTo = "/onboarding"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"return_to": returnTo,
+	})
 }
