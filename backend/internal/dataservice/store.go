@@ -108,14 +108,20 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 				lk = r.RecordKey
 			}
 			payload, _ := json.Marshal(r.Payload)
+			qs := r.QualityState
+			if qs == "" {
+				qs = "PASS"
+			}
 			rows = append(rows, []any{r.DatasetID, eid, r.RecordKey, lk, max(r.Version, 1), r.Period, r.PublishedAt, r.AvailableAt,
-				p.ID(), r.Origin, r.SourceTier, nilIfEmpty(r.Basis), payload, r.Hash()})
+				p.ID(), r.Origin, r.SourceTier, nilIfEmpty(r.Basis), payload, r.Hash(),
+				nilIfEmpty(r.RawRef), nilIfEmpty(r.RawSHA256), nilIfEmpty(r.RawLocator), nilIfZero(r.MappingVersion), qs})
 		}
 		if _, err := tx.Exec(ctx, `CREATE TEMP TABLE records_in (LIKE records INCLUDING DEFAULTS) ON COMMIT DROP`); err != nil {
 			return err
 		}
 		cols := []string{"dataset_id", "entity_id", "record_key", "logical_key", "record_version", "period", "published_at",
-			"available_at", "provider_id", "origin", "source_tier", "basis", "payload", "content_hash"}
+			"available_at", "provider_id", "origin", "source_tier", "basis", "payload", "content_hash",
+			"raw_ref", "raw_sha256", "raw_locator", "mapping_version", "quality_state"}
 		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"records_in"}, cols, pgx.CopyFromRows(rows)); err != nil {
 			return err
 		}
@@ -129,9 +135,11 @@ func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (
             SELECT 1 FROM records_in i JOIN records r USING (dataset_id, record_key, record_version)
             WHERE ROW(r.entity_id, r.logical_key, r.period, r.published_at, r.available_at,
-                      r.provider_id, r.origin, r.source_tier, r.basis, r.payload, r.content_hash)
+                      r.provider_id, r.origin, r.source_tier, r.basis, r.payload, r.content_hash,
+                      r.raw_ref, r.raw_sha256, r.raw_locator, r.mapping_version)
               IS DISTINCT FROM ROW(i.entity_id, i.logical_key, i.period, i.published_at, i.available_at,
-                      i.provider_id, i.origin, i.source_tier, i.basis, i.payload, i.content_hash)
+                      i.provider_id, i.origin, i.source_tier, i.basis, i.payload, i.content_hash,
+                      i.raw_ref, i.raw_sha256, i.raw_locator, i.mapping_version)
         )`).Scan(&conflict); err != nil {
 			return err
 		}
@@ -165,22 +173,34 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
+func nilIfZero(n int) *int {
+	if n == 0 {
+		return nil
+	}
+	return &n
+}
+
 // StoredRecord is a record as read back for research, with its evidence identity.
 type StoredRecord struct {
-	ID          uuid.UUID
-	DatasetID   string
-	EntityID    *uuid.UUID
-	RecordKey   string
-	Version     int
-	Period      *time.Time
-	PublishedAt *time.Time
-	AvailableAt time.Time
-	ProviderID  string
-	Origin      string
-	SourceTier  string
-	Basis       string
-	Payload     map[string]any
-	ContentHash string
+	ID             uuid.UUID
+	DatasetID      string
+	EntityID       *uuid.UUID
+	RecordKey      string
+	Version        int
+	Period         *time.Time
+	PublishedAt    *time.Time
+	AvailableAt    time.Time
+	ProviderID     string
+	Origin         string
+	SourceTier     string
+	Basis          string
+	Payload        map[string]any
+	ContentHash    string
+	QualityState   string
+	RawRef         *string
+	RawSHA256      *string
+	RawLocator     *string
+	MappingVersion *int
 }
 
 // Query selects the latest revision of each logical record available at asOf.
@@ -193,7 +213,8 @@ type Query struct {
 }
 
 const recordCols = `r.id, r.dataset_id, r.entity_id, r.record_key, r.record_version, r.period, r.published_at,
-		r.available_at, r.provider_id, r.origin, r.source_tier, coalesce(r.basis,''), r.payload, r.content_hash`
+		r.available_at, r.provider_id, r.origin, r.source_tier, coalesce(r.basis,''), r.payload, r.content_hash,
+		r.quality_state, r.raw_ref, r.raw_sha256, r.raw_locator, r.mapping_version`
 
 // Financial facts require a known disclosure time. Other sources may not have
 // one, but when supplied it must never be later than the snapshot cutoff.
@@ -209,7 +230,8 @@ const realSourceFilter = ` AND (NOT %s::bool OR (NOT p.synthetic AND p.kind='ven
 func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
 	var r StoredRecord
 	err := row.Scan(&r.ID, &r.DatasetID, &r.EntityID, &r.RecordKey, &r.Version, &r.Period, &r.PublishedAt, &r.AvailableAt,
-		&r.ProviderID, &r.Origin, &r.SourceTier, &r.Basis, &r.Payload, &r.ContentHash)
+		&r.ProviderID, &r.Origin, &r.SourceTier, &r.Basis, &r.Payload, &r.ContentHash,
+		&r.QualityState, &r.RawRef, &r.RawSHA256, &r.RawLocator, &r.MappingVersion)
 	return r, err
 }
 
@@ -219,6 +241,7 @@ func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
 		WHERE r.dataset_id = ANY($1) AND ` + visibleAtCutoff + `
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
 		AND (NOT $6::bool OR p.allow_model_processing)` + fmt.Sprintf(realSourceFilter, "$7") + `
+		AND r.quality_state IN ('PASS','WARN')
 		ORDER BY r.dataset_id, r.logical_key, r.record_version DESC`
 	var ents []uuid.UUID
 	if len(q.EntityIDs) > 0 {
@@ -249,9 +272,11 @@ func sortRecords(out []StoredRecord) {
 }
 
 // Coverage reports which datasets have at least one record per entity as of asOf (capability check for plans).
+// Only PASS/WARN records count; QUARANTINED/REJECTED are excluded.
 func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Time) (map[uuid.UUID]map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT r.entity_id, r.dataset_id FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.entity_id = ANY($1) AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3"), entities, asOf, s.excludeSynthetic)
+		WHERE r.entity_id = ANY($1) AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
+		AND r.quality_state IN ('PASS','WARN')`, entities, asOf, s.excludeSynthetic)
 	if err != nil {
 		return nil, err
 	}
@@ -271,11 +296,13 @@ func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Ti
 	return out, rows.Err()
 }
 
-// HasGlobal reports whether an entity-less dataset (calendar, index bars, connect turnover) has data as of asOf.
+// HasGlobal reports whether an entity-less dataset has data as of asOf.
+// Only PASS/WARN records count.
 func (s *Store) HasGlobal(ctx context.Context, dataset string, asOf time.Time) (bool, error) {
 	var ok bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
-		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`)`, dataset, asOf, s.excludeSynthetic).Scan(&ok)
+		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
+		AND r.quality_state IN ('PASS','WARN'))`, dataset, asOf, s.excludeSynthetic).Scan(&ok)
 	return ok, err
 }
 
@@ -298,7 +325,8 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 		return asOf, nil, fmt.Errorf("snapshot %s: manifest hash mismatch", hash)
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id
-		WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3"), ids, asOf, s.excludeSynthetic)
+		WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
+		AND r.quality_state IN ('PASS','WARN')`, ids, asOf, s.excludeSynthetic)
 	if err != nil {
 		return asOf, nil, err
 	}
@@ -314,6 +342,8 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 }
 
 // Freeze stores an eligible record set for model research and returns its hash.
+// It rejects any record whose quality_state is QUARANTINED or REJECTED before
+// performing the temporal eligibility check, so bad data cannot enter a snapshot.
 func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (string, error) {
 	// PostgreSQL timestamptz stores microseconds; hash the same instant that
 	// will be persisted rather than discarding subsecond precision or hashing
@@ -325,8 +355,13 @@ func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (st
 	hash := snapshotDigest(asOf, sorted, time.RFC3339Nano, "vera.snapshot.v2\x00")
 	legacyHash := snapshotDigest(asOf, sorted, time.RFC3339, "")
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Lock and qualify records in a single query so that a concurrent
+		// quality_state change between check and lock cannot slip a bad
+		// record into the snapshot. FOR SHARE holds an implicit row lock that
+		// blocks quality_state updates until the transaction commits.
 		rows, err := tx.Query(ctx, `SELECT r.id FROM records r JOIN providers p ON p.id=r.provider_id
-			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+` FOR SHARE OF r,p`, sorted, asOf, s.excludeSynthetic)
+			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
+			AND r.quality_state IN ('PASS','WARN') FOR SHARE OF r,p`, sorted, asOf, s.excludeSynthetic)
 		if err != nil {
 			return err
 		}
@@ -340,6 +375,17 @@ func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (st
 			return err
 		}
 		if count != len(sorted) {
+			// Distinguish quality rejection from temporal/permission rejection
+			// so the caller gets an actionable message.
+			var badCount int
+			if qerr := tx.QueryRow(ctx,
+				`SELECT count(*) FROM records WHERE id = ANY($1) AND quality_state NOT IN ('PASS','WARN')`,
+				sorted).Scan(&badCount); qerr != nil {
+				return fmt.Errorf("freeze: eligibility check failed: %w", qerr)
+			}
+			if badCount > 0 {
+				return fmt.Errorf("freeze: %d record(s) have QUARANTINED or REJECTED quality state", badCount)
+			}
 			return fmt.Errorf("snapshot contains missing, temporally ineligible, or currently unpermitted records")
 		}
 		// Preserve a previously frozen legacy snapshot only when its stored

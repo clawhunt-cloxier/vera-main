@@ -1,0 +1,38 @@
+# Fixture mapping: mkt.daily_bar
+# This mapping is for the fixture (synthetic) provider only.
+# Real vendor mappings go in mappings/<vendor_id>/<dataset>.yaml.
+provider: fixture
+provider_dataset: mkt_daily_bar
+target: mkt.daily_bar
+version: 1
+fields:
+  - target: open
+    source: $.open
+    unit: CNY
+    transform: decimal
+  - target: high
+    source: $.high
+    unit: CNY
+    transform: decimal
+  - target: low
+    source: $.low
+    unit: CNY
+    transform: decimal
+  - target: close
+    source: $.close
+    unit: CNY
+    transform: decimal
+  - target: volume
+    source: $.volume
+    unit: share
+    transform: decimal
+  - target: amount
+    source: $.amount
+    unit: CNY
+    transform: decimal
+  - target: trade_date
+    source: $.trade_date
+    transform: string
+basis:
+  adjust: none
+  tier: L2

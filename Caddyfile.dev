@@ -1,0 +1,29 @@
+# Development Caddyfile - reverse proxy for local development
+{
+	auto_https off
+	admin off
+}
+
+# API server
+:3000 {
+	handle /healthz {
+		respond "OK" 200
+	}
+
+	handle /api/* {
+		reverse_proxy host.docker.internal:8000
+	}
+
+	handle /auth/* {
+		reverse_proxy keycloak:8080
+	}
+
+	handle {
+		reverse_proxy host.docker.internal:5173
+	}
+}
+
+# Keycloak admin (optional, for direct access)
+:8081 {
+	reverse_proxy keycloak:8080
+}
