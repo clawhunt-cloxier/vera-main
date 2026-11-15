@@ -51,3 +51,40 @@ func TestMapArchivedQuoteRequiresBoundSourceAndPolicyReferences(t *testing.T) {
 		t.Fatal("stale quote accepted")
 	}
 }
+
+func TestMapArchivedQuoteMapsTypedTradingStatus(t *testing.T) {
+	now := time.Now().UTC()
+	local := now.In(time.FixedZone("CST", 8*60*60))
+	hhmmss := int64(local.Hour()*10000 + local.Minute()*100 + local.Second())
+	f := &testFetcher{quote: Quote{ObservedAt: now, Data: Cube{
+		Codes: []string{"A.SH"}, Indicators: []string{"TIME", "NOW", "TRADESTATUS"}, Dates: []string{local.Format("2006-01-02")},
+		Values: []Cell{{Type: 6, Value: hhmmss}, {Type: 11, Value: 10.25}, {Type: 6, Value: int64(1)}},
+	}}}
+	s := &testRawStore{ref: "object://test/status"}
+	_, ref, err := (Collector{Fetcher: f, Store: s}).CollectQuote(context.Background(), "A.SH", "TIME,NOW,TRADESTATUS", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := QuoteMappingPolicy{
+		TimeConvention: "hhmmss-asia-shanghai", TimeEvidence: "time-proof", PriceUnit: "CNY", PriceEvidence: "unit-proof",
+		LatencyMode: "real_time", LatencyEvidence: "latency-proof", LicenseRef: "license", MaxAge: time.Minute,
+		StatusIndicator: "TRADESTATUS", StatusEvidence: "status-proof", StatusMapping: map[string]string{"i:1": "continuous", "i:2": "suspended"},
+	}
+	got, err := MapArchivedQuote(s.body, ref, "A.SH", now.Add(time.Second), policy)
+	if err != nil || got.MarketStatus != "continuous" || got.Locators["TRADESTATUS"] != "$.data.Values[2]" {
+		t.Fatalf("status mapping: %#v, %v", got, err)
+	}
+	for _, invalid := range []map[string]string{
+		{"i:01": "continuous"}, {"i:+1": "continuous"}, {"i:1x": "continuous"}, {"u:-1": "continuous"}, {"x:1": "continuous"},
+	} {
+		policy.StatusMapping = invalid
+		if _, err := QuotePolicyFields(policy); err == nil {
+			t.Fatalf("invalid typed status mapping accepted: %#v", invalid)
+		}
+	}
+	policy.StatusMapping = map[string]string{"i:99": "continuous"}
+	got, err = MapArchivedQuote(s.body, ref, "A.SH", now.Add(time.Second), policy)
+	if err != nil || got.MarketStatus != "unknown" {
+		t.Fatalf("unmapped status should remain unknown: %#v, %v", got, err)
+	}
+}

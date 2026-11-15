@@ -2,6 +2,7 @@ package emquant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -33,22 +34,28 @@ func (r *Runtime) CollectAndPublishQuote(ctx context.Context, catalog *dataservi
 	}
 	// Reject unrelated or expired policy and entity before consuming quota.
 	// Each subsequent stage rechecks these conditions under its own locks.
-	var eligible bool
-	if err := r.database.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM quote_mapping_policies q JOIN source_licenses l ON l.id=q.source_license_id
+	var statusIndicator, statusEvidence string
+	var statusMapping []byte
+	if err := r.database.QueryRow(ctx, `SELECT coalesce(q.status_indicator,''),coalesce(q.status_evidence_ref,''),coalesce(q.status_mapping,'{}'::jsonb)
+		FROM quote_mapping_policies q JOIN source_licenses l ON l.id=q.source_license_id
 		JOIN providers p ON p.id=l.provider_id
 		JOIN entities e ON e.id=$4 AND e.kind='stock' AND NOT e.synthetic AND e.code=$5
 		WHERE q.id=$1 AND l.id=$2 AND l.provider_id=$3 AND l.product_code=$6
 		AND q.dataset_id='mkt.intraday_quote' AND l.dataset_id=q.dataset_id
 		AND p.enabled AND p.kind='vendor' AND NOT p.synthetic AND q.revoked_at IS NULL
 		AND q.verified_at<=clock_timestamp() AND q.valid_from<=clock_timestamp()
-		AND (q.valid_until IS NULL OR q.valid_until>clock_timestamp()))`, policy, license, provider, entity, code, product).Scan(&eligible); err != nil {
+		AND (q.valid_until IS NULL OR q.valid_until>clock_timestamp())`, policy, license, provider, entity, code, product).Scan(&statusIndicator, &statusEvidence, &statusMapping); err != nil {
 		return QuoteIngestResult{}, fmt.Errorf("emquant: quote ingestion preflight: %w", err)
 	}
-	if !eligible {
-		return QuoteIngestResult{}, errors.New("emquant: quote ingestion policy or entity unavailable")
+	var mapping map[string]string
+	if err := json.Unmarshal(statusMapping, &mapping); err != nil {
+		return QuoteIngestResult{}, errors.New("emquant: invalid quote status mapping")
 	}
-	_, source, err := collector.CollectQuote(ctx, "mkt.intraday_quote", code, "TIME,NOW", "")
+	fields, err := QuotePolicyFields(QuoteMappingPolicy{StatusIndicator: statusIndicator, StatusEvidence: statusEvidence, StatusMapping: mapping})
+	if err != nil {
+		return QuoteIngestResult{}, err
+	}
+	_, source, err := collector.CollectQuote(ctx, "mkt.intraday_quote", code, strings.Join(fields, ","), "")
 	if err != nil {
 		return QuoteIngestResult{}, err
 	}

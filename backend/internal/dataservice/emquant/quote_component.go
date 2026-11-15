@@ -119,7 +119,7 @@ func (r *Runtime) FreezeQuoteComponent(ctx context.Context, tx pgx.Tx, boundary 
 	}
 	for _, quote := range view.Quotes {
 		grant := dataservice.SourceUseRequest{LicenseID: quote.LicenseID, ProviderID: quote.ProviderID, Product: quote.Product,
-			DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: []string{"TIME", "NOW"}, Codes: []string{quote.Code}, Use: dataservice.SourceModel}
+			DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: publishedQuoteFields(quote), Codes: []string{quote.Code}, Use: dataservice.SourceModel}
 		if err := dataservice.RequireSourceUse(ctx, tx, grant); err != nil {
 			return QuoteComponentRef{}, err
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,19 +54,29 @@ func (r *Runtime) PublishStagedQuote(ctx context.Context, stageID uuid.UUID) (ti
 		var fields, codes []string
 		var eventAt, receivedAt, stagedAt, fetchedAt, archivedAt time.Time
 		var maxAgeMS int64
+		var statusPolicy QuoteMappingPolicy
+		var statusMapping []byte
 		err := tx.QueryRow(ctx, `SELECT s.policy_id,o.source_license_id,s.entity_id,o.provider_id,l.product_code,o.dataset_id,s.security_code,o.vendor_fields,o.vendor_codes,
-			s.event_at,s.received_at,s.staged_at,o.fetched_at,o.archived_at,q.max_age_ms
+			s.event_at,s.received_at,s.staged_at,o.fetched_at,o.archived_at,q.max_age_ms,
+			coalesce(q.status_indicator,''),coalesce(q.status_evidence_ref,''),coalesce(q.status_mapping,'{}'::jsonb)
 			FROM staged_quotes s JOIN raw_objects o ON o.id=s.raw_object_id
 			JOIN quote_mapping_policies q ON q.id=s.policy_id AND q.source_license_id=o.source_license_id AND q.dataset_id=o.dataset_id
 			JOIN source_licenses l ON l.id=o.source_license_id
 			WHERE s.id=$1 AND o.vendor_method='CSQSNAPSHOT' AND o.dataset_id='mkt.intraday_quote'
 			AND o.content_hash=$2 AND o.stored_path=$3 AND o.request_fingerprint=$4 AND o.fetched_at=$5
 			FOR SHARE OF s,o,q`, stageID, hash, path, fingerprint, fetched).Scan(&policyID, &licenseID, &entityID, &provider, &product, &dataset, &code, &fields, &codes,
-			&eventAt, &receivedAt, &stagedAt, &fetchedAt, &archivedAt, &maxAgeMS)
+			&eventAt, &receivedAt, &stagedAt, &fetchedAt, &archivedAt, &maxAgeMS, &statusPolicy.StatusIndicator, &statusPolicy.StatusEvidence, &statusMapping)
 		if err != nil {
 			return fmt.Errorf("emquant: staged quote unavailable: %w", err)
 		}
-		if len(fields) != 2 || fields[0] != "TIME" || fields[1] != "NOW" || len(codes) != 1 || codes[0] != code {
+		if err := json.Unmarshal(statusMapping, &statusPolicy.StatusMapping); err != nil {
+			return errors.New("emquant: invalid quote status mapping")
+		}
+		expectedFields, err := QuotePolicyFields(statusPolicy)
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(fields, expectedFields) || len(codes) != 1 || codes[0] != code {
 			return errors.New("emquant: staged quote source scope mismatch")
 		}
 		var entity uuid.UUID

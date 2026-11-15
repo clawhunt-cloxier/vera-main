@@ -105,7 +105,7 @@ func (r *Runtime) ReauthorizeQuoteComponent(ctx context.Context, tx pgx.Tx, work
 	// returning without performing any further remote reads under this lock.
 	for _, quote := range doc.View.Quotes {
 		grant := dataservice.SourceUseRequest{LicenseID: quote.LicenseID, ProviderID: quote.ProviderID, Product: quote.Product,
-			DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: []string{"TIME", "NOW"}, Codes: []string{quote.Code}, Use: use}
+			DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: publishedQuoteFields(quote), Codes: []string{quote.Code}, Use: use}
 		if err := dataservice.RequireSourceUse(ctx, tx, grant); err != nil {
 			return err
 		}
@@ -126,25 +126,32 @@ func (r *Runtime) reauthorizeQuote(ctx context.Context, tx pgx.Tx, original Publ
 	var policy QuoteMappingPolicy
 	var maxAgeMS int64
 	var payload, locators string
+	var statusMapping []byte
 	err := tx.QueryRow(ctx, `SELECT s.id,s.entity_id,s.raw_object_id,s.policy_id,o.source_license_id,o.provider_id,l.product_code,s.security_code,
 		s.event_at,s.received_at,pub.available_at,q.latency_mode,s.payload->>'market_status',o.content_hash,o.stored_path,o.request_fingerprint,
-		o.fetched_at,o.archived_at,o.vendor_fields,o.vendor_codes,q.time_convention,q.time_evidence_ref,q.price_unit,q.price_evidence_ref,coalesce(q.latency_evidence_ref,''),q.max_age_ms,s.payload::text,s.field_locators::text
+		o.fetched_at,o.archived_at,o.vendor_fields,o.vendor_codes,q.time_convention,q.time_evidence_ref,q.price_unit,q.price_evidence_ref,coalesce(q.latency_evidence_ref,''),q.max_age_ms,
+		coalesce(q.status_indicator,''),coalesce(q.status_evidence_ref,''),coalesce(q.status_mapping,'{}'::jsonb),s.payload::text,s.field_locators::text
 		FROM staged_quotes s JOIN quote_publications pub ON pub.staged_quote_id=s.id
 		JOIN raw_objects o ON o.id=s.raw_object_id AND o.source_license_id IS NOT NULL
 		JOIN source_licenses l ON l.id=o.source_license_id AND l.provider_id=o.provider_id AND l.dataset_id=o.dataset_id
 		JOIN quote_mapping_policies q ON q.id=s.policy_id AND q.source_license_id=l.id AND q.dataset_id=o.dataset_id
 		JOIN entities e ON e.id=s.entity_id AND e.kind='stock' AND NOT e.synthetic AND e.code=s.security_code
 		WHERE s.id=$1 AND s.entity_id=$2 AND s.raw_object_id=$3 AND s.policy_id=$4 AND o.source_license_id=$5
-		AND o.dataset_id='mkt.intraday_quote' AND o.vendor_method='CSQSNAPSHOT' AND o.vendor_fields=ARRAY['TIME','NOW']::text[] AND o.vendor_codes=ARRAY[s.security_code]::text[]
+		AND o.dataset_id='mkt.intraday_quote' AND o.vendor_method='CSQSNAPSHOT' AND o.vendor_fields=CASE WHEN q.status_indicator IS NULL THEN ARRAY['TIME','NOW']::text[] ELSE ARRAY['TIME','NOW',q.status_indicator]::text[] END AND o.vendor_codes=ARRAY[s.security_code]::text[]
 		AND pub.available_at<=$6 AND s.event_at<=$6 AND s.received_at<=$6 AND o.fetched_at<=pub.available_at AND o.archived_at<=pub.available_at AND s.staged_at<=pub.available_at
 		AND q.revoked_at IS NULL AND q.verified_at<=$6 AND q.valid_from<=$6 AND (q.valid_until IS NULL OR q.valid_until>$6)
 		FOR SHARE OF s,o,q,pub,e`, original.StageID, original.EntityID, original.RawObjectID, original.PolicyID, original.LicenseID, cutoff).
 		Scan(&q.StageID, &q.EntityID, &q.RawObjectID, &q.PolicyID, &q.LicenseID, &q.ProviderID, &q.Product, &q.Code,
 			&q.EventAt, &q.ReceivedAt, &q.AvailableAt, &q.LatencyMode, &q.MarketState, &q.RawSHA256, &q.RawRef, &fingerprint,
-			&fetched, &archived, &fields, &codes, &policy.TimeConvention, &policy.TimeEvidence, &policy.PriceUnit, &policy.PriceEvidence, &policy.LatencyEvidence, &maxAgeMS, &payload, &locators)
+			&fetched, &archived, &fields, &codes, &policy.TimeConvention, &policy.TimeEvidence, &policy.PriceUnit, &policy.PriceEvidence, &policy.LatencyEvidence, &maxAgeMS,
+			&policy.StatusIndicator, &policy.StatusEvidence, &statusMapping, &payload, &locators)
 	if err != nil {
 		return fmt.Errorf("emquant: frozen quote source unavailable: %w", err)
 	}
+	if err := json.Unmarshal(statusMapping, &policy.StatusMapping); err != nil {
+		return errors.New("emquant: invalid quote status mapping")
+	}
+	q.Fields = slices.Clone(fields)
 	grant := dataservice.SourceUseRequest{LicenseID: q.LicenseID, ProviderID: q.ProviderID, Product: q.Product, DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: fields, Codes: codes, Use: use}
 	if err := dataservice.RequireSourceUse(ctx, tx, grant); err != nil {
 		return err
@@ -166,7 +173,7 @@ func (r *Runtime) reauthorizeQuote(ctx context.Context, tx pgx.Tx, original Publ
 		AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp() AND (valid_until IS NULL OR valid_until>clock_timestamp())`, q.PolicyID).Scan(&current); err != nil {
 		return fmt.Errorf("emquant: quote policy expired during verification: %w", err)
 	}
-	if q.StageID != original.StageID || q.EntityID != original.EntityID || q.RawObjectID != original.RawObjectID || q.PolicyID != original.PolicyID || q.LicenseID != original.LicenseID || q.ProviderID != original.ProviderID || q.Product != original.Product || q.Code != original.Code || q.Price != original.Price || !q.EventAt.Equal(original.EventAt) || !q.ReceivedAt.Equal(original.ReceivedAt) || !q.AvailableAt.Equal(original.AvailableAt) || q.LatencyMode != original.LatencyMode || q.MarketState != original.MarketState || q.RawSHA256 != original.RawSHA256 || q.RawRef != original.RawRef || !maps.Equal(q.Locators, original.Locators) {
+	if q.StageID != original.StageID || q.EntityID != original.EntityID || q.RawObjectID != original.RawObjectID || q.PolicyID != original.PolicyID || q.LicenseID != original.LicenseID || q.ProviderID != original.ProviderID || q.Product != original.Product || q.Code != original.Code || q.Price != original.Price || !q.EventAt.Equal(original.EventAt) || !q.ReceivedAt.Equal(original.ReceivedAt) || !q.AvailableAt.Equal(original.AvailableAt) || q.LatencyMode != original.LatencyMode || q.MarketState != original.MarketState || q.RawSHA256 != original.RawSHA256 || q.RawRef != original.RawRef || !maps.Equal(q.Locators, original.Locators) || !slices.Equal(publishedQuoteFields(q), publishedQuoteFields(original)) {
 		return errors.New("emquant: frozen quote differs from its immutable source")
 	}
 	return nil

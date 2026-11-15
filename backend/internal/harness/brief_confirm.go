@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 )
 
 // BriefQuoteSource is controlled deployment configuration, not a client or
@@ -77,20 +78,33 @@ func RegisterBriefIntent(ctx context.Context, tx pgx.Tx, workspace, task uuid.UU
 	if err != nil || expectedHash != planHash || !reflect.DeepEqual(ps, definition.Sections) || !reflect.DeepEqual(ts, definition.Sections) {
 		return errors.New("harness: brief confirmation does not match the approved plan")
 	}
-	grant := dataservice.SourceUseRequest{LicenseID: source.LicenseID, ProviderID: source.ProviderID, Product: source.Product,
-		DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: []string{"TIME", "NOW"}, Codes: []string{subject.Code}}
-	for _, use := range []dataservice.SourceUse{dataservice.SourceStorage, dataservice.SourceDisplay, dataservice.SourceModel} {
-		grant.Use = use
-		if err := dataservice.RequireSourceUse(ctx, tx, grant); err != nil {
-			return err
-		}
-	}
 	var current uuid.UUID
-	if err := tx.QueryRow(ctx, `SELECT id FROM quote_mapping_policies WHERE id=$1 AND source_license_id=$2 AND dataset_id='mkt.intraday_quote'
+	var statusIndicator, statusEvidence string
+	var statusMapping []byte
+	if err := tx.QueryRow(ctx, `SELECT id,coalesce(status_indicator,''),coalesce(status_evidence_ref,''),coalesce(status_mapping,'{}'::jsonb) FROM quote_mapping_policies WHERE id=$1 AND source_license_id=$2 AND dataset_id='mkt.intraday_quote'
 		AND latency_mode='real_time' AND revoked_at IS NULL AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp()
-		AND (valid_until IS NULL OR valid_until>clock_timestamp()) FOR SHARE`, source.PolicyID, source.LicenseID).Scan(&current); err != nil {
+		AND (valid_until IS NULL OR valid_until>clock_timestamp()) FOR SHARE`, source.PolicyID, source.LicenseID).Scan(&current, &statusIndicator, &statusEvidence, &statusMapping); err != nil {
 		return fmt.Errorf("harness: realtime quote policy unavailable: %w", err)
 	}
+	var mapping map[string]string
+	if err := json.Unmarshal(statusMapping, &mapping); err != nil {
+		return errors.New("harness: invalid status mapping")
+	}
+	fields, err := emquant.QuotePolicyFields(emquant.QuoteMappingPolicy{StatusIndicator: statusIndicator, StatusEvidence: statusEvidence, StatusMapping: mapping})
+	if err != nil || statusIndicator == "" {
+		return errors.New("harness: verified intraday trading status is required")
+	}
+	hasContinuous := false
+	for _, value := range mapping {
+		if value == "continuous" {
+			hasContinuous = true
+		}
+	}
+	if !hasContinuous {
+		return errors.New("harness: realtime policy has no verified continuous-trading value")
+	}
+	grant := dataservice.SourceUseRequest{LicenseID: source.LicenseID, ProviderID: source.ProviderID, Product: source.Product,
+		DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: fields, Codes: []string{subject.Code}}
 	// Source-lock waits may consume the remaining validity window.
 	for _, use := range []dataservice.SourceUse{dataservice.SourceStorage, dataservice.SourceDisplay, dataservice.SourceModel} {
 		grant.Use = use

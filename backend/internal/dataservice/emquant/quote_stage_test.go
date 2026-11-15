@@ -380,8 +380,11 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := migrator.Down(ctx); err == nil {
+	if _, err := migrator.DownTo(ctx, 15); err == nil {
 		t.Fatal("rollback discarded a bound snapshot")
+	}
+	if _, err := migrator.Up(ctx); err != nil {
+		t.Fatalf("restore later migrations after rollback check: %v", err)
 	}
 	fullAuth, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
