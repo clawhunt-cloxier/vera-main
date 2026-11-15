@@ -106,6 +106,24 @@ func (c RegisteredCollector) CollectDailyLiquidity(ctx context.Context, code, fr
 	return rows, source, nil
 }
 
+// CollectMarginObservations registers the licensed source and preserves its
+// cells. Unverified units and publication times prevent publication as records.
+func (c RegisteredCollector) CollectMarginObservations(ctx context.Context, code, from, to string) (MarginObservations, RegisteredArchive, error) {
+	start, end, err := marginRange(code, from, to)
+	if err != nil {
+		return MarginObservations{}, RegisteredArchive{}, err
+	}
+	cube, source, err := c.CollectCSD(ctx, "flow.margin", code, marginIndicators, from, to, marginOptions)
+	if err != nil {
+		return MarginObservations{}, RegisteredArchive{}, err
+	}
+	observations, err := mapMarginObservations(cube, source.Source, code, start, end)
+	if err != nil {
+		return MarginObservations{}, RegisteredArchive{}, err
+	}
+	return observations, source, nil
+}
+
 // CollectCSS archives and registers a cross-section only after the exact
 // product, security, fields and storage use are authorized. Registration does
 // not establish disclosure time, revision identity or PIT suitability.

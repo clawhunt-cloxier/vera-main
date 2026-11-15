@@ -337,6 +337,36 @@ func TestArchiveRegistryVerifiesAndPreservesProvenance(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM records WHERE dataset_id='mkt.daily_bar'`).Scan(&dailyBars); err != nil || dailyBars != 0 {
 		t.Fatalf("partial liquidity became a complete daily bar: %d %v", dailyBars, err)
 	}
+	f.cube = Cube{Codes: []string{"A"}, Indicators: []string{"SECLENDINGBALANCEM", "TRADINGBALANCEM", "PURCHASEWITHBORROWEDMONEYM", "REPAYMENTTOBROKERM", "SECLENDINGBALANCEVOLUMEM"}, Dates: []string{"2026-11-09"}, Values: []Cell{{Type: 0}, {Type: 8, Value: int64(123)}, {Type: 11, Value: 3.5}, {Type: 0}, {Type: 8, Value: int64(45)}}}
+	marginCollector := registeredCollector
+	marginCollector.LicenseID = syntheticStorageLicense(t, pool, "choice-test", "flow.margin", "CSD", []string{"TRADINGBALANCEM", "PURCHASEWITHBORROWEDMONEYM", "REPAYMENTTOBROKERM", "SECLENDINGBALANCEVOLUMEM", "SECLENDINGBALANCEM"})
+	margin, marginRef, err := marginCollector.CollectMarginObservations(ctx, "A", "2026-11-09", "2026-11-10")
+	if err != nil || marginRef.ID == uuid.Nil || len(margin.Rows) != 1 || margin.Source != marginRef.Source || margin.Rows[0].Cells["TRADINGBALANCEM"].Value != int64(123) || margin.Rows[0].Locators["TRADINGBALANCEM"] != "$.data.Values[1]" {
+		t.Fatalf("registered margin observations: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT source_license_id,vendor_method FROM raw_objects WHERE id=$1`, marginRef.ID).Scan(&savedLicense, &savedMethod); err != nil || savedLicense != marginCollector.LicenseID || savedMethod != "CSD" {
+		t.Fatalf("margin source lost its licensed CSD scope: %v", err)
+	}
+	before = f.calls
+	if _, _, err := marginCollector.CollectMarginObservations(ctx, "C", "2026-11-09", "2026-11-10"); err == nil || f.calls != before {
+		t.Fatal("unlicensed margin security reached vendor")
+	}
+	revokedMargin := marginCollector
+	revokedMargin.Collector.Gate = testGateFunc(func(ctx context.Context, call func() error) error {
+		if err := call(); err != nil {
+			return err
+		}
+		_, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, marginCollector.LicenseID)
+		return err
+	})
+	badMargin, badMarginRef, err := revokedMargin.CollectMarginObservations(ctx, "A", "2026-11-09", "2026-11-10")
+	if err == nil || len(badMargin.Rows) != 0 || badMarginRef.ID != uuid.Nil {
+		t.Fatal("margin source revoked during collection was returned")
+	}
+	var marginRecords int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM records WHERE dataset_id='flow.margin'`).Scan(&marginRecords); err != nil || marginRecords != 0 {
+		t.Fatalf("unverified margin observations became records: %d %v", marginRecords, err)
+	}
 	f.cube = originalCube
 	f.quote = Quote{Data: f.cube, ObservedAt: time.Now().UTC()}
 	quoteCollector := registeredCollector

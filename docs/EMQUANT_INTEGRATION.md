@@ -24,7 +24,7 @@
 | `NAME`、`LISTDATE`、`DELISTDATE` | 随附 2025 年沪深股票指标手册分别列为股票简称、首发上市日期和摘牌日期 | 已实现部分观察值归档回放；真实账号单只股票的基础字段测试通过，市场覆盖与历史有效性未验证，空摘牌日不表示当前正常上市 |
 | `cec` 代码校验与补全 | [官方手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Matlab.html)说明补全模式可能返回多个后缀；`SecuType=1` 为股票、`SecuMarket=1` 为沪深 | 新增六位数字代码的沪深候选查询和表格归档，不自动选取候选；真实账号权限、返回形状及北交所覆盖尚未验证，不等于实体目录 |
 | `ctr` / `SECUMATCH` 证券简称匹配 | 厂商随附 2025 年指标手册列出 `SecuName`、`Priority` 和 `SECURITYSHORTNAME,SECUCODE`；`Priority=0` 为 AB 股优先 | 只接收明确的单个简称，保留厂商返回的所有行，不自动选择；真实账号权限、返回类型、市场覆盖和候选完整性尚未验证，不能当作完整实体目录 |
-| 融资融券序列 | 随附 2025 年指标手册列出 `TRADINGBALANCEM`、`PURCHASEWITHBORROWEDMONEYM`、`REPAYMENTTOBROKERM`、`SECLENDINGBALANCEVOLUMEM`、`SECLENDINGBALANCEM`，可按日查询 | 新增归档及逐字段原值回放；单位、日期含义、发布时间、账号权限与真实响应形状尚未验证，不生成 `flow.margin` 或研究数据 |
+| 融资融券序列 | 随附 2025 年指标手册列出 `TRADINGBALANCEM`、`PURCHASEWITHBORROWEDMONEYM`、`REPAYMENTTOBROKERM`、`SECLENDINGBALANCEVOLUMEM`、`SECLENDINGBALANCEM`，可按日查询 | 支持按产品、字段和证券授权采集并登记归档，保留逐字段原值及位置；单位、日期含义、发布时间、账号权限与真实响应形状尚未验证，不生成 `flow.margin` 或研究数据 |
 | 账户函数用量查询 | [官方 Python 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Python.html)列出 `datastatistics`，可查询函数用量、阈值和周期等 | 新增 CSD/CSS 只读诊断，返回值只在内存保留，不归档、不送模型；一次真实账号 CSD 查询返回非空表格，统计周期、额度单位和其他函数权限尚未验证，不能据此推断快照限频或数据使用许可 |
 | CSD/CSS 请求 | 官方手册说明单次最多 64 项指标、函数每分钟不超过 700 次 | 已限制指标数量；新增共享限流、超限冷却组件与数据库迁移，应用账户绑定和实际冷却配置仍未接入 |
 
