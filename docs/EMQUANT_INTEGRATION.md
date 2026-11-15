@@ -84,3 +84,9 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 `Runtime.CollectTaskQuotes` 根据可信 0.4 确认流程预先登记的不可变行情意图确定证券，并在每次采集前后核对工作区、计划、任务 epoch、revision、状态和截止时间；取消期间已发布的候选仍只是数据源候选，不构成该任务快照。发生错误时返回的部分候选不能当作完整任务结果，恢复需要任务步骤台账。当前应用尚不能创建 0.4 意图，也未调用该方法。
 
 迁移 `00015` 为计划和任务增加 `fixed_legacy` / `collect_latest` 模式及新版快照截止和清单哈希的成对约束，保留旧计划和任务的原时点；当前 worker 拒绝以旧流程处理新版任务。迁移不创建新版计划，也不验证或生成完整清单。启用新版写入前必须部署支持该模式的完整协议并排空旧 worker；回滚不得删除已有新版任务。
+
+### 独立行情采集命令
+
+`vera emquant quote --entity <entity-uuid> --code <证券代码> --license <license-uuid> --policy <policy-uuid>` 使用已登记的真实厂商、产品、证券和政策采集并发布一个行情候选；成功输出候选 ID 和数据库可用时间，不生成研究快照。发布过程中出错时若已产生候选会输出其 ID，供受控恢复，不应将错误当作成功。数据库连接成功后的采集尝试写入成功或失败审计，不记录账号密码、对象存储密钥或返回值；参数、配置或数据库连接失败时无法写入数据库审计。
+
+进程环境必须提供 `DATABASE_URL`、`EMQUANT_LIBRARY`（SDK 库绝对路径）、`EMQUANT_USER`、`EMQUANT_PASSWORD`、`EMQUANT_ACCOUNT_SCOPE`、`EMQUANT_S3_ENDPOINT`、`EMQUANT_S3_REGION`、`EMQUANT_S3_ACCESS_KEY`、`EMQUANT_S3_SECRET_KEY`、`EMQUANT_S3_BUCKET`、`EMQUANT_PROVIDER_ID`、`EMQUANT_PRODUCT`、`VERA_CONTRACTS_DIR`、`EMQUANT_MIN_INTERVAL` 和 `EMQUANT_RATE_COOLDOWN`；可选 `EMQUANT_S3_PREFIX`。限流间隔至少 90ms，冷却时间不得短于间隔；实际账号、方法和其他程序共享的限额仍须独立核验。数据库需预先迁移并由受控人员登记经核实的许可、证券及映射政策；不要把凭证放进命令参数或仓库。该命令不会替代当前缺失的 0.4 应用接线，也不能单凭调用成功证明实时权限或时效。
