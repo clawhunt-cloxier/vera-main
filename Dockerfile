@@ -26,6 +26,11 @@ COPY tests/fixtures/ ./tests/fixtures/
 COPY --from=web-builder /build/web/dist ./web/dist/
 RUN cd backend && CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /vera ./cmd/vera
 
+# Exercise dynamic SDK loading in the same libc/toolchain environment used to
+# build the release executable. The fixture is synthetic and never deployed.
+FROM go-builder AS native-check
+RUN cd backend && CGO_ENABLED=1 go test ./internal/dataservice/emquant -run 'TestNativeLifecycleAndResponse|TestOpenRejectsInvalidAndMissingLibrary' -count=1
+
 # Stage 3: Final minimal image
 # debian-slim, not alpine: embedded PostgreSQL ships glibc binaries.
 FROM debian:bookworm-slim
