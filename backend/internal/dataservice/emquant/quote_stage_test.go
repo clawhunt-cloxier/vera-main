@@ -323,6 +323,39 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err := binding.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
+	authorization, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer authorization.Rollback(context.Background())
+	if err := runtime.ReauthorizeQuoteComponent(ctx, authorization, uuid.New(), task, 1, bound.ContentHash, dataservice.SourceDisplay); err == nil {
+		t.Fatal("quote component authorization crossed workspaces")
+	}
+	for _, use := range []dataservice.SourceUse{dataservice.SourceDisplay, dataservice.SourceModel} {
+		if err := runtime.ReauthorizeQuoteComponent(ctx, authorization, workspace, task, 1, bound.ContentHash, use); err != nil {
+			t.Fatalf("frozen component %s authorization: %v", use, err)
+		}
+	}
+	if err := authorization.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE providers SET allow_model_processing=false WHERE id='stage-test'`); err != nil {
+		t.Fatal(err)
+	}
+	modelDenied, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.ReauthorizeQuoteComponent(ctx, modelDenied, workspace, task, 1, bound.ContentHash, dataservice.SourceModel); err == nil {
+		t.Fatal("frozen component bypassed current model denial")
+	}
+	if err := runtime.ReauthorizeQuoteComponent(ctx, modelDenied, workspace, task, 1, bound.ContentHash, dataservice.SourceDisplay); err != nil {
+		t.Fatalf("model denial incorrectly revoked display: %v", err)
+	}
+	_ = modelDenied.Rollback(ctx)
+	if _, err := pool.Exec(ctx, `UPDATE providers SET allow_model_processing=true WHERE id='stage-test'`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE quote_task_components SET manifest='tampered'::bytea WHERE task_id=$1`, task); err == nil {
 		t.Fatal("frozen quote component was modified")
 	}
@@ -428,6 +461,14 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 		t.Fatal("view accepted a corrupted source object")
 	}
 	_ = corruptView.Rollback(ctx)
+	corruptAuthorization, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.ReauthorizeQuoteComponent(ctx, corruptAuthorization, workspace, task, 1, bound.ContentHash, dataservice.SourceDisplay); err == nil {
+		t.Fatal("component authorization accepted a corrupted source")
+	}
+	_ = corruptAuthorization.Rollback(ctx)
 	mu.Lock()
 	objects[objectKey] = saved
 	mu.Unlock()
@@ -473,6 +514,14 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err != nil || !recovered.Equal(firstPublication) {
 		t.Fatalf("committed publication could not be recovered after becoming stale: %v", err)
 	}
+	historicalAuthorization, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.ReauthorizeQuoteComponent(ctx, historicalAuthorization, workspace, task, 1, bound.ContentHash, dataservice.SourceDisplay); err != nil {
+		t.Fatalf("frozen quote was reselected using current freshness: %v", err)
+	}
+	_ = historicalAuthorization.Rollback(ctx)
 	var records int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM records`).Scan(&records); err != nil || records != 0 {
 		t.Fatalf("unpublished quote entered research records: %d %v", records, err)
@@ -527,6 +576,14 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if _, err := runtime.PublishStagedQuote(ctx, id); err == nil {
 		t.Fatal("publication retry ignored revoked policy")
 	}
+	revokedAuthorization, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.ReauthorizeQuoteComponent(ctx, revokedAuthorization, workspace, task, 1, bound.ContentHash, dataservice.SourceDisplay); err == nil {
+		t.Fatal("component authorization ignored policy revocation")
+	}
+	_ = revokedAuthorization.Rollback(ctx)
 	staleView, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		t.Fatal(err)
