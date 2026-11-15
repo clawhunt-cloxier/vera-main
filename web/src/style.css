@@ -24,11 +24,11 @@
   --accent-dim: #005bb5;
 
   /* 语义色 */
-  --ok: #34c759;      /* 涨、成功 */
+  --ok: #34c759; /* 涨、成功 */
   --ok-soft: rgba(52, 199, 89, 0.08);
-  --warn: #ff9f0a;    /* 警告 */
+  --warn: #ff9f0a; /* 警告 */
   --warn-soft: rgba(255, 159, 10, 0.08);
-  --bad: #ff3b30;     /* 跌、错误 */
+  --bad: #ff3b30; /* 跌、错误 */
   --bad-soft: rgba(255, 59, 48, 0.08);
 
   /* 边框 */
@@ -44,7 +44,8 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* 字体栈 — Apple SF Pro + PingFang */
-  font-family: -apple-system, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", sans-serif;
+  font-family:
+    -apple-system, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', 'PingFang SC', sans-serif;
   line-height: 1.6;
   color: var(--text);
   background: var(--surface-1);
@@ -58,8 +59,8 @@
 }
 
 body {
-  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0)
-    env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0)
+    env(safe-area-inset-left, 0);
 }
 
 /* ========================================================================
@@ -946,7 +947,12 @@ tr:hover {
 }
 
 .skeleton {
-  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 50%,
+    var(--surface-2) 75%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
   border-radius: var(--radius-sm);

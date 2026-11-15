@@ -21,7 +21,14 @@ export function Landing() {
           <div className="intro">
             <p className="eyebrow">投研 AI Agent</p>
             <h1>可信金融投研，一句话交付</h1>
-            <p style={{ fontSize: 18, marginTop: 20, marginBottom: 32, color: 'var(--text-secondary)' }}>
+            <p
+              style={{
+                fontSize: 18,
+                marginTop: 20,
+                marginBottom: 32,
+                color: 'var(--text-secondary)',
+              }}
+            >
               只用授权数据，自动完成研究。每个数字可溯源，每个结论可验证。
             </p>
             <a href="/app" className="btn btn--primary">
@@ -36,21 +43,33 @@ export function Landing() {
             <div className="card interactive">
               <h3>个股分析</h3>
               <p className="muted">财务、估值、行情、资金、风险的综合分析</p>
-              <Link to="/sample/$skill" params={{ skill: 'stock_analysis' as any }} className="btn-link">
+              <Link
+                to="/sample/$skill"
+                params={{ skill: 'stock_analysis' as any }}
+                className="btn-link"
+              >
                 查看示例
               </Link>
             </div>
             <div className="card interactive">
               <h3>资金动向</h3>
               <p className="muted">融资融券、龙虎榜、大宗、陆股通与公募持仓</p>
-              <Link to="/sample/$skill" params={{ skill: 'capital_flow' as any }} className="btn-link">
+              <Link
+                to="/sample/$skill"
+                params={{ skill: 'capital_flow' as any }}
+                className="btn-link"
+              >
                 查看示例
               </Link>
             </div>
             <div className="card interactive">
               <h3>深度研究</h3>
               <p className="muted">对公司、行业或公司+行业的长篇研究报告</p>
-              <Link to="/sample/$skill" params={{ skill: 'deep_research' as any }} className="btn-link">
+              <Link
+                to="/sample/$skill"
+                params={{ skill: 'deep_research' as any }}
+                className="btn-link"
+              >
                 查看示例
               </Link>
             </div>
@@ -63,14 +82,24 @@ export function Landing() {
 
         <section style={{ paddingTop: 80, paddingBottom: 120 }}>
           <h2>产品特点</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 40 }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+              gap: 40,
+            }}
+          >
             <div>
               <h3>只用授权数据</h3>
-              <p className="muted">研究不搜索互联网，不接受用户上传。所有数据都来自登记的授权源。</p>
+              <p className="muted">
+                研究不搜索互联网，不接受用户上传。所有数据都来自登记的授权源。
+              </p>
             </div>
             <div>
               <h3>可溯源的数字</h3>
-              <p className="muted">每条数字可追溯到来源、口径、时点和原文。伪造、错位、颠倒会被拦截。</p>
+              <p className="muted">
+                每条数字可追溯到来源、口径、时点和原文。伪造、错位、颠倒会被拦截。
+              </p>
             </div>
             <div>
               <h3>结论分类展示</h3>
@@ -78,7 +107,9 @@ export function Landing() {
             </div>
             <div>
               <h3>私人工作区</h3>
-              <p className="muted">邀请制注册。任务、报告、自选股默认私密。隔离、权限、加密都有保障。</p>
+              <p className="muted">
+                邀请制注册。任务、报告、自选股默认私密。隔离、权限、加密都有保障。
+              </p>
             </div>
             <div>
               <h3>Full / Limited 标记</h3>
@@ -93,8 +124,7 @@ export function Landing() {
 
         <footer>
           <p className="muted">
-            <Link to="/privacy">数据与隐私说明</Link> ·
-            {' '}<span>© 2026 Vera</span>
+            <Link to="/privacy">数据与隐私说明</Link> · <span>© 2026 Vera</span>
           </p>
         </footer>
       </main>

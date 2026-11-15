@@ -195,7 +195,11 @@ export function App() {
                     <td>
                       <div style={{ display: 'flex', gap: 8 }}>
                         {t.status === 'COMPLETED' && t.report_ref && (
-                          <Link to="/app/reports/$id" params={{ id: t.report_ref.id }} className="btn-link">
+                          <Link
+                            to="/app/reports/$id"
+                            params={{ id: t.report_ref.id }}
+                            className="btn-link"
+                          >
                             查看
                           </Link>
                         )}

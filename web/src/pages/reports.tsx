@@ -53,7 +53,9 @@ export function Reports() {
               <tbody>
                 {reports.data.items.map((r) => (
                   <tr key={r.id}>
-                    <td><strong>{r.subject.name}</strong></td>
+                    <td>
+                      <strong>{r.subject.name}</strong>
+                    </td>
                     <td className="muted">{skillTitle[r.skill_id]}</td>
                     <td>
                       <Tag tone={r.result_kind === 'full' ? 'ok' : 'warn'}>

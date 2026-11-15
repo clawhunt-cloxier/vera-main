@@ -1,4 +1,10 @@
-import { useEffect, useRef, type ReactNode, type CSSProperties, type ButtonHTMLAttributes } from 'react';
+import {
+  useEffect,
+  useRef,
+  type ReactNode,
+  type CSSProperties,
+  type ButtonHTMLAttributes,
+} from 'react';
 import { ApiError } from '../api/client';
 
 export function ErrorBox({ error }: { error: unknown }) {
@@ -81,7 +87,8 @@ export function Dialog({
 export function SyntheticBanner() {
   return (
     <div className="banner" role="note">
-      <strong>演示环境</strong> — 数据或模型输出为模拟内容，报告不对应任何真实公司或市场，仅用于演示功能。
+      <strong>演示环境</strong> —
+      数据或模型输出为模拟内容，报告不对应任何真实公司或市场，仅用于演示功能。
     </div>
   );
 }
@@ -104,14 +111,7 @@ export function Button({
   disabled?: boolean;
   className?: string;
 } & ButtonHTMLAttributes<HTMLButtonElement>) {
-  const classList = [
-    'btn',
-    `btn--${variant}`,
-    `btn--${size}`,
-    className,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const classList = ['btn', `btn--${variant}`, `btn--${size}`, className].filter(Boolean).join(' ');
 
   return (
     <button {...props} disabled={disabled} className={classList}>
@@ -125,7 +125,9 @@ export function Button({
    ======================================================================== */
 
 export function Skeleton({ height = 20, style }: { height?: number; style?: CSSProperties }) {
-  return <div className="skeleton" style={{ height: `${height}px`, ...style }} aria-hidden="true" />;
+  return (
+    <div className="skeleton" style={{ height: `${height}px`, ...style }} aria-hidden="true" />
+  );
 }
 
 export function SkeletonCard() {
