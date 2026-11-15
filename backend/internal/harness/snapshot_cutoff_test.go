@@ -101,7 +101,7 @@ func TestLegacyWorkerRefusesCollectLatest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := migrator.Down(ctx); err == nil {
+	if _, err := migrator.DownTo(ctx, 14); err == nil {
 		t.Fatal("rollback discarded a collect_latest task")
 	}
 }

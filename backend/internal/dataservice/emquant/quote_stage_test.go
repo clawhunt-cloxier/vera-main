@@ -390,6 +390,16 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err := runtime.AuthorizeBoundSnapshotQuote(ctx, fullAuth, fullWS, fullTask, 1, 1, full.Hash, dataservice.SourceDisplay); err != nil {
 		t.Fatalf("bound snapshot quote authorization: %v", err)
 	}
+	boundView, err := runtime.ReadBoundSnapshotQuote(ctx, fullAuth, fullWS, fullTask, 1, 1, full.Hash, dataservice.SourceDisplay)
+	if err != nil || len(boundView.Quotes) != 1 || boundView.Quotes[0].StageID != id || boundView.Quotes[0].Price != "10.25" || boundView.Quotes[0].RawSHA256 != source.Source.BodySHA256 || !boundView.Cutoff.Equal(full.Cutoff) {
+		t.Fatalf("bound quote data and provenance: %v", err)
+	}
+	if _, err := runtime.ReadBoundSnapshotQuote(ctx, fullAuth, fullWS, fullTask, 1, 1, full.Hash, dataservice.SourceModel); err == nil {
+		t.Fatal("model read bypassed unavailable required dataset")
+	}
+	if _, err := runtime.ReadBoundSnapshotQuote(ctx, fullAuth, uuid.New(), fullTask, 1, 1, full.Hash, dataservice.SourceDisplay); err == nil {
+		t.Fatal("bound quote read crossed workspaces")
+	}
 	if err := runtime.AuthorizeBoundSnapshotQuote(ctx, fullAuth, fullWS, fullTask, 1, 1, full.Hash, dataservice.SourceModel); err == nil {
 		t.Fatal("required missing dataset allowed model processing")
 	}
@@ -397,6 +407,25 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 		t.Fatal("wrong full snapshot hash authorized quote")
 	}
 	_ = fullAuth.Rollback(ctx)
+	readyWS, readyTask := syntheticQuoteTask(t, pool, entityID)
+	syntheticQuoteIntent(t, pool, readyWS, readyTask, entityID)
+	if _, err := pool.Exec(ctx, `INSERT INTO task_snapshot_requirements(workspace_id,task_id,epoch,dataset_ids,required_ids)
+		VALUES($1,$2,1,ARRAY['mkt.intraday_quote'],ARRAY['mkt.intraday_quote'])`, readyWS, readyTask); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := runtime.FreezeLatestSnapshot(ctx, cat, readyWS, readyTask, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyTx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyView, err := runtime.ReadBoundSnapshotQuote(ctx, readyTx, readyWS, readyTask, 1, 1, ready.Hash, dataservice.SourceModel)
+	if err != nil || len(readyView.Quotes) != 1 || readyView.Quotes[0].Price != "10.25" {
+		t.Fatalf("model read could not access fully authorized bound quote: %v", err)
+	}
+	_ = readyTx.Rollback(ctx)
 	liveWS, liveTask := syntheticQuoteTask(t, pool, entityID)
 	if _, err := pool.Exec(ctx, `INSERT INTO quote_task_intents(workspace_id,task_id,epoch,plan_hash,protocol,requirement,entity_ids)
 		VALUES($1,$2,1,'synthetic-plan-hash','0.4','realtime_trade',ARRAY[$3]::uuid[])`, liveWS, liveTask, entityID); err != nil {
@@ -471,6 +500,12 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	}
 	if err := runtime.ReauthorizeQuoteComponent(ctx, modelDenied, workspace, task, 1, bound.ContentHash, dataservice.SourceDisplay); err != nil {
 		t.Fatalf("model denial incorrectly revoked display: %v", err)
+	}
+	if _, err := runtime.ReadBoundSnapshotQuote(ctx, modelDenied, readyWS, readyTask, 1, 1, ready.Hash, dataservice.SourceModel); err == nil {
+		t.Fatal("bound quote read bypassed revoked model use")
+	}
+	if _, err := runtime.ReadBoundSnapshotQuote(ctx, modelDenied, readyWS, readyTask, 1, 1, ready.Hash, dataservice.SourceDisplay); err != nil {
+		t.Fatalf("model denial incorrectly blocked bound display read: %v", err)
 	}
 	_ = modelDenied.Rollback(ctx)
 	if _, err := pool.Exec(ctx, `UPDATE providers SET allow_model_processing=true WHERE id='stage-test'`); err != nil {

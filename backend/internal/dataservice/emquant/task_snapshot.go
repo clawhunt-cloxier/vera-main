@@ -240,3 +240,27 @@ func (r *Runtime) AuthorizeBoundSnapshotQuote(ctx context.Context, tx pgx.Tx, wo
 	}
 	return r.ReauthorizeQuoteComponent(ctx, tx, workspace, task, epoch, quoteHash, use)
 }
+
+// ReadBoundSnapshotQuote returns the exact frozen quotes only after validating
+// the full task binding and current authorization for the specified use. The
+// caller must keep this transaction open through the protected use; permission
+// must be checked again in a new transaction for any later use. No newer quote
+// is selected during recovery, and missing required datasets block model use.
+func (r *Runtime) ReadBoundSnapshotQuote(ctx context.Context, tx pgx.Tx, workspace, task uuid.UUID, epoch, revision int64, hash string, use dataservice.SourceUse) (QuoteView, error) {
+	if err := r.AuthorizeBoundSnapshotQuote(ctx, tx, workspace, task, epoch, revision, hash, use); err != nil {
+		return QuoteView{}, err
+	}
+	_, quoteHash, ok, err := boundSnapshot(ctx, tx, workspace, task, epoch, revision)
+	if err != nil || !ok {
+		return QuoteView{}, errors.New("emquant: bound snapshot unavailable during quote read")
+	}
+	var body []byte
+	if err := tx.QueryRow(ctx, `SELECT manifest FROM quote_task_components WHERE workspace_id=$1 AND task_id=$2 AND epoch=$3 AND content_hash=$4`, workspace, task, epoch, quoteHash).Scan(&body); err != nil {
+		return QuoteView{}, fmt.Errorf("emquant: bound quote component unavailable: %w", err)
+	}
+	var doc quoteComponentDocument
+	if quoteComponentDigest(body) != quoteHash || json.Unmarshal(body, &doc) != nil {
+		return QuoteView{}, errors.New("emquant: bound quote component invalid")
+	}
+	return doc.View, nil
+}
