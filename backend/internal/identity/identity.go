@@ -466,7 +466,7 @@ func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 	var pwHash string
 	var disabled *time.Time
 
-	err := r.Context().Value("pool").(*pgxpool.Pool).QueryRow(r.Context(),
+	err := s.pool.QueryRow(r.Context(),
 		`SELECT id, password_hash, disabled_at FROM users WHERE issuer='local' AND subject=$1`,
 		strings.ToLower(req.Username)).Scan(&uid, &pwHash, &disabled)
 
