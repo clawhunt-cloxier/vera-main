@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type CSSProperties, type ButtonHTMLAttributes } from 'react';
 import { ApiError } from '../api/client';
 
 export function ErrorBox({ error }: { error: unknown }) {
@@ -103,7 +103,7 @@ export function Button({
   size?: 'sm' | 'md' | 'lg';
   disabled?: boolean;
   className?: string;
-} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+} & ButtonHTMLAttributes<HTMLButtonElement>) {
   const classList = [
     'btn',
     `btn--${variant}`,
@@ -124,7 +124,7 @@ export function Button({
    加载骨架屏
    ======================================================================== */
 
-export function Skeleton({ height = 20, style }: { height?: number; style?: React.CSSProperties }) {
+export function Skeleton({ height = 20, style }: { height?: number; style?: CSSProperties }) {
   return <div className="skeleton" style={{ height: `${height}px`, ...style }} aria-hidden="true" />;
 }
 
