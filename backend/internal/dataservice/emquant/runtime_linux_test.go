@@ -224,7 +224,8 @@ func TestRuntimeRequiresGateAndArchivesSDKResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rc, err := runtime.RegisteredCollector(cat, "runtime-test")
+	license := syntheticStorageLicense(t, pool, "runtime-test", "mkt.daily_bar", "CSD", []string{"X", "Y"})
+	rc, err := runtime.RegisteredCollector(cat, "runtime-test", "synthetic-product", license)
 	if err != nil {
 		t.Fatal(err)
 	}

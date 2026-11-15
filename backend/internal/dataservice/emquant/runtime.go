@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
@@ -72,11 +73,11 @@ func OpenRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 // RegisteredCollector uses this runtime's own gated SDK, object store and
 // database. It does not register products, enable the application research
 // path, validate permissions, or publish normalized records.
-func (r *Runtime) RegisteredCollector(catalog *dataservice.Catalog, providerID string) (RegisteredCollector, error) {
+func (r *Runtime) RegisteredCollector(catalog *dataservice.Catalog, providerID, product string, licenseID uuid.UUID) (RegisteredCollector, error) {
 	if r == nil || r.client == nil {
 		return RegisteredCollector{}, errors.New("emquant: runtime unavailable")
 	}
-	c := RegisteredCollector{Collector: r.collector, Registry: ArchiveRegistry{Pool: r.database, Store: r.store, Catalog: catalog, ProviderID: providerID}}
+	c := RegisteredCollector{Collector: r.collector, Registry: ArchiveRegistry{Pool: r.database, Store: r.store, Catalog: catalog, ProviderID: providerID}, LicenseID: licenseID, Product: product}
 	if err := c.validateConfig(); err != nil {
 		return RegisteredCollector{}, err
 	}

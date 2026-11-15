@@ -115,6 +115,7 @@
 - 数据服务映射版本是整数，Choice 采用字符串标识；合并时请求指纹位于归档元数据且没有对应独立数据库列，后续登记进展见下文。`collect_latest`、行情口径和真实报告端到端未完成；不能把分支合并或局部映射通过当作 V02 验收。
 - 新增迁移 `00010_emquant_rate_state.sql`，为现有限流门禁提供正式持久表；工作区角色不能更新账户级状态，非空表的回滚被拒绝，避免丢失未完成请求的隔离标记。使用 `go test -race ./internal/dataservice/emquant -run 'Test(PostgreSQLRateGate|RateStateMigration|Runtime)' -count=1` 验证正常迁移、跨调用限流、会话丢失后拒绝调用、缺表失败、回滚保护及模拟 SDK 归档；账户权限、共享 scope 覆盖所有外部程序与生产部署仍未验证。
 - 新增迁移 `00011_raw_object_request.sql` 与原始归档登记：S3 内容必须回读并核对对象路径、哈希、请求指纹及观察时间，已登记的相同身份不同元数据拒绝覆盖，禁用或模拟厂商不能登记；旧记录的未知请求元数据保持 NULL。Runtime 的 CSD 与行情 `RegisteredCollector` 只有对象归档及数据库登记都成功才返回数据。`go test -race ./internal/dataservice/emquant ./internal/platform/db -count=1` 通过，覆盖模拟 SDK、HTTP 对象服务、真实临时 PostgreSQL、并发登记、篡改、登记失败、非空回滚保护与缺失限流表。登记不证明来源、授权或真实可见时点；尚未接入应用研究流程，也没有实现统一记录发布、财报 PIT 或对象清理。
+- 新增迁移 `00012_source_licenses.sql` 和事务内用途门禁：按提供方、产品、数据集、厂商接口、精确字段、指定或明确全部证券、许可有效期及存储/展示/模型用途检查，使用数据库时间并在锁定后重验；工作区角色不可修改许可，许可版本只能单向撤销、不能原地扩权或恢复。`RegisteredCollector` 在实际采集前、登记时分别要求当前存储许可，并绑定许可和请求字段、证券到归档元数据；未绑定许可的旧原始登记仍不可当作研究依据。`go test -race ./internal/dataservice ./internal/dataservice/emquant -run 'Test(SourceUse|ArchiveRegistry|RateStateMigration|RuntimeRequires)' -count=1`、Go 静态检查与文档/契约检查通过，覆盖等待锁期间过期、请求中撤销、越权字段/证券和假 SDK 对象登记。许可证据是管理侧受控引用，不代表已核实当前 Choice 账户的具体授权；后续展示与模型发送必须分别重新校验当前用途，不能由存储许可推断。
 
 ### 2026-11-14 UTC 真实 SDK 局部复验
 
