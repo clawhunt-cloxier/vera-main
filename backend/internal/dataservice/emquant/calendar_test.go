@@ -39,7 +39,7 @@ func TestCollectOpenDatesChecksResponseAndPreservesArchive(t *testing.T) {
 		if err := catalog.Validate(mapped.Record); err != nil {
 			t.Fatal(err)
 		}
-		if mapped.Record.Payload["is_open"] != true || mapped.RawRef != ref.BodyRef || mapped.RawSHA256 != ref.BodySHA256 || mapped.RawLocator != fmt.Sprintf("$.data.Values[%d]", i) || !mapped.Record.AvailableAt.Equal(ref.ArchivedAt) {
+		if mapped.Record.Payload["is_open"] != true || mapped.Source != ref || mapped.RawRef != ref.BodyRef || mapped.RawSHA256 != ref.BodySHA256 || mapped.RawLocator != fmt.Sprintf("$.data.Values[%d]", i) || !mapped.Record.AvailableAt.Equal(ref.ArchivedAt) {
 			t.Fatalf("invalid provenance: %+v", mapped)
 		}
 	}

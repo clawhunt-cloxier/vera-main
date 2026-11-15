@@ -15,6 +15,7 @@ import (
 // lower bound; the eventual database writer must use its actual commit time.
 type MappedRecord struct {
 	Record         dataservice.Record
+	Source         ArchiveRef // includes request fingerprint and archive timestamps
 	RawRef         string
 	RawSHA256      string
 	RawLocator     string
@@ -65,7 +66,7 @@ func MapOpenDates(body []byte, ref ArchiveRef, market, from, to string) ([]Mappe
 			Record: dataservice.Record{DatasetID: "ref.trading_calendar", RecordKey: day, Version: 1, Period: &period,
 				AvailableAt: ref.ArchivedAt.UTC(), Origin: "exchange", SourceTier: "L2", Basis: "Choice tradedates; market=" + market,
 				Payload: map[string]any{"trade_date": day, "is_open": true}},
-			RawRef: ref.BodyRef, RawSHA256: ref.BodySHA256, RawLocator: fmt.Sprintf("$.data.Values[%d]", i), MappingVersion: "emquant-tradedates-v1",
+			Source: ref, RawRef: ref.BodyRef, RawSHA256: ref.BodySHA256, RawLocator: fmt.Sprintf("$.data.Values[%d]", i), MappingVersion: "emquant-tradedates-v1",
 		})
 	}
 	return out, nil
