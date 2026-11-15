@@ -18,6 +18,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/check"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
@@ -28,6 +29,7 @@ import (
 
 // Engine wires the data service, model gateway, policy and skills. One per process.
 type Engine struct {
+	Brief     *emquant.BriefService
 	Pool      *pgxpool.Pool
 	Store     *dataservice.Store
 	Gateway   *model.Gateway
@@ -97,6 +99,9 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 	if !e.Synthetic && !e.RealResearch {
 		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
+	if e.Brief != nil && skillID != "stock_analysis" {
+		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "真实数据模式当前仅提供成交数据简报")
+	}
 	sk, ok := e.Skills[skillID]
 	if !ok {
 		return nil, errs.Unprocessable("UNKNOWN_SKILL", "不支持的研究技能")
@@ -139,12 +144,16 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 	plan.P95Seconds = min(b.DeadlineSeconds, 60+writers*25)
 	plan.QuotaCost = 1
 	plan.Hash = planHash(sk.ID, sk.Version, subject.ID, p, asOf, plan.Sections)
+	plan.SnapshotMode = "fixed_legacy"
+	if sk.Version == emquant.ObservationBriefVersion {
+		plan.SnapshotMode = "collect_latest"
+	}
 	params, _ := json.Marshal(p)
 	secs, _ := json.Marshal(plan.Sections)
 	err = db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO research_plans(id,workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,reason_code,expires_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, plan.ID, ws, sk.ID, sk.Version, subject.ID, params, secs, asOf, plan.Hash,
-			plan.Executable, plan.ReasonCode, plan.ExpiresAt)
+		_, err := tx.Exec(ctx, `INSERT INTO research_plans(id,workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,reason_code,expires_at,snapshot_mode)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, plan.ID, ws, sk.ID, sk.Version, subject.ID, params, secs, asOf, plan.Hash,
+			plan.Executable, plan.ReasonCode, plan.ExpiresAt, plan.SnapshotMode)
 		return err
 	})
 	return plan, err
@@ -172,7 +181,11 @@ func (e *Engine) LoadPlan(ctx context.Context, ws, id uuid.UUID) (*Plan, error) 
 	if err != nil {
 		return nil, err
 	}
-	p.Subject = ents[subject]
+	var found bool
+	p.Subject, found = ents[subject]
+	if !found {
+		return nil, errs.NotFound()
+	}
 	sk := e.Skills[p.SkillID]
 	b := e.Policy.Budgets[p.SkillID]
 	w := 0
@@ -276,7 +289,7 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 	}
 	sk := e.Skills[plan.SkillID]
 	switch {
-	case plan.SnapshotMode != "fixed_legacy":
+	case plan.SnapshotMode != "fixed_legacy" && (plan.SnapshotMode != "collect_latest" || plan.SkillVersion != emquant.ObservationBriefVersion || e.Brief == nil):
 		return uuid.Nil, errs.Conflict("PLAN_VERSION_MISMATCH", "该计划需要新版确认流程")
 	case plan.Hash != hash:
 		return uuid.Nil, errs.Conflict("PLAN_CHANGED", "研究计划已变更，请重新确认")
@@ -295,7 +308,7 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 	}
 	budget := e.Policy.Budgets[sk.ID]
 	var taskID uuid.UUID
-	err = db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
+	err = e.confirmTransaction(ctx, ws, plan, func(tx pgx.Tx) error {
 		if KillSwitch(ctx, tx) {
 			return errs.Unavailable("RESEARCH_PAUSED", "平台暂停接受新的研究任务")
 		}
@@ -304,7 +317,7 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 			return err
 		}
 		var consumed *uuid.UUID
-		if err := tx.QueryRow(ctx, `SELECT consumed_task_id FROM research_plans WHERE id=$1 FOR UPDATE`, planID).Scan(&consumed); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT consumed_task_id FROM research_plans WHERE id=$1 AND workspace_id=$2 AND expires_at>clock_timestamp() FOR UPDATE`, planID, ws).Scan(&consumed); err != nil {
 			return err
 		}
 		if consumed != nil {
@@ -342,9 +355,9 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 		sb, _ := json.Marshal(secs)
 		bb, _ := json.Marshal(budget)
 		deadline := time.Now().Add(time.Duration(budget.DeadlineSeconds) * time.Second)
-		if err := tx.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,'QUEUED',$9,$10) RETURNING id`, ws, planID, sk.ID, sk.Version, plan.Subject.ID, params, sb, plan.AsOf,
-			deadline, bb).Scan(&taskID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget,snapshot_mode)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,'QUEUED',$9,$10,$11) RETURNING id`, ws, planID, sk.ID, sk.Version, plan.Subject.ID, params, sb, plan.AsOf,
+			deadline, bb, plan.SnapshotMode).Scan(&taskID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE research_plans SET consumed_task_id=$2 WHERE id=$1`, planID, taskID); err != nil {
@@ -619,7 +632,7 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	if t.Epoch != epoch || IsTerminal(t.Status) || t.Status == "CANCEL_REQUESTED" {
 		return nil
 	}
-	if t.SnapshotMode != "fixed_legacy" {
+	if t.SnapshotMode != "fixed_legacy" && (t.Version != emquant.ObservationBriefVersion || e.Brief == nil) {
 		return ErrSnapshotModeUnsupported
 	}
 	sk := e.Skills[t.Skill]
@@ -630,7 +643,11 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	runCtx, cancel := context.WithDeadline(ctx, t.Deadline.Add(-30*time.Second))
 	defer cancel()
 	go e.watchCancel(runCtx, cancel, t)
-	err = e.pipeline(runCtx, ctx, t, sk)
+	if t.Version == emquant.ObservationBriefVersion {
+		err = e.observationPipeline(runCtx, ctx, t, sk)
+	} else {
+		err = e.pipeline(runCtx, ctx, t, sk)
+	}
 	var ab *abstainError
 	switch {
 	case err == nil:

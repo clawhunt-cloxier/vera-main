@@ -29,6 +29,9 @@ func (s *Server) meBody(r *http.Request) (Me, error) {
 	_ = s.Pool.QueryRow(r.Context(), `SELECT display_name FROM users WHERE id=$1`, p.UserID).Scan(&name)
 	me := Me{UserID: p.UserID, WorkspaceID: p.WorkspaceID, CSRF: p.CSRF, Persona: p.Persona, Onboarded: p.WorkspaceID != nil,
 		Synthetic: s.Synthetic, DisplayName: name}
+	if s.Engine.Brief != nil {
+		me.ResearchProtocol = "observation.v1"
+	}
 	if ws != uuid.Nil {
 		q, err := s.Engine.Quota(r.Context(), ws)
 		if err != nil {
@@ -106,7 +109,7 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 	items := []Skill{}
 	for _, id := range skillOrder {
 		sk := s.Engine.Skills[id]
-		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused})
+		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (s.Engine.Brief == nil || id == "stock_analysis")})
 	}
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
 	return nil
@@ -115,6 +118,9 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 // ---- plans ----
 
 func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
+	if s.Engine.Brief != nil && !observationVersion(r) {
+		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "真实简报需要新版客户端")
+	}
 	var in struct {
 		Text      *string         `json:"text"`
 		SkillID   string          `json:"skill_id"`
@@ -184,6 +190,9 @@ func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if p.SnapshotMode == "collect_latest" && !observationVersion(r) {
+		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要新版客户端")
+	}
 	httpx.JSON(w, r, 200, s.toPlan(p))
 	return nil
 }
@@ -203,6 +212,13 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) error {
 		return errs.BadRequest("INVALID_BODY", "disabled_sections 过多")
 	}
 	_, ws := principal(r)
+	plan, err := s.Engine.LoadPlan(r.Context(), ws, in.PlanID)
+	if err != nil {
+		return err
+	}
+	if plan.SnapshotMode == "collect_latest" && !observationVersion(r) {
+		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要新版客户端确认")
+	}
 	id, err := s.Engine.CreateTask(r.Context(), ws, in.PlanID, in.PlanHash, in.Disabled)
 	if err != nil {
 		return err
@@ -216,7 +232,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-const taskCols = `t.id, t.skill_id, t.subject_id, t.status, t.revision, t.created_at, t.deadline, t.as_of, t.report_id, t.reason_code, t.reason_message, t.epoch`
+const taskCols = `t.id, t.skill_id, t.subject_id, t.status, t.revision, t.created_at, t.deadline, t.as_of, t.report_id, t.reason_code, t.reason_message, t.epoch, t.snapshot_mode, t.snapshot_as_of`
 
 type taskRow struct {
 	t       Task
@@ -228,7 +244,7 @@ type taskRow struct {
 func scanTask(row pgx.Row) (taskRow, error) {
 	var tr taskRow
 	err := row.Scan(&tr.t.ID, &tr.t.SkillID, &tr.subject, &tr.t.Status, &tr.t.Revision, &tr.t.CreatedAt, &tr.t.Deadline, &tr.t.AsOf, &tr.report,
-		&tr.t.ReasonCode, &tr.t.ReasonMessage, &tr.epoch)
+		&tr.t.ReasonCode, &tr.t.ReasonMessage, &tr.epoch, &tr.t.SnapshotMode, &tr.t.SnapshotAsOf)
 	return tr, err
 }
 
@@ -245,6 +261,12 @@ func (s *Server) fillTasks(r *http.Request, ws uuid.UUID, rows []taskRow, withSt
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		for _, tr := range rows {
 			t := tr.t
+			if t.SnapshotMode == "collect_latest" && !observationVersion(r) {
+				return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该任务需要新版客户端")
+			}
+			if _, ok := ents[tr.subject]; !ok {
+				continue
+			}
 			t.Subject = toEntity(ents[tr.subject], s.Engine.Skills)
 			t.Steps = []TaskStep{}
 			if tr.report != nil {
@@ -288,6 +310,9 @@ func (s *Server) task(r *http.Request, ws, id uuid.UUID) (Task, error) {
 	ts, err := s.fillTasks(r, ws, []taskRow{tr}, true)
 	if err != nil {
 		return Task{}, err
+	}
+	if len(ts) == 0 {
+		return Task{}, errs.NotFound()
 	}
 	return ts[0], nil
 }
@@ -426,6 +451,11 @@ func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) error {
 	if _, _, err := s.Engine.CancelTask(r.Context(), ws, id, in.Expected); err != nil {
 		return err
 	}
+	if s.Engine.Brief != nil {
+		// No vendor-derived fields are needed to acknowledge this command.
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
 	t, err := s.task(r, ws, id)
 	if err != nil {
 		return err
@@ -507,6 +537,9 @@ func (s *Server) reportSummaries(r *http.Request, ws uuid.UUID, where string, ar
 	}
 	out := []ReportSummary{}
 	for _, x := range rows {
+		if _, ok := ents[x.subject]; !ok {
+			continue
+		}
 		x.Subject = toEntity(ents[x.subject], s.Engine.Skills)
 		out = append(out, x.ReportSummary)
 	}
@@ -549,7 +582,13 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	httpx.JSON(w, r, 200, Report{ID: d.ID, Version: d.Version, TaskID: d.TaskID, Title: d.Title, SkillID: d.SkillID, SkillVersion: d.SkillVersion,
+	mode := "fixed_legacy"
+	var snapshotAt *time.Time
+	if d.SkillVersion == "1.1.0-demo.2" {
+		mode = "collect_latest"
+		snapshotAt = &d.AsOf
+	}
+	httpx.JSON(w, r, 200, Report{SnapshotMode: mode, SnapshotAsOf: snapshotAt, ID: d.ID, Version: d.Version, TaskID: d.TaskID, Title: d.Title, SkillID: d.SkillID, SkillVersion: d.SkillVersion,
 		Subject: toEntity(ents[d.SubjectID], s.Engine.Skills), AsOf: d.AsOf, DataAsOf: d.DataAsOf, ResultKind: d.ResultKind, Synthetic: d.Synthetic,
 		AIGenerated: true, SummaryRefs: d.SummaryRefs, Sections: d.Sections, Claims: d.Claims, Limitations: d.Limitations, Sources: d.Sources,
 		Disclaimer: d.Disclaimer, DeliveredAt: d.DeliveredAt})
@@ -615,6 +654,9 @@ func (s *Server) feedback(w http.ResponseWriter, r *http.Request) error {
 // ---- evidence & calculations: visible only when used by a task of this workspace ----
 
 func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
+	if handled, err := s.briefEvidence(w, r); handled || err != nil {
+		return err
+	}
 	id, err := pathID(r, "id")
 	if err != nil {
 		return err

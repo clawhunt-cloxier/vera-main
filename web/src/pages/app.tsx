@@ -44,6 +44,7 @@ export function App() {
     onSuccess: () => setText(''),
   });
   const synthetic = me.data?.synthetic ?? false;
+  const observation = me.data?.research_protocol === 'observation.v1';
   const placeholders = [
     '分析宁德时代最近的资金面',
     '深度研究贵州茅台',
@@ -55,6 +56,11 @@ export function App() {
   return (
     <main>
       {synthetic && <SyntheticBanner />}
+      {observation && (
+        <p className="notice">
+          当前可生成已接入股票的真实成交数据简报，包含成交量、成交额和换手率。使用已取得的日成交数据，非盘中实时行情；实时行情与财务分析尚未开放。
+        </p>
+      )}
       <header className="app-head">
         <strong className="logo">VERA</strong>
         <nav>
@@ -95,7 +101,11 @@ export function App() {
               id="queryInput"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={placeholders[placeholderIdx] || '输入研究需求…'}
+              placeholder={
+                observation
+                  ? '输入已接入的股票名称或代码，生成真实成交简报'
+                  : placeholders[placeholderIdx] || '输入研究需求…'
+              }
               onFocus={() => setPlaceholderIdx((i) => (i + 1) % placeholders.length)}
               rows={3}
               required
@@ -326,7 +336,15 @@ export function PlanReview({ id }: { id: string }) {
           <h1>研究计划：{p.data.subject.name}</h1>
           <div className="meta">
             <Tag>{skillTitle[p.data.skill_id]}</Tag>{' '}
-            <span className="muted">数据截止 {fmtTime(p.data.as_of)}</span>
+            <span className="muted">
+              {p.data.snapshot_mode === 'collect_latest' ? '计划预览时间' : '数据截止'}{' '}
+              {fmtTime(p.data.as_of)}
+            </span>
+            {p.data.snapshot_mode === 'collect_latest' && (
+              <p>
+                确认后采集真实成交数据并冻结快照。这是非实时简报；实时行情和未核实字段不纳入分析。
+              </p>
+            )}
           </div>
           <p>
             计划生成 {p.data.sections.length} 个章节，你可以取消勾选不需要的章节再提交。

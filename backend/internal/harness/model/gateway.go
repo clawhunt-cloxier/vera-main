@@ -52,6 +52,7 @@ func LoadSchemas(dir string) (Schemas, error) {
 
 // Request is one logical model call from a harness step.
 type Request struct {
+	WithSend  func(context.Context, func() (Raw, error)) (Raw, error) // holds source rights only during the actual adapter call
 	Workspace uuid.UUID
 	Task      *uuid.UUID
 	StepKey   string
@@ -176,7 +177,24 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			g.finish(context.WithoutCancel(ctx), callID, "FAILED", nil, Usage{}, decimal.Zero, "", "cancelled before send")
 			return nil, Meta{}, err
 		}
-		raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Simulate: r.Simulate, Hash: hash})
+
+		sentSuccessfully := false
+		send := func() (Raw, error) {
+			raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Simulate: r.Simulate, Hash: hash})
+			sentSuccessfully = err == nil
+			return raw, err
+		}
+		var raw Raw
+		if r.WithSend != nil {
+			raw, err = r.WithSend(ctx, send)
+		} else {
+			raw, err = send()
+		}
+		if err != nil && sentSuccessfully {
+			// A permission transaction may fail to commit after the paid
+			// request completed. Preserve the reservation for reconciliation.
+			err = &Error{Unknown: true, Msg: "source transaction failed after model response"}
+		}
 		release()
 		if err != nil {
 			var me *Error

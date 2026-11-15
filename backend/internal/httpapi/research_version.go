@@ -75,3 +75,43 @@ func acceptsLegacyJSON(headers []string) bool {
 	}
 	return bestSpecificity >= 0 && bestQuality > 0
 }
+
+const observationMedia = "application/vnd.vera.observation.v1+json"
+
+func observationVersion(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
+		media, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil || media != observationMedia {
+			continue
+		}
+		q := params["q"]
+		if q == "" {
+			return true
+		}
+		quality, err := strconv.ParseFloat(q, 64)
+		if err == nil && quality > 0 && quality <= 1 {
+			return true
+		}
+	}
+	return false
+}
+func representation(r *http.Request) string {
+	if observationVersion(r) {
+		return observationMedia
+	}
+	return "application/json"
+}
+
+// observation.v1 is intentionally distinct from the unimplemented 0.4 realtime contract.
+func (s *Server) versionGate(next http.Handler) http.Handler {
+	legacy := researchVersionGate(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if observationVersion(r) && s.Engine.Brief != nil && strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Add("Vary", "Accept")
+			w.Header().Set("Content-Type", observationMedia+"; charset=utf-8")
+			next.ServeHTTP(w, r)
+			return
+		}
+		legacy.ServeHTTP(w, r)
+	})
+}

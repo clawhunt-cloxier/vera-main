@@ -445,6 +445,16 @@ export interface components {
             report_ref: components["schemas"]["ReportRef"] | null;
             reason_code: string | null;
             reason_message: string | null;
+            /**
+             * @description 真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。
+             * @enum {string}
+             */
+            snapshot_mode?: "fixed_legacy" | "collect_latest";
+            /**
+             * Format: date-time
+             * @description 真实成交观察协议：冻结截止时间，未冻结为 null。
+             */
+            snapshot_as_of?: string | null;
         };
         Entity: {
             /** Format: uuid */
@@ -485,6 +495,11 @@ export interface components {
             /** @description deployment uses demo data or simulated models; the UI shows a fixed banner */
             synthetic: boolean;
             display_name: string;
+            /**
+             * @description 当前部署支持确认后采集的真实简报。
+             * @enum {string}
+             */
+            research_protocol?: "observation.v1";
         };
         Cancel: {
             expected_revision: number;
@@ -535,6 +550,12 @@ export interface components {
             locator: string | null;
             excerpt: string | null;
             content_hash: string;
+            /** Format: date-time */
+            received_at?: string | null;
+            /** Format: date-time */
+            event_at?: string | null;
+            /** @enum {string} */
+            latency_mode?: "unknown" | "delayed" | "real_time";
         };
         Calculation: {
             /** Format: uuid */
@@ -585,6 +606,16 @@ export interface components {
             disclaimer: string;
             /** Format: date-time */
             delivered_at: string;
+            /**
+             * @description 真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。
+             * @enum {string}
+             */
+            snapshot_mode?: "fixed_legacy" | "collect_latest";
+            /**
+             * Format: date-time
+             * @description 真实成交观察协议：冻结截止时间，未冻结为 null。
+             */
+            snapshot_as_of?: string | null;
         };
         /** @enum {unknown} */
         SkillId: "deep_research" | "stock_analysis" | "capital_flow";
@@ -636,6 +667,16 @@ export interface components {
             };
             /** Format: date-time */
             expires_at: string;
+            /**
+             * @description 真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。
+             * @enum {string}
+             */
+            snapshot_mode?: "fixed_legacy" | "collect_latest";
+            /**
+             * @description 真实成交观察简报为 null，不声明盘中行情。
+             * @enum {string|null}
+             */
+            quote_requirement?: "latest_available" | "realtime_trade" | null;
         };
         PlanResult: {
             /** @enum {unknown} */
@@ -783,6 +824,10 @@ export interface operations {
                         status: string;
                         service: string;
                     };
+                    "application/vnd.vera.observation.v1+json": {
+                        status: string;
+                        service: string;
+                    };
                 };
             };
             /** @description Structured error */
@@ -792,6 +837,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -814,6 +860,9 @@ export interface operations {
                     "application/json": {
                         status: string;
                     };
+                    "application/vnd.vera.observation.v1+json": {
+                        status: string;
+                    };
                 };
             };
             /** @description Not ready */
@@ -826,6 +875,10 @@ export interface operations {
                         status: string;
                         reason: string;
                     };
+                    "application/vnd.vera.observation.v1+json": {
+                        status: string;
+                        reason: string;
+                    };
                 };
             };
             /** @description Structured error */
@@ -835,6 +888,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -855,6 +909,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Me"];
                 };
             };
             /** @description Structured error */
@@ -864,6 +919,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -890,6 +946,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Me"];
                 };
             };
             /** @description Structured error */
@@ -899,6 +956,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -924,6 +982,9 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["Entity"][];
                     };
+                    "application/vnd.vera.observation.v1+json": {
+                        items: components["schemas"]["Entity"][];
+                    };
                 };
             };
             /** @description Structured error */
@@ -933,6 +994,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -962,6 +1024,10 @@ export interface operations {
                         items: components["schemas"]["Task"][];
                         next_cursor: string | null;
                     };
+                    "application/vnd.vera.observation.v1+json": {
+                        items: components["schemas"]["Task"][];
+                        next_cursor: string | null;
+                    };
                 };
             };
             /** @description Structured error */
@@ -971,6 +1037,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -998,6 +1065,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Task"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Task"];
                 };
             };
             /** @description Structured error */
@@ -1007,6 +1075,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1029,6 +1098,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Task"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Task"];
                 };
             };
             /** @description Structured error */
@@ -1038,6 +1108,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1067,6 +1138,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Task"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Task"];
                 };
             };
             /** @description Success */
@@ -1076,7 +1148,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Task"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Task"];
                 };
+            };
+            /** @description 真实简报模式的取消命令已处理；无厂商数据响应，展示授权失效时仍可取消。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Structured error */
             default: {
@@ -1085,6 +1165,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1108,6 +1189,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Report"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Report"];
                 };
             };
             /** @description Structured error */
@@ -1117,6 +1199,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1139,6 +1222,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Evidence"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Evidence"];
                 };
             };
             /** @description Structured error */
@@ -1148,6 +1232,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1170,6 +1255,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Calculation"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Calculation"];
                 };
             };
             /** @description Structured error */
@@ -1179,6 +1265,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1209,6 +1296,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Feedback"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Feedback"];
                 };
             };
             /** @description Structured error */
@@ -1218,6 +1306,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1321,6 +1410,9 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["Skill"][];
                     };
+                    "application/vnd.vera.observation.v1+json": {
+                        items: components["schemas"]["Skill"][];
+                    };
                 };
             };
             /** @description Structured error */
@@ -1330,6 +1422,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1356,6 +1449,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanResult"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["PlanResult"];
                 };
             };
             /** @description Structured error */
@@ -1365,6 +1459,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1387,6 +1482,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResearchPlan"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["ResearchPlan"];
                 };
             };
             /** @description Structured error */
@@ -1396,6 +1492,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1424,6 +1521,10 @@ export interface operations {
                         items: components["schemas"]["ReportSummary"][];
                         next_cursor: string | null;
                     };
+                    "application/vnd.vera.observation.v1+json": {
+                        items: components["schemas"]["ReportSummary"][];
+                        next_cursor: string | null;
+                    };
                 };
             };
             /** @description Structured error */
@@ -1433,6 +1534,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1455,6 +1557,9 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["WatchItem"][];
                     };
+                    "application/vnd.vera.observation.v1+json": {
+                        items: components["schemas"]["WatchItem"][];
+                    };
                 };
             };
             /** @description Structured error */
@@ -1464,6 +1569,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1491,6 +1597,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WatchItem"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["WatchItem"];
                 };
             };
             /** @description Structured error */
@@ -1500,6 +1607,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1531,6 +1639,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1559,6 +1668,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WatchItem"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["WatchItem"];
                 };
             };
             /** @description Structured error */
@@ -1568,6 +1678,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1592,6 +1703,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChartSeries"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["ChartSeries"];
                 };
             };
             /** @description Structured error */
@@ -1601,6 +1713,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1627,6 +1740,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Me"];
                 };
             };
             /** @description Structured error */
@@ -1636,6 +1750,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1668,6 +1783,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                    "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                 };
             };
         };

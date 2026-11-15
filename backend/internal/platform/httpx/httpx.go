@@ -37,7 +37,9 @@ func WithRequestID(next http.Handler) http.Handler {
 
 // JSON writes v with status; maps add request_id when it is a map[string]any.
 func JSON(w http.ResponseWriter, r *http.Request, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }

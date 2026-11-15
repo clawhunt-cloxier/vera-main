@@ -310,3 +310,61 @@ type fixed struct{ r Raw }
 
 func (fixed) Name() string                            { return "fixed" }
 func (f fixed) Do(context.Context, Call) (Raw, error) { return f.r, nil }
+
+func TestAuthorizationRecheckedBeforeEachSend(t *testing.T) {
+	var hits atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}, Profile{})
+	authorized := true
+	denied := errors.New("source license expired")
+	req := x.req()
+	req.WithSend = func(_ context.Context, send func() (Raw, error)) (Raw, error) {
+		if !authorized {
+			return Raw{}, denied
+		}
+		return send()
+	}
+	x.g.wait = func(context.Context, time.Duration) error { authorized = false; return nil }
+	if _, _, err := x.g.Complete(context.Background(), req); !errors.Is(err, denied) {
+		t.Fatalf("error: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("sent after permission expiry: %d", hits.Load())
+	}
+	for _, status := range x.ledger(t) {
+		if status != "FAILED" {
+			t.Fatalf("unreleased reservation: %s", status)
+		}
+	}
+}
+
+func TestSourceCommitFailureRetainsPaidReservation(t *testing.T) {
+	var hits atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		reply(w, okSummary, "stop")
+	}, Profile{})
+	req := x.req()
+	req.WithSend = func(_ context.Context, send func() (Raw, error)) (Raw, error) {
+		raw, err := send()
+		if err != nil {
+			return raw, err
+		}
+		return raw, errors.New("commit failed after paid request")
+	}
+	_, _, err := x.g.Complete(context.Background(), req)
+	var modelErr *Error
+	if !errors.As(err, &modelErr) || !modelErr.Unknown {
+		t.Fatalf("post-send accounting: %v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("paid send repeated: %d", hits.Load())
+	}
+	for _, status := range x.ledger(t) {
+		if status != "UNKNOWN" {
+			t.Fatalf("paid reservation released: %s", status)
+		}
+	}
+}

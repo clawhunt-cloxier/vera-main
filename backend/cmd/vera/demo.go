@@ -91,7 +91,7 @@ func demo(ctx context.Context) error {
 	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	slog.Info("vera demo ready", "url", c.PublicURL, "web", c.WebDir != "")
-	fmt.Printf("Vera 演示已启动：%s （开发登录，任意用户名；演示数据与模拟模型）\n", c.PublicURL)
+	fmt.Printf("Vera 测试服务已启动：%s （开发登录；synthetic=%t）\n", c.PublicURL, a.Engine.Synthetic)
 	<-ctx.Done()
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

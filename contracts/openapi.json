@@ -36,6 +36,24 @@
                     "service"
                   ]
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "service"
+                  ]
+                }
               }
             }
           },
@@ -43,6 +61,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -74,6 +97,20 @@
                     "status"
                   ]
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
               }
             }
           },
@@ -84,6 +121,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           },
@@ -91,6 +133,24 @@
             "description": "Not ready",
             "content": {
               "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "reason"
+                  ]
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "type": "object",
                   "additionalProperties": false,
@@ -126,6 +186,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Me"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
               }
             }
           },
@@ -133,6 +198,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -172,6 +242,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Me"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
               }
             }
           },
@@ -179,6 +254,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -212,6 +292,23 @@
                     "items"
                   ]
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Entity"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
               }
             }
           },
@@ -219,6 +316,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -259,6 +361,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Task"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
               }
             }
           },
@@ -266,6 +373,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -334,6 +446,30 @@
                     "next_cursor"
                   ]
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Task"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ]
+                }
               }
             }
           },
@@ -341,6 +477,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -416,6 +557,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Task"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
               }
             }
           },
@@ -423,6 +569,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -455,6 +606,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Task"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
               }
             }
           },
@@ -462,6 +618,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -475,8 +636,16 @@
                 "schema": {
                   "$ref": "#/components/schemas/Task"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
               }
             }
+          },
+          "204": {
+            "description": "真实简报模式的取消命令已处理；无厂商数据响应，展示授权失效时仍可取消。"
           }
         },
         "parameters": [
@@ -532,6 +701,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Report"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Report"
+                }
               }
             }
           },
@@ -539,6 +713,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -580,6 +759,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Evidence"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Evidence"
+                }
               }
             }
           },
@@ -587,6 +771,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -619,6 +808,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Calculation"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calculation"
+                }
               }
             }
           },
@@ -626,6 +820,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -658,6 +857,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Feedback"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Feedback"
+                }
               }
             }
           },
@@ -665,6 +869,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -820,6 +1029,23 @@
                     "items"
                   ]
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Skill"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
               }
             }
           },
@@ -827,6 +1053,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -868,6 +1099,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/PlanResult"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResult"
+                }
               }
             }
           },
@@ -875,6 +1111,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -907,6 +1148,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ResearchPlan"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchPlan"
+                }
               }
             }
           },
@@ -914,6 +1160,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -988,6 +1239,30 @@
                     "next_cursor"
                   ]
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReportSummary"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ]
+                }
               }
             }
           },
@@ -995,6 +1270,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1028,6 +1308,23 @@
                     "items"
                   ]
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WatchItem"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
               }
             }
           },
@@ -1035,6 +1332,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1084,6 +1386,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/WatchItem"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchItem"
+                }
               }
             }
           },
@@ -1091,6 +1398,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1141,6 +1453,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/WatchItem"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchItem"
+                }
               }
             }
           },
@@ -1148,6 +1465,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1186,6 +1508,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1237,6 +1564,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ChartSeries"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartSeries"
+                }
               }
             }
           },
@@ -1244,6 +1576,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1285,6 +1622,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Me"
                 }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
               }
             }
           },
@@ -1292,6 +1634,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1342,6 +1689,11 @@
             "description": "Structured error",
             "content": {
               "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1517,6 +1869,22 @@
               "string",
               "null"
             ]
+          },
+          "snapshot_mode": {
+            "type": "string",
+            "enum": [
+              "fixed_legacy",
+              "collect_latest"
+            ],
+            "description": "真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。"
+          },
+          "snapshot_as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "真实成交观察协议：冻结截止时间，未冻结为 null。"
           }
         },
         "required": [
@@ -1680,6 +2048,13 @@
           },
           "display_name": {
             "type": "string"
+          },
+          "research_protocol": {
+            "type": "string",
+            "enum": [
+              "observation.v1"
+            ],
+            "description": "当前部署支持确认后采集的真实简报。"
           }
         },
         "required": [
@@ -1913,6 +2288,28 @@
           },
           "content_hash": {
             "type": "string"
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "event_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "latency_mode": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "delayed",
+              "real_time"
+            ]
           }
         },
         "required": [
@@ -2106,6 +2503,22 @@
           "delivered_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "snapshot_mode": {
+            "type": "string",
+            "enum": [
+              "fixed_legacy",
+              "collect_latest"
+            ],
+            "description": "真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。"
+          },
+          "snapshot_as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "真实成交观察协议：冻结截止时间，未冻结为 null。"
           }
         },
         "required": [
@@ -2323,6 +2736,26 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "snapshot_mode": {
+            "type": "string",
+            "enum": [
+              "fixed_legacy",
+              "collect_latest"
+            ],
+            "description": "真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。"
+          },
+          "quote_requirement": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "latest_available",
+              "realtime_trade",
+              null
+            ],
+            "description": "真实成交观察简报为 null，不声明盘中行情。"
           }
         },
         "required": [

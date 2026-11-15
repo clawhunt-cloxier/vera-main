@@ -12,7 +12,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,7 +47,34 @@ func (s *Server) Handler() http.Handler {
 	authNoWS := s.ID.Require(false)
 	h := func(f func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			if err := f(w, r); err != nil {
+			var callErr error
+			// Cancellation is a workspace business command. It must remain
+			// available after a vendor display grant is revoked so a queued job
+			// cannot be kept alive by the failed closed display gate.
+			cancel := strings.HasSuffix(r.URL.Path, "/cancel") && r.Method == http.MethodPost
+			if s.Engine.Brief != nil && !cancel && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
+				callErr = s.Engine.Brief.WithDisplayCatalog(r.Context(), func() error { return nil })
+				if callErr == nil {
+					// Render without retaining a permission transaction across
+					// nested database work. Reauthorize while flushing bytes.
+					buf := httptest.NewRecorder()
+					buf.Header().Set("Content-Type", w.Header().Get("Content-Type"))
+					callErr = s.protectBriefRead(buf, r, f)
+					if callErr == nil {
+						callErr = s.Engine.Brief.WithDisplayCatalog(r.Context(), func() error {
+							for k, values := range buf.Header() {
+								w.Header()[k] = values
+							}
+							w.WriteHeader(buf.Code)
+							_, err := w.Write(buf.Body.Bytes())
+							return err
+						})
+					}
+				}
+			} else {
+				callErr = s.protectBriefRead(w, r, f)
+			}
+			if err := callErr; err != nil {
 				httpx.Error(w, r, err)
 			}
 		}
@@ -83,7 +112,7 @@ func (s *Server) Handler() http.Handler {
 	for p, hh := range s.Mounts {
 		m.Handle(p, hh)
 	}
-	return httpx.WithRequestID(recoverer(secure(researchVersionGate(m))))
+	return httpx.WithRequestID(recoverer(secure(s.versionGate(m))))
 }
 
 func secure(next http.Handler) http.Handler {
@@ -185,7 +214,11 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
-		sum := sha256.Sum256(append([]byte(r.URL.Path+"\x00"), body...))
+		scope := ""
+		if s.Engine.Brief != nil {
+			scope = strings.Join(s.Engine.Brief.Codes, ",")
+		}
+		sum := sha256.Sum256(append([]byte(r.URL.Path+"\x00"+representation(r)+"\x00"+scope+"\x00"), body...))
 		hash := hex.EncodeToString(sum[:])
 		route := r.Pattern
 		var stored struct {
@@ -202,10 +235,24 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 				httpx.Error(w, r, errs.Conflict("IDEMPOTENCY_KEY_REUSED", "Idempotency-Key 已用于不同的请求"))
 				return
 			}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.Header().Set("Idempotent-Replayed", "true")
-			w.WriteHeader(stored.status)
-			_, _ = w.Write(stored.resp)
+			replay := func() error {
+				w.Header().Set("Content-Type", representation(r)+"; charset=utf-8")
+				w.Header().Set("Idempotent-Replayed", "true")
+				w.WriteHeader(stored.status)
+				if stored.status == http.StatusNoContent {
+					return nil
+				}
+				_, err := w.Write(stored.resp)
+				return err
+			}
+			cancelAck := r.Pattern == "POST /api/v1/research-tasks/{id}/cancel" && stored.status == http.StatusNoContent
+			if s.Engine.Brief != nil && !cancelAck {
+				if err := s.Engine.Brief.WithDisplayCatalog(r.Context(), replay); err != nil {
+					httpx.Error(w, r, err)
+				}
+			} else {
+				_ = replay()
+			}
 			return
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {

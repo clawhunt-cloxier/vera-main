@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/fixture"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
@@ -31,6 +33,7 @@ type App struct {
 	Provider dataservice.Provider
 	Engine   *harness.Engine
 	Watch    *watchlist.Service
+	Brief    *emquant.BriefService
 	Policy   *policy.Policy
 }
 
@@ -55,25 +58,39 @@ func New(ctx context.Context, c *config.Config) (*App, error) {
 		}
 	}
 	a := &App{Cfg: c, Pool: pool}
-	if err := a.build(); err != nil {
-		pool.Close()
+	if err := a.build(ctx); err != nil {
+		a.Close()
 		return nil, err
 	}
 	return a, nil
 }
 
-func (a *App) build() error {
+func (a *App) build(ctx context.Context) error {
 	c := a.Cfg
 	cat, err := dataservice.LoadCatalog(filepath.Join(c.ContractsDir, "datasets", "catalog.json"))
 	if err != nil {
 		return err
 	}
 	if c.DataProvider == "fixture" {
+		var realEntities bool
+		if err := a.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM entities WHERE NOT synthetic)`).Scan(&realEntities); err != nil {
+			return err
+		}
+		if realEntities {
+			return fmt.Errorf("fixture mode requires a separate database: real security identities already exist")
+		}
 		a.Store = dataservice.NewStore(a.Pool, cat)
 	} else {
 		a.Store = dataservice.NewVendorStore(a.Pool, cat)
 	}
-	if a.Provider, err = newProvider(c); err != nil {
+	if c.DataProvider == "emquant" {
+		a.Brief, err = emquant.OpenBriefFromEnv(ctx, a.Pool, cat, os.Getenv)
+		if err != nil {
+			return err
+		}
+		a.Provider = a.Brief
+		a.Store.RestrictCodes(a.Brief.Codes)
+	} else if a.Provider, err = newProvider(c); err != nil {
 		return err
 	}
 	if a.Policy, err = policy.Load(c.PolicyPath); err != nil {
@@ -121,7 +138,10 @@ func (a *App) build() error {
 	}
 	gw := model.NewGateway(a.Pool, profiles, adapters, prices, schemas, a.Policy, limit)
 	a.Engine = &harness.Engine{Pool: a.Pool, Store: a.Store, Gateway: gw, Policy: a.Policy, Skills: harness.Skills(), Now: a.Provider.Now,
-		Synthetic: c.Synthetic(), Basis: a.Provider.Basis(), Prompts: harness.PromptVersion, RealResearch: c.RealResearch}
+		Synthetic: c.Synthetic(), Basis: a.Provider.Basis(), Prompts: harness.PromptVersion, RealResearch: c.RealResearch, Brief: a.Brief}
+	if a.Brief != nil {
+		a.Engine.Skills["stock_analysis"] = harness.ObservationBriefSkill()
+	}
 	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Provider.Now}
 	return nil
 }
@@ -181,4 +201,9 @@ func spa(dir string) http.Handler {
 	})
 }
 
-func (a *App) Close() { a.Pool.Close() }
+func (a *App) Close() {
+	if a.Brief != nil {
+		_ = a.Brief.Runtime.Close()
+	}
+	a.Pool.Close()
+}

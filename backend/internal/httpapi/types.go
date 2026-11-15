@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/watchlist"
 )
@@ -43,6 +44,9 @@ func toEntity(e dataservice.EntityRow, skills map[string]*harness.Skill) Entity 
 	for _, id := range skillOrder {
 		sk := skills[id]
 		es := EntitySkill{SkillID: id, Available: slices.Contains(sk.Subjects, e.Kind)}
+		if skills["stock_analysis"].Version == emquant.ObservationBriefVersion && id != "stock_analysis" {
+			es.Available = false
+		}
 		if !es.Available {
 			r := sk.Title + "不支持该类研究对象"
 			es.Reason = &r
@@ -59,14 +63,15 @@ func toEntity(e dataservice.EntityRow, skills map[string]*harness.Skill) Entity 
 type Quota = harness.Quota
 
 type Me struct {
-	UserID      uuid.UUID  `json:"user_id"`
-	WorkspaceID *uuid.UUID `json:"workspace_id"`
-	CSRF        string     `json:"csrf_token"`
-	Persona     string     `json:"persona"`
-	Quota       Quota      `json:"quota"`
-	Onboarded   bool       `json:"onboarded"`
-	Synthetic   bool       `json:"synthetic"`
-	DisplayName string     `json:"display_name"`
+	ResearchProtocol string     `json:"research_protocol,omitempty"`
+	UserID           uuid.UUID  `json:"user_id"`
+	WorkspaceID      *uuid.UUID `json:"workspace_id"`
+	CSRF             string     `json:"csrf_token"`
+	Persona          string     `json:"persona"`
+	Quota            Quota      `json:"quota"`
+	Onboarded        bool       `json:"onboarded"`
+	Synthetic        bool       `json:"synthetic"`
+	DisplayName      string     `json:"display_name"`
 }
 
 type Skill struct {
@@ -92,18 +97,20 @@ type Estimate struct {
 }
 
 type ResearchPlan struct {
-	ID           uuid.UUID      `json:"id"`
-	PlanHash     string         `json:"plan_hash"`
-	SkillID      string         `json:"skill_id"`
-	SkillVersion string         `json:"skill_version"`
-	Subject      Entity         `json:"subject"`
-	Params       map[string]any `json:"params"`
-	AsOf         time.Time      `json:"as_of"`
-	Sections     []PlanSection  `json:"sections"`
-	Executable   bool           `json:"executable"`
-	ReasonCode   *string        `json:"reason_code"`
-	Estimate     Estimate       `json:"estimate"`
-	ExpiresAt    time.Time      `json:"expires_at"`
+	SnapshotMode     string         `json:"snapshot_mode,omitempty"`
+	QuoteRequirement *string        `json:"quote_requirement"`
+	ID               uuid.UUID      `json:"id"`
+	PlanHash         string         `json:"plan_hash"`
+	SkillID          string         `json:"skill_id"`
+	SkillVersion     string         `json:"skill_version"`
+	Subject          Entity         `json:"subject"`
+	Params           map[string]any `json:"params"`
+	AsOf             time.Time      `json:"as_of"`
+	Sections         []PlanSection  `json:"sections"`
+	Executable       bool           `json:"executable"`
+	ReasonCode       *string        `json:"reason_code"`
+	Estimate         Estimate       `json:"estimate"`
+	ExpiresAt        time.Time      `json:"expires_at"`
 }
 
 func paramsMap(p harness.Params, skill string) map[string]any {
@@ -121,9 +128,12 @@ func paramsMap(p harness.Params, skill string) map[string]any {
 }
 
 func (s *Server) toPlan(p *harness.Plan) ResearchPlan {
-	out := ResearchPlan{ID: p.ID, PlanHash: p.Hash, SkillID: p.SkillID, SkillVersion: p.SkillVersion, Subject: toEntity(p.Subject, s.Engine.Skills),
+	out := ResearchPlan{SnapshotMode: p.SnapshotMode, ID: p.ID, PlanHash: p.Hash, SkillID: p.SkillID, SkillVersion: p.SkillVersion, Subject: toEntity(p.Subject, s.Engine.Skills),
 		Params: paramsMap(p.Params, p.SkillID), AsOf: p.AsOf, Executable: p.Executable, ReasonCode: p.ReasonCode,
 		Estimate: Estimate{P95Seconds: p.P95Seconds, QuotaCost: p.QuotaCost}, ExpiresAt: p.ExpiresAt, Sections: []PlanSection{}}
+	if p.SnapshotMode == "collect_latest" {
+		out.Params = map[string]any{}
+	}
 	for _, sec := range p.Sections {
 		out.Sections = append(out.Sections, PlanSection{sec.ID, sec.Title, sec.Required, sec.Avail, sec.Reason})
 	}
@@ -156,6 +166,8 @@ type ReportRef struct {
 }
 
 type Task struct {
+	SnapshotMode  string     `json:"snapshot_mode,omitempty"`
+	SnapshotAsOf  *time.Time `json:"snapshot_as_of"`
 	ID            uuid.UUID  `json:"id"`
 	SkillID       string     `json:"skill_id"`
 	Subject       Entity     `json:"subject"`
@@ -181,6 +193,8 @@ type ReportSummary struct {
 }
 
 type Report struct {
+	SnapshotMode string               `json:"snapshot_mode,omitempty"`
+	SnapshotAsOf *time.Time           `json:"snapshot_as_of,omitempty"`
 	ID           uuid.UUID            `json:"id"`
 	Version      int                  `json:"version"`
 	TaskID       uuid.UUID            `json:"task_id"`
@@ -203,6 +217,9 @@ type Report struct {
 }
 
 type Evidence struct {
+	ReceivedAt  *time.Time `json:"received_at,omitempty"`
+	EventAt     *time.Time `json:"event_at"`
+	LatencyMode string     `json:"latency_mode,omitempty"`
 	ID          uuid.UUID  `json:"id"`
 	DatasetID   string     `json:"dataset_id"`
 	Provider    string     `json:"provider"`

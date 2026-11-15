@@ -96,3 +96,9 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 迁移 `00016` 和 `FreezeLatestSnapshot` 为已确认的 0.4 任务提供固定 MVCC 视图内的原子清单绑定：受信确认流程预先保存不可变的数据集要求，行情组件和截止时间与任务 epoch/revision 一起写入；并发或重试读取已绑定清单。当前只有个股行情有已发布数据选择器，其他要求的数据集明确标记 `unavailable`，必需数据缺失时禁止通过该路径发送给模型。`ReadBoundSnapshotQuote` 在验证完整绑定和当前用途许可后读取原冻结行情；调用方必须在实际使用期间保持事务，后续用途须重新授权。这里尚未实现低频数据发布与选择、0.4 确认流程、任务 worker 或报告接线，不能将清单当作可交付研报。
 
 `BoundQuoteFacts` 可把经绑定和模型用途授权的单股冻结行情转换为 Harness 事实，并保留原价格精度、行情时间和归档字段位置；尚未接入任务执行、证据 API 或报告。证据展示需要重新检查展示授权，不能把已授权模型用途当作展示许可。
+
+## 休市真实成交简报
+
+用户于 2026-11-15 允许先交付非实时真实简报。`BriefService` 现已作为 Provider 接入应用，独立版本 demo.2 使用已确认单位的 VOLUME/AMOUNT/TURN 与当前证券名称观察。原有严格实时行情链路保持原门槛，未知字段不参与模型。新路径的原始归档、许可、不可变清单及每次模型/展示授权见 [技能规格](skills/stock-observation-brief.md) 和 [API](../API.md)。Canonical Records/Capabilities 仍不伪造完整覆盖；原登记的 ref.security/mkt.daily_bar 数据集仅分类原始对象，不宣称具备全部字段。
+
+2026-11-15 UTC 已用真实 Choice SDK、持久 SeaweedFS S3 与 deepseek-flash 完成应用链路验证：东方财富单股 limited 非实时简报，synthetic=false，4 次模型调用，报告数据最近日期为 2026-11-13。验收通过命令 `VERA_LIVE_BRIEF=1 go test ./internal/app -run TestLiveObservationBrief -count=1 -v`（其他秘密/授权变量单独注入）；真实原始数据与报告仅保存在受控本地/对象存储，不提交 Git。网站部署验收另记交接，不以本次进程内测试替代网站结果。

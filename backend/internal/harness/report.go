@@ -15,10 +15,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/check"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
-	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 )
 
 const Disclaimer = "本报告由 Vera 基于已接入数据自动生成（AI 生成内容），仅供研究参考，不构成任何投资建议。数据可能存在延迟或口径差异，请以原始披露为准。"
@@ -158,7 +158,7 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 		for _, c := range final {
 			msg += fmt.Sprintf("%s（%s）：%s\n", c.Ref, c.Claim.Kind, c.Claim.Text)
 		}
-		raw, _, err := e.Gateway.Complete(ctx, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "summary", Profile: "writer",
+		raw, _, err := e.complete(ctx, t, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "summary", Profile: "writer",
 			Messages: []model.Message{{Role: "system", Content: summaryRules}, {Role: "user", Content: "已核验结论：\n" + msg}}, MaxOutput: 4000,
 			Schema: "summary-output", Budget: t.Budget, Simulate: func() (any, error) { return simulateSummary(final, required), nil }})
 		var pts []summaryPoint
@@ -277,10 +277,17 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 		doc.Sections = append(doc.Sections, ds)
 	}
 	doc.Limitations = append(doc.Limitations, sheet.Limitations...)
+	if t.Version == emquant.ObservationBriefVersion {
+		doc.ResultKind = "limited"
+		doc.DataAsOf = "数据采集后的冻结时点：" + t.AsOf.In(cst).Format("2006-01-02 15:04:05") + "（北京时间；非实时）"
+	}
 	if doc.Synthetic {
 		doc.Limitations = append(doc.Limitations, "本报告使用虚构的演示数据或模拟模型生成，不对应任何真实公司或市场，仅用于演示。")
 	}
 	provs, err := e.providerNames(ctx)
+	if t.Version == emquant.ObservationBriefVersion && e.Brief != nil {
+		err = e.Pool.QueryRow(ctx, `SELECT name FROM providers WHERE id=$1 AND enabled AND NOT synthetic`, e.Brief.ProviderID).Scan(&provs)
+	}
 	if err != nil {
 		return doc, err
 	}
@@ -310,15 +317,15 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 	h := sha256.Sum256(body)
 	versions, _ := json.Marshal(map[string]string{"skill": doc.SkillVersion, "rules": check.RulesVersion, "formulas": facts.FormulaVersion,
 		"prompts": PromptVersion, "policy": e.Policy.Version, "prices": e.priceVersion()})
-	return db.InWorkspace(ctx, e.Pool, t.Workspace, func(tx pgx.Tx) error {
+	return e.deliverTransaction(ctx, t, func(tx pgx.Tx) error {
 		var epoch int64
 		var status, planHash string
 		var snapshot *string
-		if err := tx.QueryRow(ctx, `SELECT t.epoch, t.status, t.snapshot_hash, p.plan_hash FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id
+		if err := tx.QueryRow(ctx, `SELECT t.epoch, t.status, coalesce(t.snapshot_hash,t.snapshot_manifest_hash), p.plan_hash FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id
 			WHERE t.id=$1 FOR UPDATE OF t`, t.ID).Scan(&epoch, &status, &snapshot, &planHash); err != nil {
 			return err
 		}
-		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash {
+		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.Version == emquant.ObservationBriefVersion && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
 			return errStale
 		}
 		if err := event(ctx, tx, t.Workspace, t.ID, t.Epoch, "DELIVERING", nil); err != nil {
@@ -396,7 +403,7 @@ func (e *Engine) verifySummary(ctx, parent context.Context, t *taskRow, sheet *f
 	if len(pending) == 0 {
 		return points, nil
 	}
-	raw, _, err := e.Gateway.Complete(ctx, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "verify:summary", Profile: "verifier",
+	raw, _, err := e.complete(ctx, t, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "verify:summary", Profile: "verifier",
 		Messages: []model.Message{{Role: "system", Content: summaryVerifyRules}, {Role: "user", Content: b.String()}}, MaxOutput: 2000,
 		Schema: "verify-output", Budget: t.Budget, Simulate: func() (any, error) {
 			vs := []map[string]string{}

@@ -1,0 +1,21 @@
+# Persistent S3 archive for the test deployment. Secrets remain on the host.
+services:
+  storage:
+    image: chrislusf/seaweedfs:4.00@sha256:dcbccdc9f33689d43ca3d1fb73d2baa319f8307c59d7923191b993ddc85ba6f8
+    container_name: vera-storage
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-ip=localhost", "-ip.bind=0.0.0.0", "-volume.max=4", "-master.volumeSizeLimitMB=1024"]
+    ports:
+      - "127.0.0.1:19000:8333"
+    volumes:
+      - objects:/data
+      - /opt/vera/storage/s3.json:/etc/seaweedfs/s3.json:ro
+    networks: [archive]
+volumes:
+  objects:
+    external: true
+    name: vera-objects
+networks:
+  archive:
+    external: true
+    name: vera-archive

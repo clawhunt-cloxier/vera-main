@@ -32,6 +32,7 @@ export class ApiError extends Error {
 }
 
 let csrf = '';
+let researchProtocol = '';
 export const setCsrf = (t: string) => {
   csrf = t;
 };
@@ -46,7 +47,9 @@ export async function api<T>(
   body?: unknown,
   opts: Opts = {}
 ): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' };
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.vera.observation.v1+json, application/json;q=0.5',
+  };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') headers['X-CSRF-Token'] = csrf;
   if (opts.idem) headers['Idempotency-Key'] = opts.idem;
@@ -79,6 +82,14 @@ export async function api<T>(
       }
     }
     throw err;
+  }
+  if (path === '/api/v1/me') researchProtocol = data?.research_protocol ?? '';
+  if (
+    researchProtocol === 'observation.v1' &&
+    path.startsWith('/api/v1/') &&
+    res.headers.get('Content-Type')?.split(';')[0] !== 'application/vnd.vera.observation.v1+json'
+  ) {
+    throw new Error('服务端数据版本不匹配，请刷新后重试');
   }
   return data as T;
 }

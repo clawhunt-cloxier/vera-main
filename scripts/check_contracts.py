@@ -13,9 +13,9 @@ schemas = api['components']['schemas']
 draft = json.loads((root/'contracts/drafts/openapi-0.4.json').read_text())
 validate_spec(draft)
 draft_schemas = draft['components']['schemas']
-assert 'snapshot_mode' not in schemas['ResearchPlan']['properties']
+assert 'snapshot_mode' in schemas['ResearchPlan']['properties']
 assert 'snapshot_mode' in draft_schemas['ResearchPlan']['required']
-assert 'quote_requirement' not in schemas['ResearchPlan']['properties']
+assert 'quote_requirement' in schemas['ResearchPlan']['properties']
 assert 'quote_requirement' in draft_schemas['ResearchPlan']['required']
 plan_request_04 = Draft202012Validator(draft_schemas['CreatePlanV04'], format_checker=FormatChecker())
 assert not list(plan_request_04.iter_errors({'text': '研究该公司', 'quote_requirement': 'realtime_trade'}))
