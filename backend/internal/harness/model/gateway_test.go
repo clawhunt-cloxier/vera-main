@@ -59,7 +59,7 @@ func TestGatewayOpenAIRetryRepairReuseBudget(t *testing.T) {
 	}
 	prof := Profile{Name: "writer", Adapter: "openai", BaseURL: srv.URL, ModelID: "flash", APIKey: "test-key"}
 	g := NewGateway(pool, map[string]Profile{"writer": prof}, map[string]Adapter{"openai": OpenAI{}}, prices(), sc, pol, decimal.RequireFromString("30"))
-	g.sleep = func(time.Duration) {}
+	g.wait = func(context.Context, time.Duration) error { return nil }
 	task := uuid.New()
 	req := Request{Workspace: uuid.New(), Task: &task, StepKey: "summary", Profile: "writer", Messages: []Message{{"user", "写摘要"}},
 		MaxOutput: 500, Schema: "summary-output", Budget: pol.Budgets["stock_analysis"]}

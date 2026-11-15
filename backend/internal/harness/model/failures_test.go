@@ -20,6 +20,37 @@ import (
 
 const okSummary = `{"points":[{"text":"a","claim_refs":["S2.1"]}]}`
 
+func TestWaitContextHonoursCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	if err := waitContext(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitContext error = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("cancelled retry wait took %s", elapsed)
+	}
+}
+
+func TestGatewayStopsBeforeRetryWhenContextIsCancelled(t *testing.T) {
+	var hits atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}, Profile{})
+	ctx, cancel := context.WithCancel(context.Background())
+	x.g.wait = func(_ context.Context, _ time.Duration) error {
+		cancel()
+		return context.Canceled
+	}
+	if _, _, err := x.g.Complete(ctx, x.req()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("retry cancellation error = %v, want context.Canceled", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("cancelled retry made %d upstream calls, want 1", hits.Load())
+	}
+}
+
 func reply(w http.ResponseWriter, content, finish string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"model": "flash-1017",
 		"choices": []any{map[string]any{"message": map[string]any{"content": content}, "finish_reason": finish}},
@@ -52,7 +83,7 @@ func newGW(t *testing.T, h http.HandlerFunc, prof Profile) *harnessT {
 	}
 	x := &harnessT{pool: pool, pol: pol}
 	x.g = NewGateway(pool, map[string]Profile{"writer": prof}, map[string]Adapter{"openai": OpenAI{}}, prices(), sc, pol, decimal.RequireFromString("30"))
-	x.g.sleep = func(d time.Duration) { x.slept = append(x.slept, d) }
+	x.g.wait = func(_ context.Context, d time.Duration) error { x.slept = append(x.slept, d); return nil }
 	return x
 }
 

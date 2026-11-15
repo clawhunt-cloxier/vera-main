@@ -83,8 +83,10 @@ type Gateway struct {
 	DailyLimit decimal.Decimal
 	sem        chan struct{}
 	profSem    map[string]chan struct{}
-	sleep      func(time.Duration)
-	now        func() time.Time
+	// wait is injectable so retry tests do not sleep, while production waits
+	// remain interruptible when a task is cancelled or reaches its deadline.
+	wait func(context.Context, time.Duration) error
+	now  func() time.Time
 }
 
 func NewGateway(pool *pgxpool.Pool, profiles map[string]Profile, adapters map[string]Adapter, prices *PriceTable,
@@ -100,7 +102,18 @@ func NewGateway(pool *pgxpool.Pool, profiles map[string]Profile, adapters map[st
 		}
 	}
 	return &Gateway{Pool: pool, Profiles: profiles, Adapters: adapters, Prices: prices, Schemas: schemas, Policy: pol,
-		DailyLimit: daily, sem: make(chan struct{}, n), profSem: ps, sleep: time.Sleep, now: time.Now}
+		DailyLimit: daily, sem: make(chan struct{}, n), profSem: ps, wait: waitContext, now: time.Now}
+}
+
+func waitContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // billable reports whether an adapter may reach a paid vendor.
@@ -180,7 +193,9 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 				if me.RetryIn > wait {
 					wait = me.RetryIn
 				}
-				g.sleep(wait)
+				if err := g.wait(ctx, wait); err != nil {
+					return nil, Meta{}, err
+				}
 				continue
 			}
 			return nil, Meta{}, lastErr
