@@ -83,7 +83,7 @@ func (s *Server) Handler() http.Handler {
 	for p, hh := range s.Mounts {
 		m.Handle(p, hh)
 	}
-	return httpx.WithRequestID(recoverer(secure(m)))
+	return httpx.WithRequestID(recoverer(secure(researchVersionGate(m))))
 }
 
 func secure(next http.Handler) http.Handler {
