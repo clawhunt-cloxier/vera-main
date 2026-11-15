@@ -74,9 +74,10 @@ func (q Quote) LastPriceAt(code string, asOf time.Time, maxAge time.Duration) (L
 	return LastPrice{Code: q.Data.Codes[codeIndex], Value: value, EventAt: event, ObservedAt: q.ObservedAt.UTC()}, nil
 }
 
-// EventTime validates a quote against the research cutoff. Vendor TIME is
-// HHMMSS in China local time; this interpretation is limited to the observed
-// integer form. Unsupported timestamp forms fail closed until verified.
+// EventTime validates a quote against the research cutoff using the proposed
+// HHMMSS China-local convention for the observed integer form. This function
+// does not verify vendor semantics or authorize that convention; publication
+// requires a separately verified mapping policy. Unsupported forms fail closed.
 // maxAge must be chosen by the caller's registered data policy.
 func (q Quote) EventTime(code int, asOf time.Time, maxAge time.Duration) (time.Time, error) {
 	if asOf.IsZero() || q.ObservedAt.IsZero() || maxAge <= 0 || q.ObservedAt.After(asOf) || len(q.Data.Dates) != 1 {

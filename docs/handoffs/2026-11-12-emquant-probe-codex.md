@@ -108,6 +108,10 @@
 
 ## 未完成与下一步
 
+- 2026-11-15 用户授权先做单股简版真实数据研报并部署测试网站，范围见 ADR-0005；三项完整技能和 V02 仍未完成。服务器模型配置存在，writer/verifier/router 的 model ID 均为 `deepseek-flash`；仅读取配置存在性与非密钥标识，未记录密钥。服务器当时运行 `vera demo`，数据提供方为默认 fixture，不能宣称已连接真实数据。最新 `origin/dev`（PR #29 前端）已合并至本工作分支。
+- SDK 随附 `python3/EmQuantAPI.py` 将 `csq` 描述为异步实时行情、`csqsnapshot` 描述为同步快照（最多 64 指标）；`python3/demo.py` 在订阅示例中使用 `TIME,Now,Volume`，快照示例使用 `NOW`。随附 PDF 的 `cfc` 仅校验 CSS/CSD/CSES，不能据此证明行情快照的 `TIME` 时区或账户实时延迟。
+- 测试网站镜像原先以 `CGO_ENABLED=0` 构建，无法加载 Choice 原生库；本分支改为 Debian Bookworm 构建并启用 cgo，在运行镜像提供 C++ 运行时依赖。本地 cgo 构建与原生模拟 SDK 竞态测试通过；本地 Docker daemon 无访问权限，最终镜像构建与 SDK 挂载尚待 CI/部署环境验证。
+
 ### 2026-11-15 T012 / T014 合入后的 Choice 集成
 
 - PR #26 与 PR #28 已合入 `dev`（`be172a4`），T014b 分支已合并该基线并解决 `store.go` 冲突。对照两侧保留 T014 的质量过滤、冻结锁、血缘冲突比较与 Choice 分支的事务、时点和模拟隔离；合并提交 `c479b46`。T014b 继续领取记录见 TASKS。数据服务竞态测试、文档及契约检查通过；全包测试结果以本次后续验证为准。
