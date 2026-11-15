@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
@@ -325,6 +329,120 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	if err := binding.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
+	fullWS, fullTask := syntheticQuoteTask(t, pool, entityID)
+	syntheticQuoteIntent(t, pool, fullWS, fullTask, entityID)
+	if _, err := runtime.FreezeLatestSnapshot(ctx, cat, fullWS, fullTask, 1, 1); err == nil {
+		t.Fatal("snapshot froze without confirmed dataset requirements")
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO task_snapshot_requirements(workspace_id,task_id,epoch,dataset_ids,required_ids)
+		VALUES($1,$2,1,ARRAY['mkt.intraday_quote','fin.statement','flow.margin'],ARRAY['mkt.intraday_quote','fin.statement'])`, fullWS, fullTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.FreezeLatestSnapshot(ctx, cat, uuid.New(), fullTask, 1, 1); err == nil {
+		t.Fatal("snapshot crossed workspaces")
+	}
+	type frozenResult struct {
+		value LatestSnapshot
+		err   error
+	}
+	frozen := make(chan frozenResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			value, err := runtime.FreezeLatestSnapshot(ctx, cat, fullWS, fullTask, 1, 1)
+			frozen <- frozenResult{value, err}
+		}()
+	}
+	a, b := <-frozen, <-frozen
+	full, err := a.value, a.err
+	if err != nil || b.err != nil || b.value.Hash != full.Hash || !b.value.Cutoff.Equal(full.Cutoff) || len(full.Datasets) != 3 || full.Hash == "" || full.Cutoff.IsZero() {
+		t.Fatalf("concurrent freeze did not reuse one winner: %v / %v", err, b.err)
+	}
+	states := make(map[string]SnapshotDataset)
+	for _, d := range full.Datasets {
+		states[d.DatasetID] = d
+	}
+	if states["mkt.intraday_quote"].State != "available" || !states["mkt.intraday_quote"].Required || states["fin.statement"].State != "unavailable" || !states["fin.statement"].Required || states["flow.margin"].State != "unavailable" || states["flow.margin"].Required {
+		t.Fatalf("snapshot lost required or unavailable dataset status: %+v", states)
+	}
+	retry, err := runtime.FreezeLatestSnapshot(ctx, cat, fullWS, fullTask, 1, 1)
+	if err != nil || retry.Hash != full.Hash || !retry.Cutoff.Equal(full.Cutoff) {
+		t.Fatalf("snapshot retry did not reuse frozen manifest: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE task_snapshot_requirements SET dataset_ids=ARRAY['mkt.intraday_quote'] WHERE task_id=$1`, fullTask); err == nil {
+		t.Fatal("confirmed snapshot requirements were modified")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE task_snapshot_manifests SET manifest='tampered'::bytea WHERE task_id=$1`, fullTask); err == nil {
+		t.Fatal("bound snapshot manifest was modified")
+	}
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	defer sqlDB.Close()
+	migrator, err := goose.NewProvider(goose.DialectPostgres, sqlDB, os.DirFS("../../platform/db/migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrator.Down(ctx); err == nil {
+		t.Fatal("rollback discarded a bound snapshot")
+	}
+	fullAuth, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.AuthorizeBoundSnapshotQuote(ctx, fullAuth, fullWS, fullTask, 1, 1, full.Hash, dataservice.SourceDisplay); err != nil {
+		t.Fatalf("bound snapshot quote authorization: %v", err)
+	}
+	if err := runtime.AuthorizeBoundSnapshotQuote(ctx, fullAuth, fullWS, fullTask, 1, 1, full.Hash, dataservice.SourceModel); err == nil {
+		t.Fatal("required missing dataset allowed model processing")
+	}
+	if err := runtime.AuthorizeBoundSnapshotQuote(ctx, fullAuth, fullWS, fullTask, 1, 1, strings.Repeat("0", 64), dataservice.SourceDisplay); err == nil {
+		t.Fatal("wrong full snapshot hash authorized quote")
+	}
+	_ = fullAuth.Rollback(ctx)
+	liveWS, liveTask := syntheticQuoteTask(t, pool, entityID)
+	if _, err := pool.Exec(ctx, `INSERT INTO quote_task_intents(workspace_id,task_id,epoch,plan_hash,protocol,requirement,entity_ids)
+		VALUES($1,$2,1,'synthetic-plan-hash','0.4','realtime_trade',ARRAY[$3]::uuid[])`, liveWS, liveTask, entityID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO task_snapshot_requirements(workspace_id,task_id,epoch,dataset_ids,required_ids)
+		VALUES($1,$2,1,ARRAY['mkt.intraday_quote'],ARRAY['mkt.intraday_quote'])`, liveWS, liveTask); err != nil {
+		t.Fatal(err)
+	}
+	liveSnapshot, err := runtime.FreezeLatestSnapshot(ctx, cat, liveWS, liveTask, 1, 1)
+	if err != nil || len(liveSnapshot.Datasets) != 1 || liveSnapshot.Datasets[0].State != "unavailable" {
+		t.Fatalf("unknown quote latency or market status satisfied a realtime snapshot: %v", err)
+	}
+	liveAuth, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.AuthorizeBoundSnapshotQuote(ctx, liveAuth, liveWS, liveTask, 1, 1, liveSnapshot.Hash, dataservice.SourceModel); err == nil {
+		t.Fatal("missing realtime quote reached model")
+	}
+	if err := runtime.AuthorizeBoundSnapshotQuote(ctx, liveAuth, liveWS, liveTask, 1, 1, liveSnapshot.Hash, dataservice.SourceDisplay); err == nil {
+		t.Fatal("missing realtime quote authorized for display")
+	}
+	_ = liveAuth.Rollback(ctx)
+	badLiveWS, badLiveTask := syntheticQuoteTask(t, pool, entityID)
+	if _, err := pool.Exec(ctx, `INSERT INTO quote_task_intents(workspace_id,task_id,epoch,plan_hash,protocol,requirement,entity_ids)
+		VALUES($1,$2,1,'synthetic-plan-hash','0.4','realtime_trade',ARRAY[$3]::uuid[])`, badLiveWS, badLiveTask, entityID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO task_snapshot_requirements(workspace_id,task_id,epoch,dataset_ids,required_ids)
+		VALUES($1,$2,1,ARRAY['mkt.intraday_quote','fin.statement'],ARRAY['fin.statement'])`, badLiveWS, badLiveTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.FreezeLatestSnapshot(ctx, cat, badLiveWS, badLiveTask, 1, 1); err == nil {
+		t.Fatal("realtime quote was made optional")
+	}
+	var badComponents int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM quote_task_components WHERE task_id=$1`, badLiveTask).Scan(&badComponents); err != nil || badComponents != 0 {
+		t.Fatalf("failed freeze persisted a component: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE research_tasks SET epoch=epoch+1,revision=revision+1,status='CANCEL_REQUESTED' WHERE id=$1`, fullTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.FreezeLatestSnapshot(ctx, cat, fullWS, fullTask, 1, 1); err == nil {
+		t.Fatal("cancelled task reused frozen snapshot")
+	}
 	authorization, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		t.Fatal(err)
@@ -451,6 +569,9 @@ func TestStageQuoteRequiresRegisteredSourceAndCurrentPolicy(t *testing.T) {
 	var appCanRead, appCanInsert bool
 	if err := pool.QueryRow(ctx, `SELECT has_table_privilege('vera_app','quote_task_components','SELECT'),has_table_privilege('vera_app','quote_task_intents','INSERT')`).Scan(&appCanRead, &appCanInsert); err != nil || appCanRead || appCanInsert {
 		t.Fatalf("workspace role can bypass quote component controls: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT has_table_privilege('vera_app','task_snapshot_manifests','SELECT'),has_table_privilege('vera_app','task_snapshot_requirements','INSERT')`).Scan(&appCanRead, &appCanInsert); err != nil || appCanRead || appCanInsert {
+		t.Fatalf("workspace role can bypass snapshot controls: %v", err)
 	}
 	mu.Lock()
 	objects[objectKey] = []byte("corrupt")

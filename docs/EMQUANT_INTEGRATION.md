@@ -92,3 +92,5 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 进程环境必须提供 `DATABASE_URL`、`EMQUANT_LIBRARY`（SDK 库绝对路径）、`EMQUANT_USER`、`EMQUANT_PASSWORD`、`EMQUANT_ACCOUNT_SCOPE`、`EMQUANT_S3_ENDPOINT`、`EMQUANT_S3_REGION`、`EMQUANT_S3_ACCESS_KEY`、`EMQUANT_S3_SECRET_KEY`、`EMQUANT_S3_BUCKET`、`EMQUANT_PROVIDER_ID`、`EMQUANT_PRODUCT`、`VERA_CONTRACTS_DIR`、`EMQUANT_MIN_INTERVAL` 和 `EMQUANT_RATE_COOLDOWN`；可选 `EMQUANT_S3_PREFIX`。限流间隔至少 90ms，冷却时间不得短于间隔；实际账号、方法和其他程序共享的限额仍须独立核验。数据库需预先迁移并由受控人员登记经核实的许可、证券及映射政策；不要把凭证放进命令参数或仓库。该命令不会替代当前缺失的 0.4 应用接线，也不能单凭调用成功证明实时权限或时效。
 
 恢复发布只需上述数据库和 `EMQUANT_S3_*` 对象存储配置，无需 SDK 路径、Choice 账号密码或限流参数。连接数据库后的恢复尝试会写入成功或失败审计；权限撤销、来源损坏或尚未发布的候选过期等情况不会伪报成功。
+
+迁移 `00016` 和 `FreezeLatestSnapshot` 为已确认的 0.4 任务提供固定 MVCC 视图内的原子清单绑定：受信确认流程预先保存不可变的数据集要求，行情组件和截止时间与任务 epoch/revision 一起写入；并发或重试读取已绑定清单。当前只有个股行情有已发布数据选择器，其他要求的数据集明确标记 `unavailable`，必需数据缺失时禁止通过该路径发送给模型。读取行情前仍须通过 `AuthorizeBoundSnapshotQuote` 验证完整绑定和当前用途许可。这里尚未实现低频数据发布与选择、0.4 确认流程、任务 worker 或报告接线，不能将清单当作可交付研报。
