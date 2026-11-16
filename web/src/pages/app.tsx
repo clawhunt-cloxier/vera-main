@@ -55,178 +55,188 @@ export function App() {
 
   return (
     <main>
-      {synthetic && <SyntheticBanner />}
-      {observation && (
-        <p className="notice">
-          当前可生成已接入股票的真实成交数据简报，包含成交量、成交额和换手率。使用已取得的日成交数据，非盘中实时行情；实时行情与财务分析尚未开放。
-        </p>
-      )}
-      <header className="app-head">
-        <strong className="logo">VERA</strong>
-        <nav>
-          <Link to="/app/watchlist">自选股</Link>
-          <Link to="/app/reports">报告</Link>
-          <details className="menu">
-            <summary aria-label="账户菜单">{me.data?.display_name ?? '账户'}</summary>
-            <button
-              type="button"
-              className="ghost small"
-              onClick={async () => {
-                try {
-                  await post('/auth/logout', {});
-                } finally {
-                  window.location.assign('/');
-                }
-              }}
-            >
-              退出登录
-            </button>
-          </details>
-        </nav>
-      </header>
-
-      <section className="quick">
-        <h1>发起研究</h1>
-        <div className="card">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              plan.mutate();
-            }}
-          >
-            <label htmlFor="queryInput" className="form-label">
-              描述你想要的研究
-            </label>
-            <textarea
-              id="queryInput"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={
-                observation
-                  ? '输入已接入的股票名称或代码，生成真实成交简报'
-                  : placeholders[placeholderIdx] || '输入研究需求…'
-              }
-              onFocus={() => setPlaceholderIdx((i) => (i + 1) % placeholders.length)}
-              rows={3}
-              required
-              maxLength={500}
-              className="form-input"
-            />
-            <div className="meta" style={{ marginTop: 12 }}>
-              <span className="muted">{text.length}/500</span>
-            </div>
-            <div className="actions">
-              <button type="submit" disabled={plan.isPending || !text.trim()} className="primary">
-                {plan.isPending ? '识别中…' : '开始研究'}
-              </button>
-            </div>
-          </form>
-          {plan.error && <ErrorBox error={plan.error} />}
-          {plan.data?.kind === 'choose' && (
+      {me.isLoading && <Loading />}
+      {(me.isError || (!me.isLoading && !me.data)) && null}
+      {me.data && (
+        <>
+          {synthetic && <SyntheticBanner />}
+          {observation && (
             <p className="notice">
-              您的需求对应多个可能的研究对象，请在下方快速启动中选择具体对象。
+              当前可生成已接入股票的真实成交数据简报，包含成交量、成交额和换手率。使用已取得的日成交数据，非盘中实时行情；实时行情与财务分析尚未开放。
             </p>
           )}
-          {plan.data?.kind === 'unsupported' && (
-            <p className="error">
-              <strong>不支持的需求：</strong> {plan.data.unsupported_reason}
-            </p>
-          )}
-        </div>
-      </section>
+          <header className="app-head">
+            <strong className="logo">VERA</strong>
+            <nav>
+              <Link to="/app/watchlist">自选股</Link>
+              <Link to="/app/reports">报告</Link>
+              <details className="menu">
+                <summary aria-label="账户菜单">{me.data?.display_name ?? '账户'}</summary>
+                <button
+                  type="button"
+                  className="ghost small"
+                  onClick={async () => {
+                    try {
+                      await post('/auth/logout', {});
+                    } finally {
+                      window.location.assign('/');
+                    }
+                  }}
+                >
+                  退出登录
+                </button>
+              </details>
+            </nav>
+          </header>
 
-      <section className="skills">
-        <h2>快速启动</h2>
-        <div className="grid">
-          {skills.isLoading ? (
-            Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="card small">
-                <Skeleton height={24} />
-                <Skeleton height={16} style={{ marginTop: 12 }} />
-              </div>
-            ))
-          ) : skills.data?.items.length === 0 ? (
-            <Empty>暂无可用技能</Empty>
-          ) : (
-            skills.data?.items.map((sk) => (
-              <Link
-                key={sk.id}
-                to="/app/quick/$skill"
-                params={{ skill: sk.id as any }}
-                className="card interactive"
+          <section className="quick">
+            <h1>发起研究</h1>
+            <div className="card">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  plan.mutate();
+                }}
               >
-                <h3>{sk.title}</h3>
-                {!sk.available && <Tag tone="warn">暂不可用</Tag>}
-              </Link>
-            ))
-          )}
-        </div>
-      </section>
+                <label htmlFor="queryInput" className="form-label">
+                  描述你想要的研究
+                </label>
+                <textarea
+                  id="queryInput"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder={
+                    observation
+                      ? '输入已接入的股票名称或代码，生成真实成交简报'
+                      : placeholders[placeholderIdx] || '输入研究需求…'
+                  }
+                  onFocus={() => setPlaceholderIdx((i) => (i + 1) % placeholders.length)}
+                  rows={3}
+                  required
+                  maxLength={500}
+                  className="form-input"
+                />
+                <div className="meta" style={{ marginTop: 12 }}>
+                  <span className="muted">{text.length}/500</span>
+                </div>
+                <div className="actions">
+                  <button
+                    type="submit"
+                    disabled={plan.isPending || !text.trim()}
+                    className="primary"
+                  >
+                    {plan.isPending ? '识别中…' : '开始研究'}
+                  </button>
+                </div>
+              </form>
+              {plan.error && <ErrorBox error={plan.error} />}
+              {plan.data?.kind === 'choose' && (
+                <p className="notice">
+                  您的需求对应多个可能的研究对象，请在下方快速启动中选择具体对象。
+                </p>
+              )}
+              {plan.data?.kind === 'unsupported' && (
+                <p className="error">
+                  <strong>不支持的需求：</strong> {plan.data.unsupported_reason}
+                </p>
+              )}
+            </div>
+          </section>
 
-      <section className="recent">
-        <h2>最近任务</h2>
-        {tasks.isLoading && <Loading label="加载任务中…" />}
-        {tasks.data?.items.length === 0 && (
-          <Empty>尚未发起研究任务。在上方输入需求或选择快速启动试试。</Empty>
-        )}
-        {tasks.data && tasks.data.items.length > 0 && (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>研究对象</th>
-                  <th>技能</th>
-                  <th>状态</th>
-                  <th>创建时间</th>
-                  <th style={{ width: 100 }}>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.data.items.map((t) => (
-                  <tr key={t.id}>
-                    <td>
-                      <strong>{t.subject.name}</strong>
-                    </td>
-                    <td>{skillTitle[t.skill_id]}</td>
-                    <td>
-                      <Tag
-                        tone={
-                          t.status === 'COMPLETED'
-                            ? 'ok'
-                            : terminal.includes(t.status)
-                              ? 'bad'
-                              : 'info'
-                        }
-                      >
-                        {statusLabel[t.status]}
-                      </Tag>
-                    </td>
-                    <td>{fmtTime(t.created_at)}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        {t.status === 'COMPLETED' && t.report_ref && (
-                          <Link
-                            to="/app/reports/$id"
-                            params={{ id: t.report_ref.id }}
-                            className="btn-link"
+          <section className="skills">
+            <h2>快速启动</h2>
+            <div className="grid">
+              {skills.isLoading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="card small">
+                    <Skeleton height={24} />
+                    <Skeleton height={16} style={{ marginTop: 12 }} />
+                  </div>
+                ))
+              ) : skills.data?.items.length === 0 ? (
+                <Empty>暂无可用技能</Empty>
+              ) : (
+                skills.data?.items.map((sk) => (
+                  <Link
+                    key={sk.id}
+                    to="/app/quick/$skill"
+                    params={{ skill: sk.id as any }}
+                    className="card interactive"
+                  >
+                    <h3>{sk.title}</h3>
+                    {!sk.available && <Tag tone="warn">暂不可用</Tag>}
+                  </Link>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="recent">
+            <h2>最近任务</h2>
+            {tasks.isLoading && <Loading label="加载任务中…" />}
+            {tasks.data?.items.length === 0 && (
+              <Empty>尚未发起研究任务。在上方输入需求或选择快速启动试试。</Empty>
+            )}
+            {tasks.data && tasks.data.items.length > 0 && (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>研究对象</th>
+                      <th>技能</th>
+                      <th>状态</th>
+                      <th>创建时间</th>
+                      <th style={{ width: 100 }}>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tasks.data.items.map((t) => (
+                      <tr key={t.id}>
+                        <td>
+                          <strong>{t.subject.name}</strong>
+                        </td>
+                        <td>{skillTitle[t.skill_id]}</td>
+                        <td>
+                          <Tag
+                            tone={
+                              t.status === 'COMPLETED'
+                                ? 'ok'
+                                : terminal.includes(t.status)
+                                  ? 'bad'
+                                  : 'info'
+                            }
                           >
-                            查看
-                          </Link>
-                        )}
-                        {!terminal.includes(t.status) && (
-                          <Link to="/app/tasks/$id" params={{ id: t.id }} className="btn-link">
-                            详情
-                          </Link>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                            {statusLabel[t.status]}
+                          </Tag>
+                        </td>
+                        <td>{fmtTime(t.created_at)}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            {t.status === 'COMPLETED' && t.report_ref && (
+                              <Link
+                                to="/app/reports/$id"
+                                params={{ id: t.report_ref.id }}
+                                className="btn-link"
+                              >
+                                查看
+                              </Link>
+                            )}
+                            {!terminal.includes(t.status) && (
+                              <Link to="/app/tasks/$id" params={{ id: t.id }} className="btn-link">
+                                详情
+                              </Link>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </main>
   );
 }

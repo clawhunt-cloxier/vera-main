@@ -194,10 +194,11 @@ func spa(dir string) http.Handler {
 		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
 		if st, err := filepathStat(p); err != nil || st {
 			w.Header().Set("Cache-Control", "no-cache")
-			// Routes under /app belong to the React SPA (app.html).
+			// React SPA (app.html) owns the authenticated routes: /app/* and /onboarding.
 			// All other unknown paths fall back to the landing page (index.html).
 			fallback := "index.html"
-			if r.URL.Path == "/app" || strings.HasPrefix(r.URL.Path, "/app/") {
+			if r.URL.Path == "/app" || strings.HasPrefix(r.URL.Path, "/app/") ||
+				r.URL.Path == "/onboarding" || strings.HasPrefix(r.URL.Path, "/onboarding/") {
 				fallback = "app.html"
 			}
 			http.ServeFile(w, r, filepath.Join(dir, fallback))
