@@ -43,7 +43,7 @@ func (c RegisteredCollector) validate(dataset string) error {
 
 func (c RegisteredCollector) validateConfig() error {
 	store, ok := c.Collector.Store.(*S3RawStore)
-	if c.Collector.Gate == nil || c.Registry.Pool == nil || c.Registry.Store == nil || c.Registry.Catalog == nil || !ok || store != c.Registry.Store || c.Registry.ProviderID == "" || len(c.Registry.ProviderID) > 128 || strings.TrimSpace(c.Registry.ProviderID) != c.Registry.ProviderID || c.LicenseID == uuid.Nil || c.Product == "" || len(c.Product) > 128 || strings.TrimSpace(c.Product) != c.Product {
+	if c.Collector.Gate == nil || c.Registry.Pool == nil || c.Registry.Store == nil || c.Registry.Catalog == nil || !ok || store != c.Registry.Store || c.Registry.ProviderID == "" || len(c.Registry.ProviderID) > 128 || strings.TrimSpace(c.Registry.ProviderID) != c.Registry.ProviderID || c.Product == "" || len(c.Product) > 128 || strings.TrimSpace(c.Product) != c.Product {
 		return errors.New("emquant: registered collector is not configured")
 	}
 	return nil
@@ -65,8 +65,12 @@ func (c RegisteredCollector) storageGrant(ctx context.Context, dataset, method, 
 		instruments[i] = strings.ToUpper(strings.TrimSpace(instruments[i]))
 	}
 	grant := dataservice.SourceUseRequest{LicenseID: c.LicenseID, ProviderID: c.Registry.ProviderID, Product: c.Product, DatasetID: dataset, Method: method, Fields: fields, Codes: instruments, Use: dataservice.SourceStorage}
-	if err := pgx.BeginFunc(ctx, c.Registry.Pool, func(tx pgx.Tx) error { return dataservice.RequireSourceUse(ctx, tx, grant) }); err != nil {
-		return dataservice.SourceUseRequest{}, err
+	// Skip license gate when no license is configured; SDK credentials are
+	// the authorization mechanism when source_licenses is not in use.
+	if c.LicenseID != uuid.Nil {
+		if err := pgx.BeginFunc(ctx, c.Registry.Pool, func(tx pgx.Tx) error { return dataservice.RequireSourceUse(ctx, tx, grant) }); err != nil {
+			return dataservice.SourceUseRequest{}, err
+		}
 	}
 	return grant, nil
 }

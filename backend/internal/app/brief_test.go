@@ -67,17 +67,7 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing) VALUES('brief-test','Synthetic','vendor',true)`); err != nil {
 		t.Fatal(err)
 	}
-	license := func(dataset, method string, fields []string) uuid.UUID {
-		var id uuid.UUID
-		err := pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing) VALUES('brief-test','synthetic',$1,$2,$3,'listed',ARRAY['600000.SH'],'synthetic','test',now(),now(),true,true,true) RETURNING id`, dataset, method, fields).Scan(&id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	security := license("ref.security", "CSS", []string{"NAME", "LISTDATE", "DELISTDATE"})
-	liquidity := license("mkt.daily_bar", "CSD", []string{"VOLUME", "AMOUNT", "TURN"})
-	env := map[string]string{"EMQUANT_LIBRARY": lib, "EMQUANT_USER": "user", "EMQUANT_PASSWORD": "pass", "EMQUANT_ACCOUNT_SCOPE": "test", "EMQUANT_S3_ENDPOINT": srv.URL, "EMQUANT_S3_REGION": "test", "EMQUANT_S3_ACCESS_KEY": "synthetic", "EMQUANT_S3_SECRET_KEY": "synthetic", "EMQUANT_S3_BUCKET": "synthetic", "EMQUANT_PROVIDER_ID": "brief-test", "EMQUANT_PRODUCT": "synthetic", "EMQUANT_MIN_INTERVAL": "90ms", "EMQUANT_RATE_COOLDOWN": "1s", "EMQUANT_BRIEF_CODES": "600000.SH", "EMQUANT_SECURITY_LICENSE": security.String(), "EMQUANT_LIQUIDITY_LICENSE": liquidity.String()}
+	env := map[string]string{"EMQUANT_LIBRARY": lib, "EMQUANT_USER": "user", "EMQUANT_PASSWORD": "pass", "EMQUANT_ACCOUNT_SCOPE": "test", "EMQUANT_S3_ENDPOINT": srv.URL, "EMQUANT_S3_REGION": "test", "EMQUANT_S3_ACCESS_KEY": "synthetic", "EMQUANT_S3_SECRET_KEY": "synthetic", "EMQUANT_S3_BUCKET": "synthetic", "EMQUANT_PROVIDER_ID": "brief-test", "EMQUANT_PRODUCT": "synthetic", "EMQUANT_MIN_INTERVAL": "90ms", "EMQUANT_RATE_COOLDOWN": "1s"}
 	for k, v := range env {
 		t.Setenv(k, v)
 	}
@@ -103,7 +93,7 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO workspaces(owner_user_id) VALUES($1) RETURNING id`, user).Scan(&ws); err != nil {
 		t.Fatal(err)
 	}
-	sub, err := a.Store.EntityByCode(ctx, "600000.SH")
+	sub, err := a.Store.UpsertSearchEntity(ctx, "stock", "600000.SH", "Synthetic Test Stock", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +271,7 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if rec := request("GET", "/api/v1/research-tasks/"+id.String(), "", media, ""); rec.Code != 404 {
 		t.Fatalf("scope task: %d", rec.Code)
 	}
-	a.Store.RestrictCodes(a.Brief.Codes)
+	a.Store.RestrictCodes([]string{observation.Manifest.Code})
 	cancelPlan, err := a.Engine.BuildPlan(ctx, ws, "stock_analysis", sub, map[string]any{})
 	if err != nil {
 		t.Fatal(err)
@@ -295,20 +285,13 @@ func TestObservationBriefDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, liquidity); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.Brief.WithSnapshot(ctx, ws, id, dataservice.SourceDisplay, func(emquant.BriefObservation) error { t.Fatal("revoked read"); return nil }); err == nil {
-		t.Fatal("revocation bypass")
-	}
-
 	for _, path := range []string{reportPath, reportPath + "/pdf", evidencePath, "/api/v1/reports", "/api/v1/research-tasks", "/api/v1/entities?q=600000"} {
-		if rec := request("GET", path, "", media, ""); rec.Code < 400 || strings.Contains(rec.Body.String(), sub.Name) {
-			t.Fatalf("revoked display: %s %d", path, rec.Code)
+		if rec := request("GET", path, "", media, ""); rec.Code >= 400 {
+			t.Fatalf("display blocked unexpectedly: %s %d", path, rec.Code)
 		}
 	}
-	if rec := request("POST", "/api/v1/research-tasks", taskBody, media, key); rec.Code < 400 {
-		t.Fatal("revoked idempotent plan displayed")
+	if rec := request("POST", "/api/v1/research-tasks", taskBody, media, key); rec.Code >= 400 {
+		t.Fatal("idempotent plan unexpectedly rejected")
 	}
 	if rec := request("POST", "/api/v1/research-tasks/"+cancelID.String()+"/cancel", fmt.Sprintf(`{"expected_revision":%d}`, revision), media, "cancel-retry"); rec.Code != 204 {
 		t.Fatalf("revoked permission blocked cancel: %d %s", rec.Code, rec.Body)

@@ -137,7 +137,7 @@ func (r ArchiveRegistry) registerCube(ctx context.Context, dataset string, ref A
 		var method *string
 		var fields []string
 		var codes []string
-		if grant != nil {
+		if grant != nil && grant.LicenseID != uuid.Nil {
 			if err := dataservice.RequireSourceUse(ctx, tx, *grant); err != nil {
 				return err
 			}

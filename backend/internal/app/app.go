@@ -90,7 +90,6 @@ func (a *App) build(ctx context.Context) error {
 			return err
 		}
 		a.Provider = a.Brief
-		a.Store.RestrictCodes(a.Brief.Codes)
 	} else if a.Provider, err = newProvider(c); err != nil {
 		return err
 	}
