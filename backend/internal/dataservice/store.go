@@ -520,3 +520,40 @@ func (s *Store) Mentioned(ctx context.Context, text string) ([]EntityRow, error)
 }
 
 func (s *Store) RestrictCodes(codes []string) { s.allowedCodes = append([]string(nil), codes...) }
+
+// UpsertSearchEntity inserts or updates a non-synthetic entity discovered via
+// a real-time vendor search. It is a search-index-only write: it does not
+// grant data permissions, establish data lineage, or add research records.
+// Bypasses allowedCodes because this is a write path creating the row.
+func (s *Store) UpsertSearchEntity(ctx context.Context, kind, code, name string, aliases []string) (EntityRow, error) {
+	if kind == "" || code == "" || name == "" {
+		return EntityRow{}, fmt.Errorf("dataservice: upsert search entity: kind, code and name required")
+	}
+	var id uuid.UUID
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,synthetic,status)
+			VALUES($1,$2,$3,false,'unknown')
+			ON CONFLICT (code) DO UPDATE SET name=excluded.name
+			RETURNING id`, kind, code, name).Scan(&id); err != nil {
+			return err
+		}
+		for _, a := range append([]string{strings.ToLower(code), strings.ToLower(name)}, aliases...) {
+			a = strings.TrimSpace(strings.ToLower(a))
+			if a == "" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO entity_aliases VALUES($1,$2) ON CONFLICT DO NOTHING`, id, a); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return EntityRow{}, fmt.Errorf("dataservice: upsert search entity %s: %w", code, err)
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities WHERE id=$1`, id)
+	if err != nil {
+		return EntityRow{}, err
+	}
+	return pgx.CollectExactlyOneRow(rows, scanEntity)
+}

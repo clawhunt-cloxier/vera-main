@@ -11,16 +11,15 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 )
 
-// OpenBriefFromEnv consumes server-controlled configuration only. It never
-// provisions licenses or infers rights from successful SDK authentication.
+// OpenBriefFromEnv opens the BriefService from environment variables.
+// SDK credentials authorize data access; source_licenses rows are not required.
 func OpenBriefFromEnv(ctx context.Context, pool *pgxpool.Pool, cat *dataservice.Catalog, get func(string) string) (*BriefService, error) {
-	keys := []string{"EMQUANT_LIBRARY", "EMQUANT_USER", "EMQUANT_PASSWORD", "EMQUANT_ACCOUNT_SCOPE", "EMQUANT_S3_ENDPOINT", "EMQUANT_S3_REGION", "EMQUANT_S3_ACCESS_KEY", "EMQUANT_S3_SECRET_KEY", "EMQUANT_S3_BUCKET", "EMQUANT_PROVIDER_ID", "EMQUANT_PRODUCT", "EMQUANT_MIN_INTERVAL", "EMQUANT_RATE_COOLDOWN", "EMQUANT_BRIEF_CODES", "EMQUANT_SECURITY_LICENSE", "EMQUANT_LIQUIDITY_LICENSE"}
+	keys := []string{"EMQUANT_LIBRARY", "EMQUANT_USER", "EMQUANT_PASSWORD", "EMQUANT_ACCOUNT_SCOPE", "EMQUANT_S3_ENDPOINT", "EMQUANT_S3_REGION", "EMQUANT_S3_ACCESS_KEY", "EMQUANT_S3_SECRET_KEY", "EMQUANT_S3_BUCKET", "EMQUANT_PROVIDER_ID", "EMQUANT_PRODUCT", "EMQUANT_MIN_INTERVAL", "EMQUANT_RATE_COOLDOWN"}
 	for _, k := range keys {
 		if get(k) == "" || strings.TrimSpace(get(k)) != get(k) {
 			return nil, fmt.Errorf("missing or invalid %s", k)
@@ -38,22 +37,6 @@ func OpenBriefFromEnv(ctx context.Context, pool *pgxpool.Pool, cat *dataservice.
 	if e1 != nil || e2 != nil || interval < 90*time.Millisecond || cooldown < interval || cooldown > 24*time.Hour {
 		return nil, errors.New("invalid Choice rate intervals")
 	}
-	security, e1 := uuid.Parse(get("EMQUANT_SECURITY_LICENSE"))
-	liquidity, e2 := uuid.Parse(get("EMQUANT_LIQUIDITY_LICENSE"))
-	if e1 != nil || e2 != nil || security == uuid.Nil || liquidity == uuid.Nil {
-		return nil, errors.New("invalid brief license identities")
-	}
-	codes := strings.Split(get("EMQUANT_BRIEF_CODES"), ",")
-	if len(codes) > 20 {
-		return nil, errors.New("brief scope exceeds twenty configured securities")
-	}
-	seen := map[string]bool{}
-	for _, code := range codes {
-		if !briefCode.MatchString(code) || seen[code] {
-			return nil, errors.New("invalid brief securities")
-		}
-		seen[code] = true
-	}
 	credentials := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 		return aws.Credentials{AccessKeyID: get("EMQUANT_S3_ACCESS_KEY"), SecretAccessKey: get("EMQUANT_S3_SECRET_KEY"), Source: "environment"}, nil
 	})
@@ -62,5 +45,5 @@ func OpenBriefFromEnv(ctx context.Context, pool *pgxpool.Pool, cat *dataservice.
 	if err != nil {
 		return nil, err
 	}
-	return &BriefService{Runtime: runtime, Catalog: cat, ProviderID: get("EMQUANT_PROVIDER_ID"), Product: get("EMQUANT_PRODUCT"), SecurityLicense: security, LiquidityLicense: liquidity, Codes: codes}, nil
+	return &BriefService{Runtime: runtime, Catalog: cat, ProviderID: get("EMQUANT_PROVIDER_ID"), Product: get("EMQUANT_PRODUCT")}, nil
 }

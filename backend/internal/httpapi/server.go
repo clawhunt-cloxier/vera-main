@@ -217,7 +217,7 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		scope := ""
 		if s.Engine.Brief != nil {
-			scope = strings.Join(s.Engine.Brief.Codes, ",")
+			scope = s.Engine.Brief.ProviderID
 		}
 		sum := sha256.Sum256(append([]byte(r.URL.Path+"\x00"+representation(r)+"\x00"+scope+"\x00"), body...))
 		hash := hex.EncodeToString(sum[:])
