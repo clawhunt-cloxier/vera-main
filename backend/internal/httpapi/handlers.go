@@ -93,6 +93,8 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 		httpx.JSON(w, r, 200, map[string]any{"items": items})
 		return nil
 	}
+
+	// Try local store first (demo/fixture data)
 	ents, err := s.Store.Search(r.Context(), q, kind, 20)
 	if err != nil {
 		return err
@@ -100,6 +102,32 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 	for _, e := range ents {
 		items = append(items, toEntity(e, s.Engine.Skills))
 	}
+
+	// If searching for stocks and no local results, try real Choice data
+	if len(items) == 0 && (kind == "" || kind == "stock") && s.Engine.Brief != nil {
+		// Query Choice API for matching stocks by code or name
+		table, err := s.Engine.Brief.Runtime.MatchStockName(q)
+		if err == nil && len(table.Data) > 0 {
+			// Parse Choice results: first column is code, second is name
+			for i := 0; i < len(table.Data) && i < 20; i++ {
+				row := table.Data[i]
+				if len(row) >= 2 {
+					if code, ok := row[0].(string); ok {
+						if name, ok := row[1].(string); ok {
+							items = append(items, Entity{
+								ID:     "", // Will be filled if user clicks to view
+								Kind:   "stock",
+								Code:   code,
+								Name:   name,
+								Status: "active",
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
 	return nil
 }
