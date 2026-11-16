@@ -5,16 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
@@ -94,7 +97,7 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 
-	// Try local store first (demo/fixture data)
+	// Try local store first (demo/fixture data and previously cached vendor results)
 	ents, err := s.Store.Search(r.Context(), q, kind, 20)
 	if err != nil {
 		return err
@@ -103,8 +106,158 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 		items = append(items, toEntity(e, s.Engine.Skills))
 	}
 
+	// If local search found nothing and we have a real vendor, query Choice in real-time
+	if len(items) == 0 && s.Engine.Brief != nil {
+		if vendorEnts, err := s.searchVendorStocks(r, q, kind); err != nil {
+			// Log and fall through — don't fail the whole search on a vendor error
+			slog.Warn("vendor stock search failed", "query", q, "err", err)
+		} else {
+			for _, e := range vendorEnts {
+				items = append(items, toEntity(e, s.Engine.Skills))
+			}
+		}
+	}
+
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
 	return nil
+}
+
+// isStockCode returns true for 6-digit numeric strings (A-share code without exchange suffix).
+func isStockCode(q string) bool {
+	if len(q) != 6 {
+		return false
+	}
+	for _, ch := range q {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isStockName returns true for strings that look like a Chinese short name (letters, digits, CJK).
+func isStockName(q string) bool {
+	for _, ch := range q {
+		if !unicode.IsLetter(ch) && !unicode.IsNumber(ch) && !strings.ContainsRune(" *.-·()（）", ch) {
+			return false
+		}
+	}
+	return true
+}
+
+// searchVendorStocks calls the Choice API for the query, upserts discovered entities, and
+// returns the matched EntityRows. It only searches stocks; industry/market have no equivalent.
+func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataservice.EntityRow, error) {
+	if kind != "" && kind != "stock" {
+		return nil, nil
+	}
+	runtime := s.Engine.Brief.Runtime
+	if runtime == nil {
+		return nil, nil
+	}
+
+	var table emquant.Table
+	var colName, colCode int = -1, -1
+
+	if isStockCode(q) {
+		t, _, err := runtime.CollectStockCodeCandidates(r.Context(), q)
+		if err != nil {
+			return nil, err
+		}
+		table = t
+		// CEC returns: CODE, FULLCODES, ... — we need FULLCODES (with exchange suffix)
+		for i, col := range table.Columns {
+			switch strings.ToUpper(col) {
+			case "FULLCODES":
+				colCode = i
+			}
+		}
+		// If FULLCODES not present, fall back to first column
+		if colCode == -1 && len(table.Columns) > 0 {
+			colCode = 0
+		}
+	} else if isStockName(q) {
+		t, _, err := runtime.CollectStockNameCandidates(r.Context(), q)
+		if err != nil {
+			return nil, err
+		}
+		table = t
+		// CTR returns: SECURITYSHORTNAME, SECUCODE
+		for i, col := range table.Columns {
+			switch strings.ToUpper(col) {
+			case "SECURITYSHORTNAME":
+				colName = i
+			case "SECUCODE":
+				colCode = i
+			}
+		}
+	} else {
+		return nil, nil
+	}
+
+	if table.Rows == 0 || len(table.Columns) == 0 {
+		return nil, nil
+	}
+
+	numCols := len(table.Columns)
+	var out []dataservice.EntityRow
+	seen := map[string]bool{}
+
+	for row := 0; row < table.Rows; row++ {
+		base := row * numCols
+
+		var name, code string
+		if colName >= 0 && base+colName < len(table.Values) {
+			name, _ = table.Values[base+colName].Value.(string)
+		}
+		if colCode >= 0 && base+colCode < len(table.Values) {
+			rawCode, _ := table.Values[base+colCode].Value.(string)
+			// FULLCODES may be comma-separated ("000001.SZ,000001.SH"); take first
+			if idx := strings.Index(rawCode, ","); idx >= 0 {
+				rawCode = rawCode[:idx]
+			}
+			code = strings.TrimSpace(rawCode)
+		}
+
+		// For code-only lookup the name comes from the code itself
+		if name == "" && code != "" {
+			name = strings.Split(code, ".")[0]
+		}
+		if code == "" || seen[code] {
+			continue
+		}
+		// Only accept properly qualified A-share codes
+		if !emquantBriefCodeLike(code) {
+			continue
+		}
+		seen[code] = true
+
+		e, err := s.Store.UpsertSearchEntity(r.Context(), "stock", code, name, nil)
+		if err != nil {
+			slog.Warn("failed to upsert vendor search entity", "code", code, "err", err)
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// emquantBriefCodeLike checks that a code looks like a qualified A-share code (NNNNNN.XX).
+func emquantBriefCodeLike(code string) bool {
+	parts := strings.SplitN(code, ".", 2)
+	if len(parts) != 2 || len(parts[0]) != 6 {
+		return false
+	}
+	for _, ch := range parts[0] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	switch parts[1] {
+	case "SH", "SZ", "BJ":
+		return true
+	}
+	return false
 }
 
 func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
