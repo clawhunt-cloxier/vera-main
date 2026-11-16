@@ -156,23 +156,24 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 	}
 
 	var table emquant.Table
-	var colName, colCode int = -1, -1
+	colName, colCode := -1, -1
 
-	if isStockCode(q) {
+	switch {
+	case isStockCode(q):
 		t, _, err := runtime.CollectStockCodeCandidates(r.Context(), q)
 		if err != nil {
 			return nil, err
 		}
 		table = t
 		for i, col := range table.Columns {
-			if strings.ToUpper(col) == "FULLCODES" {
+			if strings.EqualFold(col, "FULLCODES") {
 				colCode = i
 			}
 		}
 		if colCode == -1 && len(table.Columns) > 0 {
 			colCode = 0
 		}
-	} else if isStockName(q) {
+	case isStockName(q):
 		t, _, err := runtime.CollectStockNameCandidates(r.Context(), q)
 		if err != nil {
 			return nil, err
@@ -186,7 +187,7 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 				colCode = i
 			}
 		}
-	} else {
+	default:
 		return nil, nil
 	}
 
