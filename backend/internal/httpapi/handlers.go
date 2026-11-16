@@ -106,7 +106,7 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 	// If searching for stocks and no local results, try real Choice data
 	if len(items) == 0 && (kind == "" || kind == "stock") && s.Engine.Brief != nil {
 		// Query Choice API for matching stocks by code or name
-		table, err := s.Engine.Brief.Runtime.MatchStockName(q)
+		table, err := s.Engine.Brief.Runtime.SearchStocks(q)
 		if err == nil && len(table.Data) > 0 {
 			// Parse Choice results: first column is code, second is name
 			for i := 0; i < len(table.Data) && i < 20; i++ {
