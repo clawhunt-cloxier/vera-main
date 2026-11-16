@@ -236,14 +236,6 @@ func (r *Runtime) MapMarginFromArchive(ctx context.Context, ref ArchiveRef, code
 	return mapMarginObservations(cube, ref, code, start, end)
 }
 
-// SearchStocks queries the Choice API for stocks matching a code or name
-func (r *Runtime) SearchStocks(name string) (Table, error) {
-	if r == nil || r.client == nil {
-		return Table{}, errors.New("emquant: runtime unavailable")
-	}
-	return r.client.MatchStockName(name)
-}
-
 func (r *Runtime) CollectMarginObservations(ctx context.Context, code, from, to string) (MarginObservations, error) {
 	if r == nil || r.client == nil {
 		return MarginObservations{}, errors.New("emquant: runtime unavailable")
