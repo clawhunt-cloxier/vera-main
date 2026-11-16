@@ -91,6 +91,10 @@ func (a *App) build(ctx context.Context) error {
 		}
 		a.Provider = a.Brief
 		a.Store.RestrictCodes(a.Brief.Codes)
+		// Seed common real A-share securities for search indexing (no reporting authorization)
+		if err := seedRealSecurities(ctx, a.Pool); err != nil {
+			slog.Warn("failed to seed real securities", "err", err)
+		}
 	} else if a.Provider, err = newProvider(c); err != nil {
 		return err
 	}
@@ -209,6 +213,49 @@ func spa(dir string) http.Handler {
 		}
 		fs.ServeHTTP(w, r)
 	})
+}
+
+// seedRealSecurities inserts common A-share securities for search indexing when using real data provider.
+// This enables users to search for real stocks even if they don't have brief reporting authorization yet.
+func seedRealSecurities(ctx context.Context, pool *pgxpool.Pool) error {
+	sql := `INSERT INTO entities (kind, code, name, synthetic) VALUES
+		('stock', '601398.SH', '中国工商银行', false),
+		('stock', '600000.SH', '浦发银行', false),
+		('stock', '600016.SH', '民生银行', false),
+		('stock', '600036.SH', '招商银行', false),
+		('stock', '601988.SH', '中国银行', false),
+		('stock', '601939.SH', '建设银行', false),
+		('stock', '300059.SZ', '东方财富', false),
+		('stock', '000858.SZ', '五粮液', false),
+		('stock', '000651.SZ', '格力电器', false),
+		('stock', '000333.SZ', '美的集团', false),
+		('stock', '600519.SH', '贵州茅台', false),
+		('stock', '000002.SZ', '万科A', false),
+		('stock', '000963.SZ', '华东医药', false),
+		('stock', '600030.SH', '中信证券', false),
+		('stock', '601066.SH', '中信建投', false)
+	ON CONFLICT (kind, code) DO NOTHING;
+
+	INSERT INTO entity_aliases (entity_id, alias)
+	VALUES
+		((SELECT id FROM entities WHERE code='601398.SH'), '工商银行'),
+		((SELECT id FROM entities WHERE code='600000.SH'), '浦发'),
+		((SELECT id FROM entities WHERE code='600036.SH'), '招商'),
+		((SELECT id FROM entities WHERE code='600036.SH'), '招商银行'),
+		((SELECT id FROM entities WHERE code='601988.SH'), '中行'),
+		((SELECT id FROM entities WHERE code='601939.SH'), '建行'),
+		((SELECT id FROM entities WHERE code='300059.SZ'), '东方财富'),
+		((SELECT id FROM entities WHERE code='300059.SZ'), '东财'),
+		((SELECT id FROM entities WHERE code='000858.SZ'), '五粮液'),
+		((SELECT id FROM entities WHERE code='000651.SZ'), '格力'),
+		((SELECT id FROM entities WHERE code='600519.SH'), '贵州茅台'),
+		((SELECT id FROM entities WHERE code='600519.SH'), '茅台'),
+		((SELECT id FROM entities WHERE code='000002.SZ'), '万科'),
+		((SELECT id FROM entities WHERE code='600030.SH'), '中信证券')
+	ON CONFLICT (entity_id, alias) DO NOTHING;`
+
+	_, err := pool.Exec(ctx, sql)
+	return err
 }
 
 func (a *App) Close() {
