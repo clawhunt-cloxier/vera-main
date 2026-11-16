@@ -44,15 +44,20 @@ func OpenBriefFromEnv(ctx context.Context, pool *pgxpool.Pool, cat *dataservice.
 		return nil, errors.New("invalid brief license identities")
 	}
 	codes := strings.Split(get("EMQUANT_BRIEF_CODES"), ",")
-	if len(codes) > 20 {
-		return nil, errors.New("brief scope exceeds twenty configured securities")
-	}
-	seen := map[string]bool{}
-	for _, code := range codes {
-		if !briefCode.MatchString(code) || seen[code] {
-			return nil, errors.New("invalid brief securities")
+	// A single "*" means accept any A-share code matching the standard pattern.
+	// The source_licenses table remains the authoritative permission gate.
+	wildcardScope := len(codes) == 1 && codes[0] == "*"
+	if !wildcardScope {
+		if len(codes) > 100 {
+			return nil, errors.New("brief scope exceeds one hundred configured securities")
 		}
-		seen[code] = true
+		seen := map[string]bool{}
+		for _, code := range codes {
+			if !briefCode.MatchString(code) || seen[code] {
+				return nil, errors.New("invalid brief securities")
+			}
+			seen[code] = true
+		}
 	}
 	credentials := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 		return aws.Credentials{AccessKeyID: get("EMQUANT_S3_ACCESS_KEY"), SecretAccessKey: get("EMQUANT_S3_SECRET_KEY"), Source: "environment"}, nil

@@ -45,9 +45,20 @@ var briefCode = regexp.MustCompile(`^[0-9]{6}\.(SH|SZ|BJ)$`)
 func (b *BriefService) collector(id uuid.UUID) (RegisteredCollector, error) {
 	return b.Runtime.RegisteredCollector(b.Catalog, b.ProviderID, b.Product, id)
 }
+// WildcardScope reports whether this service accepts any valid A-share code.
+// When true, the source_licenses table is the sole authorization gate.
+func (b *BriefService) WildcardScope() bool {
+	return len(b.Codes) == 1 && b.Codes[0] == "*"
+}
+
 func (b *BriefService) permitted(code string) bool {
 	if !briefCode.MatchString(code) {
 		return false
+	}
+	// Wildcard scope: any valid A-share code is permitted; the license gate
+	// (RequireSourceUse) remains the authoritative authorization check.
+	if len(b.Codes) == 1 && b.Codes[0] == "*" {
+		return true
 	}
 	for _, c := range b.Codes {
 		if c == code {
@@ -89,6 +100,11 @@ func (b *BriefService) Entities(ctx context.Context) ([]dataservice.Entity, erro
 	c, err := b.collector(b.SecurityLicense)
 	if err != nil {
 		return nil, err
+	}
+	// Wildcard scope: entities are populated lazily via real-time search rather
+	// than by enumerating a configured list at startup.
+	if len(b.Codes) == 1 && b.Codes[0] == "*" {
+		return nil, nil
 	}
 	var out []dataservice.Entity
 	for _, code := range b.Codes {

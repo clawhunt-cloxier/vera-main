@@ -90,7 +90,11 @@ func (a *App) build(ctx context.Context) error {
 			return err
 		}
 		a.Provider = a.Brief
-		a.Store.RestrictCodes(a.Brief.Codes)
+		// Wildcard scope (EMQUANT_BRIEF_CODES=*) means no local allowlist; entities
+		// are populated lazily via real-time search and gated by source licenses.
+		if !a.Brief.WildcardScope() {
+			a.Store.RestrictCodes(a.Brief.Codes)
+		}
 	} else if a.Provider, err = newProvider(c); err != nil {
 		return err
 	}
