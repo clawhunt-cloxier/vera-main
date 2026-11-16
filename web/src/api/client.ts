@@ -74,9 +74,9 @@ export async function api<T>(
     );
     if (!opts.noRedirect) {
       if (res.status === 401) {
-        window.location.assign(
-          '/auth/login?return_to=' + encodeURIComponent(location.pathname + location.search)
-        );
+        // 未登录：跳到密码登录页（/onboarding），而不是 OIDC 流（GET /auth/login）。
+        const from = encodeURIComponent(location.pathname + location.search);
+        window.location.assign('/onboarding?return_to=' + from);
       } else if (err.code === 'ONBOARDING_REQUIRED' && location.pathname !== '/onboarding') {
         window.location.assign('/onboarding');
       }

@@ -6,20 +6,23 @@ import { useMe } from '../api/hooks';
 import { ErrorBox, Loading } from '../components/ui';
 
 export function Onboarding() {
-  const me = useMe();
+  // noRedirect=true：/onboarding 本身就是登录页，不能因为 401 再跳回来死循环。
+  const me = useMe(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [persona, setPersona] = useState<S<'OnboardingInput'>['persona']>('individual');
   const nav = useNavigate();
+  const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  const returnTo = params.get('return_to') || '/app';
   const mut = useMutation({
     mutationFn: async () => {
       const resp = await post<{ success: boolean; return_to: string }>('/auth/login', {
         username,
         password,
-        return_to: '/app',
+        return_to: returnTo,
       });
       if (resp.success) {
-        nav({ to: resp.return_to || '/app' });
+        window.location.assign(resp.return_to || returnTo);
       }
     },
   });
@@ -29,7 +32,8 @@ export function Onboarding() {
         <Loading />
       </main>
     );
-  if (!me.data || me.data.onboarded) {
+  // 已登录且有工作区 → 直接去工作台。
+  if (me.data?.onboarded) {
     nav({ to: '/app' });
     return null;
   }
