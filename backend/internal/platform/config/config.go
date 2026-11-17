@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/modelguard"
@@ -61,9 +62,13 @@ type Config struct {
 	DataProvider      string // fixture | <vendor id>
 	Registration      bool
 	RealResearch      bool
-	DailyCostLimit    decimal.Decimal
-	Profiles          map[string]ModelProfile
-	WorkerQueues      int
+	// QuoteLicenseID and QuotePolicyID are deployment-side grants for the
+	// realtime quote path. They are never accepted from a client or model.
+	QuoteLicenseID uuid.UUID
+	QuotePolicyID  uuid.UUID
+	DailyCostLimit decimal.Decimal
+	Profiles       map[string]ModelProfile
+	WorkerQueues   int
 }
 
 func env(k, d string) string {
@@ -114,6 +119,17 @@ func Load() (*Config, error) {
 		Registration:      boolEnv("VERA_REGISTRATION_ENABLED", false),
 		RealResearch:      boolEnv("VERA_REAL_RESEARCH_ENABLED", false),
 		Profiles:          map[string]ModelProfile{},
+	}
+	for name, dst := range map[string]*uuid.UUID{"EMQUANT_QUOTE_LICENSE_ID": &c.QuoteLicenseID, "EMQUANT_QUOTE_POLICY_ID": &c.QuotePolicyID} {
+		v := strings.TrimSpace(os.Getenv(name))
+		if v == "" {
+			continue
+		}
+		id, parseErr := uuid.Parse(v)
+		if parseErr != nil || id == uuid.Nil {
+			return nil, fmt.Errorf("%s must be a non-zero UUID", name)
+		}
+		*dst = id
 	}
 	limit, err := decimal.NewFromString(env("VERA_DAILY_MODEL_COST_LIMIT_USD", "30.00"))
 	if err != nil {
@@ -207,6 +223,12 @@ func (c *Config) validate(problems []string) error {
 	}
 	if c.DatabaseURL == "" {
 		problems = append(problems, "DATABASE_URL is required")
+	}
+	if (c.QuoteLicenseID == uuid.Nil) != (c.QuotePolicyID == uuid.Nil) {
+		problems = append(problems, "EMQUANT_QUOTE_LICENSE_ID and EMQUANT_QUOTE_POLICY_ID must be configured together")
+	}
+	if c.QuoteLicenseID != uuid.Nil && c.DataProvider != "emquant" {
+		problems = append(problems, "quote source configuration requires VERA_DATA_PROVIDER=emquant")
 	}
 	if c.DevOIDC && c.Env == "production" {
 		problems = append(problems, "production refuses the development OIDC issuer (VERA_DEV_OIDC)")

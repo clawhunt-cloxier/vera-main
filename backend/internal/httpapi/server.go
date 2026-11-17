@@ -52,7 +52,11 @@ func (s *Server) Handler() http.Handler {
 			// available after a vendor display grant is revoked so a queued job
 			// cannot be kept alive by the failed closed display gate.
 			cancel := strings.HasSuffix(r.URL.Path, "/cancel") && r.Method == http.MethodPost
-			if s.Engine.Brief != nil && !cancel && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
+			// Reports and evidence perform their own snapshot authorization
+			// through the final write. An outer buffer would release those
+			// grant locks before the protected bytes are actually sent.
+			boundRead := strings.HasPrefix(r.URL.Path, "/api/v1/reports/") || strings.HasPrefix(r.URL.Path, "/api/v1/evidence/")
+			if s.Engine.Brief != nil && !cancel && !boundRead && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
 				callErr = s.Engine.Brief.WithDisplayCatalog(r.Context(), func() error { return nil })
 				if callErr == nil {
 					// Render without retaining a permission transaction across

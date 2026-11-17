@@ -725,13 +725,11 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	mode := "fixed_legacy"
-	var snapshotAt *time.Time
-	if d.SkillVersion == "1.1.0-demo.2" {
-		mode = "collect_latest"
-		snapshotAt = &d.AsOf
+	mode := d.SnapshotMode
+	if mode == "" {
+		mode = "fixed_legacy"
 	}
-	httpx.JSON(w, r, 200, Report{SnapshotMode: mode, SnapshotAsOf: snapshotAt, ID: d.ID, Version: d.Version, TaskID: d.TaskID, Title: d.Title, SkillID: d.SkillID, SkillVersion: d.SkillVersion,
+	httpx.JSON(w, r, 200, Report{SnapshotMode: mode, SnapshotAsOf: d.SnapshotAsOf, SourceFreshness: d.SourceFreshness, ID: d.ID, Version: d.Version, TaskID: d.TaskID, Title: d.Title, SkillID: d.SkillID, SkillVersion: d.SkillVersion,
 		Subject: toEntity(ents[d.SubjectID], s.Engine.Skills), AsOf: d.AsOf, DataAsOf: d.DataAsOf, ResultKind: d.ResultKind, Synthetic: d.Synthetic,
 		AIGenerated: true, SummaryRefs: d.SummaryRefs, Sections: d.Sections, Claims: d.Claims, Limitations: d.Limitations, Sources: d.Sources,
 		Disclaimer: d.Disclaimer, DeliveredAt: d.DeliveredAt})

@@ -193,27 +193,28 @@ type ReportSummary struct {
 }
 
 type Report struct {
-	SnapshotMode string               `json:"snapshot_mode,omitempty"`
-	SnapshotAsOf *time.Time           `json:"snapshot_as_of,omitempty"`
-	ID           uuid.UUID            `json:"id"`
-	Version      int                  `json:"version"`
-	TaskID       uuid.UUID            `json:"task_id"`
-	Title        string               `json:"title"`
-	SkillID      string               `json:"skill_id"`
-	SkillVersion string               `json:"skill_version"`
-	Subject      Entity               `json:"subject"`
-	AsOf         time.Time            `json:"as_of"`
-	DataAsOf     string               `json:"data_as_of"`
-	ResultKind   string               `json:"result_kind"`
-	Synthetic    bool                 `json:"synthetic"`
-	AIGenerated  bool                 `json:"ai_generated"`
-	SummaryRefs  []string             `json:"summary_claim_refs"`
-	Sections     []harness.DocSection `json:"sections"`
-	Claims       []harness.DocClaim   `json:"claims"`
-	Limitations  []string             `json:"limitations"`
-	Sources      []harness.DocSource  `json:"sources"`
-	Disclaimer   string               `json:"disclaimer"`
-	DeliveredAt  time.Time            `json:"delivered_at"`
+	SnapshotMode    string                    `json:"snapshot_mode,omitempty"`
+	SnapshotAsOf    *time.Time                `json:"snapshot_as_of,omitempty"`
+	SourceFreshness []harness.SourceFreshness `json:"source_freshness,omitempty"`
+	ID              uuid.UUID                 `json:"id"`
+	Version         int                       `json:"version"`
+	TaskID          uuid.UUID                 `json:"task_id"`
+	Title           string                    `json:"title"`
+	SkillID         string                    `json:"skill_id"`
+	SkillVersion    string                    `json:"skill_version"`
+	Subject         Entity                    `json:"subject"`
+	AsOf            time.Time                 `json:"as_of"`
+	DataAsOf        string                    `json:"data_as_of"`
+	ResultKind      string                    `json:"result_kind"`
+	Synthetic       bool                      `json:"synthetic"`
+	AIGenerated     bool                      `json:"ai_generated"`
+	SummaryRefs     []string                  `json:"summary_claim_refs"`
+	Sections        []harness.DocSection      `json:"sections"`
+	Claims          []harness.DocClaim        `json:"claims"`
+	Limitations     []string                  `json:"limitations"`
+	Sources         []harness.DocSource       `json:"sources"`
+	Disclaimer      string                    `json:"disclaimer"`
+	DeliveredAt     time.Time                 `json:"delivered_at"`
 }
 
 type Evidence struct {
