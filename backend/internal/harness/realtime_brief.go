@@ -135,7 +135,7 @@ func (e *Engine) realtimePipeline(ctx, parent context.Context, t *taskRow, sk *S
 		}
 	}
 	var sheet *facts.Sheet
-	err = e.withRealtimeSnapshot(ctx, t, dataservice.SourceModel, func(tx pgx.Tx, _ emquant.QuoteView) error {
+	err = pgx.BeginTxFunc(ctx, e.Pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
 		var err error
 		sheet, _, err = BoundQuoteFacts(ctx, tx, e.Brief.Runtime, t.Workspace, t.ID, t.Subject, t.Epoch, t.SnapshotRevision, *t.Snapshot)
 		return err

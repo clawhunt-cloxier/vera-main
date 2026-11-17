@@ -236,8 +236,18 @@ func TestRealtimeBriefPipelineAndRecovery(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM report_versions WHERE task_id=$1`, cancelled).Scan(&reports); err != nil || reports != 0 {
 		t.Fatal("cancelled task delivered")
 	}
+	unconfirmed, err := e.BuildRealtimePlan(ctx, ws, "stock_analysis", subjects["600000.SH"], nil, "latest_available")
+	if err != nil || !unconfirmed.Executable {
+		t.Fatalf("pending plan: %+v %v", unconfirmed, err)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, source.LicenseID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := e.CreateTask(ctx, ws, unconfirmed.ID, unconfirmed.Hash, nil); err == nil {
+		t.Fatal("revoked source confirmed a task")
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM research_tasks WHERE plan_id=$1`, unconfirmed.ID).Scan(&reports); err != nil || reports != 0 {
+		t.Fatal("failed confirmation retained a task")
 	}
 	if err := brief.Runtime.WithTaskSnapshotQuote(ctx, ws, id, dataservice.SourceDisplay, func(emquant.QuoteView) error { t.Fatal("revoked source displayed"); return nil }); err == nil {
 		t.Fatal("source revocation ignored")
