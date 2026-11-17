@@ -83,4 +83,4 @@
 
 Playwright 覆盖：登录 → 首页一句话 → 计划确认 → 进度 → 报告 → 打开证据 → 反馈 → 加入自选股 → 自选股列表；以及 unsupported、choose、ABSTAINED 三个分支；桌面与 390×844 手机视口各跑一次。测试使用 fixture 数据和录制回放的模型响应。
 
-0.4 前端验证：`cd web && npm run test:api-client` 检查请求/响应媒体类型、降级拒绝以及旧计划的原协议确认；`npm run test:realtime-ui` 使用明确标注的模拟 API 数据，在桌面和手机视口验证行情选择、计划确认、冻结截止与证据时间展示（需 Playwright Chromium）。这不替代真实厂商端到端验收。
+0.4 前端验证：`make test-web-client`（已纳入 `make verify` / CI）检查请求/响应媒体类型、降级拒绝以及旧计划的原协议确认。先执行 `cd web && npm ci && npx playwright install --with-deps chromium` 安装浏览器及系统依赖，再运行 `npm run test:realtime-ui`；该测试使用明确标注的模拟 API 数据，在桌面和手机视口验证行情选择、计划确认、冻结截止与证据时间展示，并检查旧 observation 与历史报告兼容。这不替代真实厂商端到端验收。

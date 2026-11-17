@@ -10,11 +10,14 @@ ADR-0004 的 [盘中时点与来源样例](tests/fixtures/intraday-cases.json) �
 - `make check-api-types`：用锁定版本的 openapi-typescript 重新生成前端类型并与 `web/src/api/schema.d.ts` 比较；不一致时执行 `cd web && npm run gen:api`。
 - `make check-toolchain`：Go ≥ 1.27、Node ≥ 26 的版本检查。
 - `make test-go`：健康与就绪接口的 Go 测试。
+- `make test-web-client`：使用模拟 HTTP 响应验证客户端协议协商、0.4 降级拒绝、旧计划确认、历史报告读取和取消；已纳入 `make verify` 与 CI，无浏览器或厂商依赖。
 - `make build-web`：TypeScript 检查与 Vite 生产构建。
 - `make test-automation`：用离线 API 替身验证“合并后自动清理任务分支”的保护条件；不请求 GitHub，也不删除真实分支。真实触发与权限需在合并后查看维护作业。
 - `make verify`：以上全部。CI 不使用真实密钥，不调用收费模型。
 
 Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch policy 只检查 PR 来源分支，不证明业务正确。
+
+前端页面验收可运行 `cd web && npm ci && npx playwright install --with-deps chromium && npm run test:realtime-ui`。该命令需要下载 Playwright Chromium 及系统依赖；使用标注为模拟的 API 响应，在桌面和手机视口检查 0.4 选择、确认、冻结时间、证据展示，并回归旧 observation 计划、历史报告与取消流程，不调用真实数据厂商或模型。浏览器用例不替代真实行情时点与授权的端到端验收。
 
 ## 2. 按任务补齐的测试
 

@@ -5,6 +5,7 @@ import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
 
 const media = 'application/vnd.vera.v0.4+json';
+const observationMedia = 'application/vnd.vera.observation.v1+json';
 const entity = {
   id: 'mock-entity',
   name: '模拟验收公司',
@@ -227,5 +228,113 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
       assert.deepEqual(errors, []);
       await context.close();
     });
+  }
+
+  for (const advertisedProtocol of ['v0.4', 'observation.v1']) {
+    await t.test(
+      `${advertisedProtocol}: old observation plan, cancellation and history`,
+      async () => {
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        page.setDefaultTimeout(10000);
+        const errors = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        const oldPlan = {
+          ...plan,
+          id: 'mock-old-plan',
+          skill_version: '1.1.0-demo.2',
+          quote_requirement: null,
+        };
+        const oldTask = {
+          ...task,
+          id: 'mock-old-task',
+          status: 'QUEUED',
+          snapshot_as_of: null,
+          report_ref: null,
+        };
+        const oldReport = {
+          ...report,
+          id: 'mock-old-report',
+          title: '模拟旧版观察简报',
+          skill_version: oldPlan.skill_version,
+          source_freshness: undefined,
+        };
+        const fixedReport = {
+          ...oldReport,
+          id: 'mock-fixed-report',
+          title: '模拟固定时点报告',
+          snapshot_mode: 'fixed_legacy',
+          snapshot_as_of: undefined,
+          data_as_of: '模拟历史截止',
+        };
+        const oldReports = [oldReport, fixedReport];
+        let cancelled = false;
+        await page.route(`${origin}/app**`, (route) =>
+          route.fulfill({ contentType: 'text/html', body: appHTML })
+        );
+        await page.route(`${origin}/api/v1/**`, async (route) => {
+          const request = route.request();
+          const path = new URL(request.url()).pathname;
+          const accept = request.headers().accept;
+          const selected =
+            advertisedProtocol === 'v0.4' && accept.includes(media) ? media : observationMedia;
+          let body;
+          if (path === '/api/v1/me')
+            body = {
+              user_id: 'mock-user',
+              workspace_id: 'mock-workspace',
+              csrf_token: 'mock-csrf',
+              persona: 'analyst',
+              quota: {},
+              onboarded: true,
+              synthetic: true,
+              display_name: '模拟验收',
+              research_protocol: advertisedProtocol,
+            };
+          else if (path === '/api/v1/research-plans/mock-old-plan') body = oldPlan;
+          else if (path === '/api/v1/research-tasks' && request.method() === 'POST') {
+            assert.equal(accept, observationMedia);
+            assert.equal(request.headers()['content-type'], 'application/json');
+            assert.equal(request.postDataJSON().plan_hash, oldPlan.plan_hash);
+            body = oldTask;
+          } else if (path === '/api/v1/research-tasks/mock-old-task')
+            body = { ...oldTask, status: cancelled ? 'CANCELLED' : 'QUEUED' };
+          else if (path === '/api/v1/research-tasks/mock-old-task/cancel') {
+            assert.equal(request.postDataJSON().expected_revision, oldTask.revision);
+            assert.equal(request.headers()['content-type'], 'application/json');
+            cancelled = true;
+            await route.fulfill({ status: 204 });
+            return;
+          } else if (path === '/api/v1/reports') body = { items: oldReports };
+          else if (path === '/api/v1/reports/mock-old-report/versions/1') body = oldReport;
+          else if (path === '/api/v1/reports/mock-fixed-report/versions/1') body = fixedReport;
+          else throw new Error(`Unexpected compatibility request ${path}`);
+          await route.fulfill({ contentType: selected, body: JSON.stringify(body) });
+        });
+        await page.goto(`${origin}/app/plan/mock-old-plan`);
+        await page.getByRole('heading', { name: '研究计划：模拟验收公司', exact: true }).waitFor();
+        assert.match(await page.locator('main').innerText(), /这是非实时简报/);
+        assert.equal(await page.getByRole('radio').count(), 0);
+        await page.getByRole('button', { name: '提交任务', exact: true }).click();
+        await page.getByRole('heading', { name: '任务：模拟验收公司', exact: true }).waitFor();
+        assert.match(await page.locator('main').innerText(), /数据快照尚未冻结/);
+        page.once('dialog', (dialog) => dialog.accept());
+        await page.getByRole('button', { name: '取消任务', exact: true }).click();
+        await page.getByText('已取消', { exact: true }).waitFor();
+        assert.equal(cancelled, true);
+
+        await page.goto(`${origin}/app/reports`);
+        await page.locator('a[href="/app/reports/mock-old-report"]').click();
+        await page.getByRole('heading', { name: oldReport.title, exact: true }).waitFor();
+        assert.match(await page.locator('.report-head').innerText(), /快照截止/);
+        assert.match(await page.locator('#limits').innerText(), /模拟厂商/);
+        await page.getByRole('link', { name: '← 返回报告列表' }).click();
+        await page.locator('a[href="/app/reports/mock-fixed-report"]').click();
+        await page.getByRole('heading', { name: fixedReport.title, exact: true }).waitFor();
+        assert.match(await page.locator('.report-head').innerText(), /数据截止 模拟历史截止/);
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+    );
   }
 });

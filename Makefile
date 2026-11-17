@@ -1,4 +1,4 @@
-.PHONY: setup setup-web check-toolchain check-docs check-contracts check-contract-compat check-api-types test-go test-integration test-automation build-web lint-go lint-web verify dev-up dev-down dev-api dev-web dev-migrate
+.PHONY: setup setup-web check-toolchain check-docs check-contracts check-contract-compat check-api-types test-go test-integration test-automation test-web-client build-web lint-go lint-web verify dev-up dev-down dev-api dev-web dev-migrate
 setup:
 	python3 -m venv .venv
 	.venv/bin/python -m pip install -r tooling/requirements.txt
@@ -19,6 +19,8 @@ check-api-types:
 	cd web && npm ci && npm run check:api
 test-go:
 	cd backend && go test -race ./...
+test-web-client:
+	cd web && npm ci && npm run test:api-client
 lint-go:
 	cd backend && golangci-lint run -c ../.golangci.yml
 lint-web:
@@ -28,7 +30,7 @@ build-web:
 test-automation:
 	.venv/bin/python scripts/test_branch_cleanup.py
 	python3 scripts/test_contract_compat.py
-verify: check-toolchain check-docs check-contracts check-contract-compat check-api-types test-go test-automation lint-go lint-web build-web
+verify: check-toolchain check-docs check-contracts check-contract-compat check-api-types test-go test-automation test-web-client lint-go lint-web build-web
 dev-up:
 	docker compose up -d
 	@echo "Waiting for services to be ready..."
