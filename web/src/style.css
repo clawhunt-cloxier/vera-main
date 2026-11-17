@@ -870,6 +870,22 @@ tr:hover {
   border-bottom: none;
 }
 
+.source-times {
+  display: grid;
+  grid-template-columns: minmax(6em, auto) minmax(0, 1fr);
+  gap: 8px 12px;
+  font-size: 13px;
+}
+
+.source-times dt {
+  color: var(--text-secondary);
+}
+
+.source-times dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .disclaimer {
   font-size: 12px;
   color: var(--text-muted);

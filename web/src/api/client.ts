@@ -17,6 +17,26 @@ export type ReportSummary = S<'ReportSummary'>;
 export type WatchItem = S<'WatchItem'>;
 export type WatchAlert = S<'WatchAlert'>;
 export type SkillId = S<'SkillId'>;
+export type QuoteRequirement = NonNullable<ResearchPlan['quote_requirement']>;
+export type ResearchProtocol = 'v0.4' | 'observation.v1' | 'legacy';
+
+const mediaTypes: Record<ResearchProtocol, string> = {
+  'v0.4': 'application/vnd.vera.v0.4+json',
+  'observation.v1': 'application/vnd.vera.observation.v1+json',
+  legacy: 'application/json',
+};
+
+export const planProtocol = (plan: ResearchPlan): ResearchProtocol =>
+  plan.quote_requirement
+    ? 'v0.4'
+    : plan.snapshot_mode === 'collect_latest'
+      ? 'observation.v1'
+      : 'legacy';
+
+export const quoteRequirementLabel: Record<QuoteRequirement, string> = {
+  realtime_trade: '交易中实时成交行情',
+  latest_available: '最近可用行情',
+};
 
 export class ApiError extends Error {
   constructor(
@@ -32,14 +52,14 @@ export class ApiError extends Error {
 }
 
 let csrf = '';
-let researchProtocol = '';
+let researchProtocol: ResearchProtocol | undefined;
 export const setCsrf = (t: string) => {
   csrf = t;
 };
 
 export const newKey = () => crypto.randomUUID();
 
-type Opts = { idem?: string; noRedirect?: boolean };
+type Opts = { idem?: string; noRedirect?: boolean; protocol?: ResearchProtocol };
 
 export async function api<T>(
   method: string,
@@ -47,10 +67,22 @@ export async function api<T>(
   body?: unknown,
   opts: Opts = {}
 ): Promise<T> {
+  const protocol = opts.protocol ?? researchProtocol;
+  const apiPath = path.startsWith('/api/v1/');
   const headers: Record<string, string> = {
-    Accept: 'application/vnd.vera.observation.v1+json, application/json;q=0.5',
+    Accept: apiPath
+      ? protocol
+        ? mediaTypes[protocol]
+        : `${mediaTypes['v0.4']}, ${mediaTypes['observation.v1']};q=0.8, application/json;q=0.5`
+      : 'application/json',
   };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (body !== undefined) {
+    headers['Content-Type'] =
+      protocol === 'v0.4' &&
+      (path === '/api/v1/research-plans' || path === '/api/v1/research-tasks')
+        ? mediaTypes['v0.4']
+        : 'application/json';
+  }
   if (method !== 'GET') headers['X-CSRF-Token'] = csrf;
   if (opts.idem) headers['Idempotency-Key'] = opts.idem;
   const res = await fetch(path, {
@@ -83,13 +115,25 @@ export async function api<T>(
     }
     throw err;
   }
-  if (path === '/api/v1/me') researchProtocol = data?.research_protocol ?? '';
+  const advertisedProtocol = data?.research_protocol;
+  const expectedProtocol: ResearchProtocol | undefined =
+    protocol ??
+    (path === '/api/v1/me' &&
+    (advertisedProtocol === 'v0.4' || advertisedProtocol === 'observation.v1')
+      ? advertisedProtocol
+      : undefined);
   if (
-    researchProtocol === 'observation.v1' &&
-    path.startsWith('/api/v1/') &&
-    res.headers.get('Content-Type')?.split(';')[0] !== 'application/vnd.vera.observation.v1+json'
+    apiPath &&
+    expectedProtocol &&
+    res.headers.get('Content-Type')?.split(';')[0].trim() !== mediaTypes[expectedProtocol]
   ) {
     throw new Error('服务端数据版本不匹配，请刷新后重试');
+  }
+  if (path === '/api/v1/me') {
+    researchProtocol =
+      advertisedProtocol === 'v0.4' || advertisedProtocol === 'observation.v1'
+        ? advertisedProtocol
+        : 'legacy';
   }
   return data as T;
 }
@@ -140,4 +184,16 @@ export const fmtTime = (s: string) =>
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+  }).format(new Date(s));
+
+export const fmtDataTime = (s: string) =>
+  new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
   }).format(new Date(s));

@@ -5,12 +5,15 @@ import {
   fmtTime,
   get,
   newKey,
+  planProtocol,
   post,
+  quoteRequirementLabel,
   skillTitle,
   statusLabel,
   terminal,
   type Entity,
   type PlanResult,
+  type QuoteRequirement,
   type ResearchPlan,
   type Skill,
   type SkillId,
@@ -18,10 +21,12 @@ import {
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
+import { QuoteRequirementField } from '../components/QuoteRequirementField';
 import { Empty, ErrorBox, Loading, Skeleton, SyntheticBanner, Tag } from '../components/ui';
 
 export function App() {
   const me = useMe();
+  const realtime = me.data?.research_protocol === 'v0.4';
   const skills = useQuery({
     queryKey: ['skills'],
     queryFn: () => get<{ items: Skill[] }>('/api/v1/skills'),
@@ -34,10 +39,16 @@ export function App() {
     refetchInterval: 5000,
   });
   const [text, setText] = useState('');
+  const [quoteRequirement, setQuoteRequirement] = useState<QuoteRequirement | ''>('');
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
-      const r = await post<PlanResult>('/api/v1/research-plans', { text }, { idem: newKey() });
+      if (realtime && !quoteRequirement) throw new Error('请选择行情要求');
+      const r = await post<PlanResult>(
+        '/api/v1/research-plans',
+        { text, ...(realtime ? { quote_requirement: quoteRequirement } : {}) },
+        { idem: newKey(), protocol: realtime ? 'v0.4' : undefined }
+      );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
       return r;
     },
@@ -63,6 +74,11 @@ export function App() {
           {observation && (
             <p className="notice">
               当前可生成已接入股票的真实成交数据简报，包含成交量、成交额和换手率。使用已取得的日成交数据，非盘中实时行情；实时行情与财务分析尚未开放。
+            </p>
+          )}
+          {realtime && (
+            <p className="notice">
+              请选择行情要求。确认后采集并冻结一次数据快照，报告会分别显示行情实际时点与来源限制。
             </p>
           )}
           <header className="app-head">
@@ -119,10 +135,13 @@ export function App() {
                 <div className="meta" style={{ marginTop: 12 }}>
                   <span className="muted">{text.length}/500</span>
                 </div>
+                {realtime && (
+                  <QuoteRequirementField value={quoteRequirement} onChange={setQuoteRequirement} />
+                )}
                 <div className="actions">
                   <button
                     type="submit"
-                    disabled={plan.isPending || !text.trim()}
+                    disabled={plan.isPending || !text.trim() || (realtime && !quoteRequirement)}
                     className="primary"
                   >
                     {plan.isPending ? '识别中…' : '开始研究'}
@@ -243,6 +262,7 @@ export function App() {
 
 export function Quick({ skill }: { skill: SkillId }) {
   const me = useMe();
+  const realtime = me.data?.research_protocol === 'v0.4';
   const s = useQuery({
     queryKey: ['skills'],
     queryFn: () => get<{ items: Skill[] }>('/api/v1/skills'),
@@ -251,18 +271,21 @@ export function Quick({ skill }: { skill: SkillId }) {
   });
   const [subject, setSubject] = useState<Entity | null>(null);
   const [mode, setMode] = useState('');
+  const [quoteRequirement, setQuoteRequirement] = useState<QuoteRequirement | ''>('');
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
       if (!subject) return;
+      if (realtime && !quoteRequirement) throw new Error('请选择行情要求');
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
         {
           skill_id: skill,
           subject_id: subject.id,
           params: mode && subject.kind === 'stock' ? { mode } : {},
+          ...(realtime ? { quote_requirement: quoteRequirement } : {}),
         },
-        { idem: newKey() }
+        { idem: newKey(), protocol: realtime ? 'v0.4' : undefined }
       );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
       return r;
@@ -296,7 +319,13 @@ export function Quick({ skill }: { skill: SkillId }) {
             </select>
           </label>
         )}
-        <button type="submit" disabled={!subject || plan.isPending}>
+        {realtime && (
+          <QuoteRequirementField value={quoteRequirement} onChange={setQuoteRequirement} />
+        )}
+        <button
+          type="submit"
+          disabled={!me.data || !subject || plan.isPending || (realtime && !quoteRequirement)}
+        >
           {plan.isPending ? '准备中…' : '发起研究'}
         </button>
       </form>
@@ -323,7 +352,7 @@ export function PlanReview({ id }: { id: string }) {
       const t = await post<Task>(
         '/api/v1/research-tasks',
         { plan_id: id, plan_hash: p.data!.plan_hash, disabled_sections: disabled },
-        { idem: newKey() }
+        { idem: newKey(), protocol: planProtocol(p.data!) }
       );
       qc.invalidateQueries({ queryKey: ['tasks'] });
       nav({ to: '/app/tasks/$id', params: { id: t.id } });
@@ -341,6 +370,7 @@ export function PlanReview({ id }: { id: string }) {
         <Link to="/app">← 返回工作台</Link>
       </p>
       {p.isLoading && <Loading />}
+      {p.error && <ErrorBox error={p.error} />}
       {p.data && (
         <>
           <h1>研究计划：{p.data.subject.name}</h1>
@@ -350,7 +380,18 @@ export function PlanReview({ id }: { id: string }) {
               {p.data.snapshot_mode === 'collect_latest' ? '计划预览时间' : '数据截止'}{' '}
               {fmtTime(p.data.as_of)}
             </span>
-            {p.data.snapshot_mode === 'collect_latest' && (
+            {p.data.quote_requirement && (
+              <Tag tone="info">{quoteRequirementLabel[p.data.quote_requirement]}</Tag>
+            )}
+            {p.data.snapshot_mode === 'collect_latest' && p.data.quote_requirement && (
+              <p>
+                确认后采集数据，再冻结一次快照。报告分别标明行情事件、接收、可用时点和交易状态。
+                {p.data.quote_requirement === 'realtime_trade'
+                  ? '若无法核实交易中实时成交条件，任务将弃权。'
+                  : '最近可用行情可能是延迟、盘后或休市数据，具体性质将在报告中注明。'}
+              </p>
+            )}
+            {p.data.snapshot_mode === 'collect_latest' && !p.data.quote_requirement && (
               <p>
                 确认后采集真实成交数据并冻结快照。这是非实时简报；实时行情和未核实字段不纳入分析。
               </p>
