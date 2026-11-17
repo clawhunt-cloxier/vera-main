@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -112,7 +113,7 @@ func TestLegacyRepresentationStripsOnlyVersionedFields(t *testing.T) {
 	if err := json.Unmarshal(filtered, &value); err != nil {
 		t.Fatal(err)
 	}
-	if got := legacyJSON(body, "/api/v1/research-tasks", realtimeMedia); string(got) != string(body) {
+	if got := legacyJSON(body, "/api/v1/research-tasks", realtimeMedia); !bytes.Equal(got, body) {
 		t.Fatal("0.4 body changed")
 	}
 }

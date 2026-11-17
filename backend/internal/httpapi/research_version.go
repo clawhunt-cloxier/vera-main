@@ -238,8 +238,6 @@ func stripJSONFields(body []byte, fields []string) []byte {
 	return result
 }
 
-func researchVersionGate(next http.Handler) http.Handler { return versionGate(next, false, false) }
-
 func (s *Server) versionGate(next http.Handler) http.Handler {
 	return versionGate(next, s.Engine.RealtimeEnabled(), s.Engine.Brief != nil)
 }

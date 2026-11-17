@@ -667,11 +667,12 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	runCtx, cancel := context.WithDeadline(ctx, t.Deadline.Add(-30*time.Second))
 	defer cancel()
 	go e.watchCancel(runCtx, cancel, t)
-	if t.Version == RealtimeBriefVersion {
+	switch t.Version {
+	case RealtimeBriefVersion:
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
-	} else if t.Version == emquant.ObservationBriefVersion {
+	case emquant.ObservationBriefVersion:
 		err = e.observationPipeline(runCtx, ctx, t, sk)
-	} else {
+	default:
 		err = e.pipeline(runCtx, ctx, t, sk)
 	}
 	var ab *abstainError
