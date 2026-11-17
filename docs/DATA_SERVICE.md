@@ -57,7 +57,7 @@ type Mapper interface {
 | `ref.security` | 证券代码、简称、交易所、上市日期、状态、曾用名 | 证券 | 全部 | 必需 |
 | `ref.industry` | 申万行业分类（一/二/三级）与成分、生效区间 | 证券×日期 | S F D | 必需 |
 | `ref.trading_calendar` | 交易日历 | 日 | 全部 | 必需 |
-| `mkt.intraday_quote`、`mkt.intraday_index_quote` | 个股或指数行情快照、事件时间及延迟性质 | 标的×行情事件时间×厂商 | S F D | 用户要求实时行情时对应章节必需；目标契约未实现 |
+| `mkt.intraday_quote`、`mkt.intraday_index_quote` | 个股或指数行情快照、事件时间及延迟性质 | 标的×行情事件时间×厂商 | S F D | T027 仅接通单股 `stock_analysis/1.1.0-demo.3`；其他技能、指数覆盖与完整数据集仍待实现 |
 | `mkt.daily_bar` | 日线：开高低收、成交量、成交额、换手率、复权因子 | 证券×交易日 | S F D W | 必需 |
 | `mkt.index_bar` | 指数与申万行业指数日线 | 指数×交易日 | S F D | 必需 |
 | `mkt.valuation_daily` | 总市值、流通市值、PE(TTM)、PB(MRQ)、PS(TTM)、股息率 | 证券×交易日 | S D W | S 必需 |
