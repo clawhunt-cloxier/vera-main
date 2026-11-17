@@ -49,6 +49,9 @@ func (s *Server) protectBriefRead(w http.ResponseWriter, r *http.Request, fn fun
 		return errs.Unavailable("SOURCE_UNAVAILABLE", "真实报告来源当前不可读取")
 	}
 	if version == harness.RealtimeBriefVersion {
+		if s.Engine.Brief.Runtime == nil {
+			return errs.Unavailable("SOURCE_UNAVAILABLE", "实时行情来源当前不可读取")
+		}
 		// Build the response before taking the grant locks, then reauthorize
 		// and keep them through the final display. PDF and series share this gate.
 		buf := httptest.NewRecorder()

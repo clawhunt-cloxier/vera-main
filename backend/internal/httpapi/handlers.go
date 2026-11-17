@@ -271,38 +271,39 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		SkillID          string          `json:"skill_id"`
 		SubjectID        *uuid.UUID      `json:"subject_id"`
 		Params           json.RawMessage `json:"params"`
-		QuoteRequirement *string         `json:"quote_requirement"`
+		QuoteRequirement json.RawMessage `json:"quote_requirement"`
 	}
 	if err := httpx.Decode(r, &in); err != nil {
 		return err
 	}
-	if realtimeVersion(r) && in.QuoteRequirement == nil {
+	if realtimeVersion(r) && len(in.QuoteRequirement) == 0 {
 		return errs.BadRequest("INVALID_BODY", "0.4 请求必须明确 quote_requirement")
 	}
-	if !realtimeVersion(r) && in.QuoteRequirement != nil {
+	if !realtimeVersion(r) && len(in.QuoteRequirement) != 0 {
 		return errs.BadRequest("INVALID_BODY", "旧版请求不支持 quote_requirement，请使用 0.4 协议")
 	}
-	if in.QuoteRequirement != nil && *in.QuoteRequirement != "realtime_trade" && *in.QuoteRequirement != "latest_available" {
+	var requirement string
+	if realtimeVersion(r) && (json.Unmarshal(in.QuoteRequirement, &requirement) != nil || (requirement != "realtime_trade" && requirement != "latest_available")) {
 		return errs.Unprocessable("INVALID_QUOTE_REQUIREMENT", "quote_requirement 必须是 realtime_trade 或 latest_available")
 	}
 	_, ws := principal(r)
 	var res *harness.ParseResult
 	switch {
-	case in.Text != nil && in.SubjectID == nil && in.SkillID == "":
+	case in.Text != nil && in.SubjectID == nil && in.SkillID == "" && len(in.Params) == 0:
 		t := strings.TrimSpace(*in.Text)
 		if n := len([]rune(t)); n < 2 || n > 500 {
 			return errs.BadRequest("INVALID_BODY", "请输入 2–500 字")
 		}
 		var err error
 		if realtimeVersion(r) {
-			res, err = s.Engine.ParseRealtimePlan(r.Context(), ws, t, *in.QuoteRequirement)
+			res, err = s.Engine.ParseRealtimePlan(r.Context(), ws, t, requirement)
 			if err != nil {
 				return err
 			}
 		} else if res, err = s.Engine.ParsePlan(r.Context(), ws, t); err != nil {
 			return err
 		}
-	case in.Text == nil && in.SubjectID != nil && in.SkillID != "":
+	case in.Text == nil && in.SubjectID != nil && in.SkillID != "" && len(in.Params) > 0 && string(in.Params) != "null":
 		ents, err := s.Store.Entities(r.Context(), []uuid.UUID{*in.SubjectID})
 		if err != nil {
 			return err
@@ -312,14 +313,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 			return errs.Unprocessable("UNKNOWN_SUBJECT", "研究对象不存在")
 		}
 		params := map[string]any{}
-		if len(in.Params) > 0 && string(in.Params) != "null" {
-			if err := json.Unmarshal(in.Params, &params); err != nil {
-				return errs.BadRequest("INVALID_BODY", "params 必须是对象")
-			}
+		if err := json.Unmarshal(in.Params, &params); err != nil || params == nil {
+			return errs.BadRequest("INVALID_BODY", "params 必须是对象")
 		}
 		var p *harness.Plan
 		if realtimeVersion(r) {
-			p, err = s.Engine.BuildRealtimePlan(r.Context(), ws, in.SkillID, sub, params, *in.QuoteRequirement)
+			p, err = s.Engine.BuildRealtimePlan(r.Context(), ws, in.SkillID, sub, params, requirement)
 		} else {
 			p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
 		}

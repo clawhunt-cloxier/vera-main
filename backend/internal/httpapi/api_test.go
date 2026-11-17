@@ -86,6 +86,10 @@ type env struct {
 }
 
 func setup(t *testing.T) *env {
+	return setupEngine(t, nil)
+}
+
+func setupEngine(t *testing.T, configure func(*harness.Engine)) *env {
 	pool := dbtest.New(t)
 	ctx := context.Background()
 	p, err := fixture.New(root + "tests/fixtures/demo-universe.json")
@@ -105,6 +109,9 @@ func setup(t *testing.T) *env {
 	}
 	gw := model.NewGateway(pool, profiles, map[string]model.Adapter{"sim": model.Sim{}}, nil, sc, pol, decimal.RequireFromString("30"))
 	eng := &harness.Engine{Pool: pool, Store: st, Gateway: gw, Policy: pol, Skills: harness.Skills(), Now: p.Now, Synthetic: true, Basis: p.Basis()}
+	if configure != nil {
+		configure(eng)
+	}
 	if _, err := eng.NewRiver(pool, false, 1); err != nil {
 		t.Fatal(err)
 	}
