@@ -11,11 +11,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 )
 
 // BriefDemoVersion is distinct from the complete stock-analysis skill. The
 // demo cannot claim the full skill's data coverage or acceptance criteria.
 const BriefDemoVersion = "1.1.0-demo.1"
+
+const RealtimeBriefVersion = emquant.RealtimeBriefVersion
 
 var mainlandStockCode = regexp.MustCompile(`^[0-9]{6}\.(SH|SZ|BJ)$`)
 
@@ -66,6 +69,26 @@ func NewRealtimeBriefPlan(subject dataservice.EntityRow, preview time.Time, quot
 			{ID: "S3", Title: "公司与财务事实", Required: false, Avail: "unavailable", Reason: &optionalReason},
 		},
 	}, nil
+}
+
+// NewQuoteBriefPlan is the current 0.4 plan definition. The caller must supply
+// the user's explicit quote requirement; the historical demo.1 hash is kept
+// unchanged by retaining NewRealtimeBriefPlan above.
+func NewQuoteBriefPlan(subject dataservice.EntityRow, preview time.Time, quoteReady bool, requirement string) (BriefPlanDefinition, error) {
+	if requirement != string(emquant.QuoteRealtimeTrade) && requirement != string(emquant.QuoteLatestAvailable) {
+		return BriefPlanDefinition{}, errors.New("harness: quote requirement must be explicit")
+	}
+	p, err := NewRealtimeBriefPlan(subject, preview, quoteReady)
+	if err != nil {
+		return p, err
+	}
+	p.SkillVersion = RealtimeBriefVersion
+	p.QuoteRequirement = requirement
+	if !quoteReady {
+		reason := "行情数据源或所选行情要求尚未核实"
+		p.Sections[0].Reason, p.Sections[1].Reason = &reason, &reason
+	}
+	return p, nil
 }
 
 // Hash binds every server-chosen data requirement and quote requirement. The

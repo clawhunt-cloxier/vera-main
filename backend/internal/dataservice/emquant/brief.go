@@ -16,6 +16,11 @@ import (
 
 const ObservationBriefVersion = "1.1.0-demo.2"
 
+// RealtimeBriefVersion is the negotiated 0.4 single-stock brief. It is kept
+// separate from the historical observation brief so an old worker cannot
+// interpret a collect_latest task as the legacy daily observation flow.
+const RealtimeBriefVersion = "1.1.0-demo.3"
+
 // BriefService publishes current observations from the Choice API.
 // It archives every vendor response for reproducibility; source_licenses
 // rows are not required — SDK credentials are the authorization mechanism.

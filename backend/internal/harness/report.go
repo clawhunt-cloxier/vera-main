@@ -414,14 +414,17 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 	versions, _ := json.Marshal(map[string]string{"skill": doc.SkillVersion, "rules": check.RulesVersion, "formulas": facts.FormulaVersion,
 		"prompts": PromptVersion, "policy": e.Policy.Version, "prices": e.priceVersion()})
 	return e.deliverTransaction(ctx, t, func(tx pgx.Tx) error {
-		var epoch int64
+		var epoch, revision int64
 		var status, planHash string
 		var snapshot *string
-		if err := tx.QueryRow(ctx, `SELECT t.epoch, t.status, coalesce(t.snapshot_hash,t.snapshot_manifest_hash), p.plan_hash FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id
-			WHERE t.id=$1 FOR UPDATE OF t`, t.ID).Scan(&epoch, &status, &snapshot, &planHash); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT t.epoch, t.status, coalesce(t.snapshot_hash,t.snapshot_manifest_hash), p.plan_hash, t.revision FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id
+			WHERE t.id=$1 FOR UPDATE OF t`, t.ID).Scan(&epoch, &status, &snapshot, &planHash, &revision); err != nil {
 			return err
 		}
-		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.Version == emquant.ObservationBriefVersion && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
+		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.SnapshotMode == "collect_latest" && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
+			return errStale
+		}
+		if t.Version == RealtimeBriefVersion && revision != t.Revision {
 			return errStale
 		}
 		if err := event(ctx, tx, t.Workspace, t.ID, t.Epoch, "DELIVERING", nil); err != nil {
