@@ -111,8 +111,11 @@ func TestRealtimeDeliveredReportEvidenceAndPDF(t *testing.T) {
 	if err := json.Unmarshal(data, &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.SnapshotMode != "collect_latest" || report.SnapshotAsOf == nil || report.SnapshotAsOf.Before(plan.Plan.AsOf) || !report.SnapshotAsOf.Equal(*task.SnapshotAsOf) || len(report.SourceFreshness) != 1 || len(report.Claims) == 0 {
+	if report.SnapshotMode != "collect_latest" || report.SnapshotAsOf == nil || report.SnapshotAsOf.Before(plan.Plan.AsOf) || !report.AsOf.Equal(task.AsOf) || !report.AsOf.Equal(plan.Plan.AsOf) || !report.SnapshotAsOf.Equal(*task.SnapshotAsOf) || len(report.SourceFreshness) != 1 || len(report.Claims) == 0 {
 		t.Fatalf("invalid source metadata: %+v", report)
+	}
+	if len(report.Sources) != 1 || report.Sources[0].Provider != "Synthetic API test provider" {
+		t.Fatalf("report named a provider outside the frozen source: %+v", report.Sources)
 	}
 	fresh := report.SourceFreshness[0]
 	if fresh.EventAt == nil || fresh.ReceivedAt == nil || fresh.AvailableAt == nil || fresh.EventAt.After(*fresh.ReceivedAt) || fresh.ReceivedAt.After(*fresh.AvailableAt) || fresh.AvailableAt.After(*report.SnapshotAsOf) || fresh.LatencyMode != "real_time" || fresh.Status != "fresh" {
@@ -174,6 +177,14 @@ func TestRealtimeDeliveredReportEvidenceAndPDF(t *testing.T) {
 	}
 	if _, err := e.pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, source.LicenseID); err != nil {
 		t.Fatal(err)
+	}
+	// Feedback is a workspace command and does not redisplay revoked source
+	// data. It must have one consistent outcome rather than a hidden insert
+	// followed by a display-authorization error.
+	request(c, "POST", reportPath+"/feedback", map[string]any{"kind": "incorrect", "comment": "synthetic review", "claim_ref": report.Claims[0].Ref}, realtimeMedia, 201)
+	var feedbackCount int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM feedback WHERE report_id=$1`, task.ReportRef.ID).Scan(&feedbackCount); err != nil || feedbackCount != 1 {
+		t.Fatalf("feedback outcome inconsistent: %d %v", feedbackCount, err)
 	}
 	for _, path := range []string{reportPath, evidencePath, reportPath + "/pdf"} {
 		for _, media := range []string{realtimeMedia, legacyMedia, observationMedia} {

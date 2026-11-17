@@ -84,7 +84,12 @@ func TestRealtimeAPIPlanConfirmationAndHistoricalReads(t *testing.T) {
 	}
 	request("GET", "/api/v1/me", nil, realtimeMedia, "Me", 200)
 	request("GET", "/api/v1/entities?q="+url.QueryEscape("API synthetic stock"), nil, realtimeMedia, "", 200)
-	request("GET", "/api/v1/skills", nil, realtimeMedia, "", 200)
+	var skills struct {
+		Items []Skill `json:"items"`
+	}
+	if err := json.Unmarshal(request("GET", "/api/v1/skills", nil, realtimeMedia, "", 200), &skills); err != nil || len(skills.Items) == 0 || skills.Items[0].Version != harness.RealtimeBriefVersion {
+		t.Fatalf("0.4 skill catalog differs from its plan version: %+v %v", skills, err)
+	}
 	var plans [2]PlanResult
 	for i, requirement := range []string{"realtime_trade", "latest_available"} {
 		body := map[string]any{"skill_id": "stock_analysis", "subject_id": entity, "params": map[string]any{}, "quote_requirement": requirement}

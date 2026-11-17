@@ -429,6 +429,7 @@ type taskRow struct {
 	Params                 Params
 	Sections               []PlanSection
 	AsOf, Deadline         time.Time
+	PreviewAt              time.Time // persisted plan/task time before a collect_latest evaluation cutoff
 	Budget                 policy.Budget
 	Snapshot               *string
 	PlanHash               string
@@ -453,6 +454,7 @@ func (e *Engine) loadTask(ctx context.Context, ws, id uuid.UUID) (*taskRow, erro
 	if err != nil {
 		return nil, err
 	}
+	t.PreviewAt = t.AsOf
 	_ = json.Unmarshal(params, &t.Params)
 	_ = json.Unmarshal(secs, &t.Sections)
 	_ = json.Unmarshal(budget, &t.Budget)

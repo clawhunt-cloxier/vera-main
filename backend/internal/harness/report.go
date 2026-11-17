@@ -226,6 +226,11 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 		SkillVersion: sk.Version, SubjectID: subject.ID, AsOf: t.AsOf, SnapshotMode: t.SnapshotMode, DataAsOf: t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间）",
 		ResultKind: "full", Synthetic: e.Synthetic || subject.Synthetic, AIGenerated: true, Disclaimer: Disclaimer, Claims: []DocClaim{},
 		Limitations: []string{}, Sources: []DocSource{}, SummaryRefs: []string{}}
+	if t.Version == RealtimeBriefVersion {
+		// Deterministic fact checks use t.AsOf as the frozen evaluation
+		// cutoff; the public 0.4 as_of retains the user's plan preview time.
+		doc.AsOf = t.PreviewAt
+	}
 	// S1 summary claims
 	s1 := DocSection{ID: "S1", Title: "核心要点", Status: "ok", ClaimRefs: []string{}, Tables: []facts.Table{}, Charts: []DocChart{}}
 	byRef := map[string]finalClaim{}
@@ -317,6 +322,11 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 	provs, err := e.providerNames(ctx)
 	if t.Version == emquant.ObservationBriefVersion && e.Brief != nil {
 		err = e.Pool.QueryRow(ctx, `SELECT name FROM providers WHERE id=$1 AND enabled AND NOT synthetic`, e.Brief.ProviderID).Scan(&provs)
+	}
+	if t.Version == RealtimeBriefVersion && len(doc.SourceFreshness) > 0 {
+		// A report must name only providers that contributed to its frozen
+		// snapshot; the platform's enabled-provider aggregate is not lineage.
+		err = e.Pool.QueryRow(ctx, `SELECT name FROM providers WHERE id=$1 AND enabled`, doc.SourceFreshness[0].Provider).Scan(&provs)
 	}
 	if err != nil {
 		return doc, err

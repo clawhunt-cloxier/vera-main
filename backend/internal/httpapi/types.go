@@ -44,7 +44,7 @@ func toEntity(e dataservice.EntityRow, skills map[string]*harness.Skill) Entity 
 	for _, id := range skillOrder {
 		sk := skills[id]
 		es := EntitySkill{SkillID: id, Available: slices.Contains(sk.Subjects, e.Kind)}
-		if skills["stock_analysis"].Version == emquant.ObservationBriefVersion && id != "stock_analysis" {
+		if (skills["stock_analysis"].Version == emquant.ObservationBriefVersion || skills["stock_analysis"].Version == harness.RealtimeBriefVersion) && id != "stock_analysis" {
 			es.Available = false
 		}
 		if !es.Available {

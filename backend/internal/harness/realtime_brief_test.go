@@ -135,7 +135,7 @@ func TestRealtimeBriefPipelineAndRecovery(t *testing.T) {
 	if err := json.Unmarshal(body, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.SkillVersion != RealtimeBriefVersion || doc.ResultKind != "limited" || len(doc.Claims) == 0 || len(doc.SourceFreshness) != 1 || cutoff.Before(plan.AsOf) {
+	if doc.SkillVersion != RealtimeBriefVersion || doc.ResultKind != "limited" || len(doc.Claims) == 0 || len(doc.SourceFreshness) != 1 || cutoff.Before(plan.AsOf) || !doc.AsOf.Equal(plan.AsOf) {
 		t.Fatalf("invalid realtime report: %+v", doc)
 	}
 	for _, claim := range doc.Claims {

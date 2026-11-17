@@ -254,6 +254,9 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 	items := []Skill{}
 	for _, id := range skillOrder {
 		sk := s.Engine.Skills[id]
+		if id == "stock_analysis" && realtimeVersion(r) && s.Engine.RealtimeEnabled() {
+			sk = harness.RealtimeBriefSkill()
+		}
 		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (s.Engine.Brief == nil || id == "stock_analysis")})
 	}
 	httpx.JSON(w, r, 200, map[string]any{"items": items})

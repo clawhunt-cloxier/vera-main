@@ -59,9 +59,12 @@ type SourceFreshness struct {
 	DatasetID   string  `json:"dataset_id"`
 	Provider    string  `json:"provider"`
 	EventAt     *string `json:"event_at"`
+	PublishedAt *string `json:"published_at"`
 	ReceivedAt  *string `json:"received_at"`
 	AvailableAt *string `json:"available_at"`
+	Period      *string `json:"period"`
 	LatencyMode string  `json:"latency_mode"`
+	Status      string  `json:"status"`
 	Note        string  `json:"note"`
 }
 
@@ -323,7 +326,7 @@ func (d *doc) fmtTime(s string) string {
 	if err != nil {
 		return s
 	}
-	return t.In(d.loc).Format("2006-01-02 15:04")
+	return t.In(d.loc).Format("2006-01-02 15:04:05")
 }
 
 func trunc(s string, n int) string {
@@ -945,9 +948,15 @@ func (d *doc) limits() {
 			return sp(d.fmtTime(*v))
 		}
 		latency := map[string]string{"real_time": "实时", "delayed": "延迟", "unknown": "未知"}[source.LatencyMode]
+		status := map[string]string{"fresh": "新鲜", "stale": "过期", "unavailable": "不可用", "unknown": "未知"}[source.Status]
+		period := "未确认 / 不适用"
+		if source.Period != nil {
+			period = *source.Period
+		}
 		d.table(Table{Title: source.Provider + " · " + source.DatasetID + " 来源时点", Columns: []string{"字段", "实际时点 / 状态"}, Rows: [][]*string{
-			{sp("行情事件"), value(source.EventAt)}, {sp("系统接收"), value(source.ReceivedAt)},
-			{sp("系统可用"), value(source.AvailableAt)}, {sp("延迟性质"), sp(latency)}, {sp("说明"), sp(source.Note)},
+			{sp("行情事件"), value(source.EventAt)}, {sp("披露 / 发布"), value(source.PublishedAt)},
+			{sp("系统接收"), value(source.ReceivedAt)}, {sp("系统可用"), value(source.AvailableAt)},
+			{sp("期间"), sp(period)}, {sp("延迟性质"), sp(latency)}, {sp("状态"), sp(status)}, {sp("说明"), sp(source.Note)},
 		}})
 	}
 	d.y += 5
