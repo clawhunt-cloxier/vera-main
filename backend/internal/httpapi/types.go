@@ -129,7 +129,7 @@ func paramsMap(p harness.Params, skill string) map[string]any {
 
 func (s *Server) toPlan(p *harness.Plan) ResearchPlan {
 	out := ResearchPlan{SnapshotMode: p.SnapshotMode, ID: p.ID, PlanHash: p.Hash, SkillID: p.SkillID, SkillVersion: p.SkillVersion, Subject: toEntity(p.Subject, s.Engine.Skills),
-		Params: paramsMap(p.Params, p.SkillID), AsOf: p.AsOf, Executable: p.Executable, ReasonCode: p.ReasonCode,
+		QuoteRequirement: p.QuoteRequirement, Params: paramsMap(p.Params, p.SkillID), AsOf: p.AsOf, Executable: p.Executable, ReasonCode: p.ReasonCode,
 		Estimate: Estimate{P95Seconds: p.P95Seconds, QuotaCost: p.QuotaCost}, ExpiresAt: p.ExpiresAt, Sections: []PlanSection{}}
 	if p.SnapshotMode == "collect_latest" {
 		out.Params = map[string]any{}
@@ -166,20 +166,21 @@ type ReportRef struct {
 }
 
 type Task struct {
-	SnapshotMode  string     `json:"snapshot_mode,omitempty"`
-	SnapshotAsOf  *time.Time `json:"snapshot_as_of"`
-	ID            uuid.UUID  `json:"id"`
-	SkillID       string     `json:"skill_id"`
-	Subject       Entity     `json:"subject"`
-	Status        string     `json:"status"`
-	Revision      int64      `json:"revision"`
-	CreatedAt     time.Time  `json:"created_at"`
-	Deadline      time.Time  `json:"deadline"`
-	AsOf          time.Time  `json:"as_of"`
-	Steps         []TaskStep `json:"steps"`
-	ReportRef     *ReportRef `json:"report_ref"`
-	ReasonCode    *string    `json:"reason_code"`
-	ReasonMessage *string    `json:"reason_message"`
+	SnapshotMode     string     `json:"snapshot_mode,omitempty"`
+	SnapshotAsOf     *time.Time `json:"snapshot_as_of"`
+	QuoteRequirement *string    `json:"quote_requirement"`
+	ID               uuid.UUID  `json:"id"`
+	SkillID          string     `json:"skill_id"`
+	Subject          Entity     `json:"subject"`
+	Status           string     `json:"status"`
+	Revision         int64      `json:"revision"`
+	CreatedAt        time.Time  `json:"created_at"`
+	Deadline         time.Time  `json:"deadline"`
+	AsOf             time.Time  `json:"as_of"`
+	Steps            []TaskStep `json:"steps"`
+	ReportRef        *ReportRef `json:"report_ref"`
+	ReasonCode       *string    `json:"reason_code"`
+	ReasonMessage    *string    `json:"reason_message"`
 }
 
 type ReportSummary struct {

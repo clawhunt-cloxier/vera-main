@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"encoding/json"
 	"math"
 	"mime"
 	"net/http"
@@ -11,39 +13,23 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/httpx"
 )
 
-// Until 0.4 is implemented, do not silently serve a 0.3 plan or task to a
-// client that requires the new representation. Wildcards and application/json
-// continue to select 0.3; a 0.4 client must check the response Content-Type.
-func researchVersionGate(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !researchVersionPath(r.URL.Path) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		w.Header().Add("Vary", "Accept")
-		if !acceptsLegacyJSON(r.Header.Values("Accept")) {
-			httpx.Error(w, r, errs.New(http.StatusNotAcceptable, "REPRESENTATION_UNAVAILABLE", "请求的数据版本尚不可用"))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
+const (
+	legacyMedia      = "application/json"
+	observationMedia = "application/vnd.vera.observation.v1+json"
+	realtimeMedia    = "application/vnd.vera.v0.4+json"
+)
 
-func researchVersionPath(path string) bool {
-	for _, base := range []string{"/api/v1/research-plans", "/api/v1/research-tasks"} {
-		if path == base || strings.HasPrefix(path, base+"/") {
-			return true
-		}
-	}
-	return false
-}
+type representationKey struct{}
 
-func acceptsLegacyJSON(headers []string) bool {
-	if len(headers) == 0 || strings.TrimSpace(strings.Join(headers, "")) == "" {
-		return true
+// A vendor media type must be requested explicitly. An absent Accept or a
+// wildcard keeps the historical JSON behavior instead of changing plan intent.
+func mediaQuality(headers []string, target string, wildcard bool) float64 {
+	if strings.TrimSpace(strings.Join(headers, "")) == "" {
+		if wildcard {
+			return 1
+		}
+		return 0
 	}
-	// The most specific matching range determines the quality of JSON. A
-	// specific q=0 exclusion overrides a more permissive wildcard.
 	bestSpecificity, bestQuality := -1, 0.0
 	for _, part := range strings.Split(strings.Join(headers, ","), ",") {
 		media, params, err := mime.ParseMediaType(strings.TrimSpace(part))
@@ -51,12 +37,12 @@ func acceptsLegacyJSON(headers []string) bool {
 			continue
 		}
 		specificity := -1
-		switch strings.ToLower(media) {
-		case "application/json":
+		switch {
+		case strings.EqualFold(media, target):
 			specificity = 2
-		case "application/*":
+		case wildcard && strings.EqualFold(media, "application/*"):
 			specificity = 1
-		case "*/*":
+		case wildcard && media == "*/*":
 			specificity = 0
 		}
 		if specificity < 0 {
@@ -65,7 +51,7 @@ func acceptsLegacyJSON(headers []string) bool {
 		quality := 1.0
 		if q, ok := params["q"]; ok {
 			quality, err = strconv.ParseFloat(q, 64)
-			if err != nil || math.IsNaN(quality) || quality < 0 || quality > 1 {
+			if err != nil || math.IsNaN(quality) || math.IsInf(quality, 0) || quality < 0 || quality > 1 {
 				continue
 			}
 		}
@@ -73,45 +59,187 @@ func acceptsLegacyJSON(headers []string) bool {
 			bestSpecificity, bestQuality = specificity, quality
 		}
 	}
-	return bestSpecificity >= 0 && bestQuality > 0
+	return bestQuality
 }
 
-const observationMedia = "application/vnd.vera.observation.v1+json"
-
-func observationVersion(r *http.Request) bool {
-	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
-		media, params, err := mime.ParseMediaType(strings.TrimSpace(part))
-		if err != nil || media != observationMedia {
+func negotiateRepresentation(r *http.Request, realtime, observation bool) string {
+	selected, quality := "", 0.0
+	for _, candidate := range []string{realtimeMedia, observationMedia, legacyMedia} {
+		if candidate == realtimeMedia && !realtime {
 			continue
 		}
-		q := params["q"]
-		if q == "" {
-			return true
+		if candidate == observationMedia && !observation {
+			continue
 		}
-		quality, err := strconv.ParseFloat(q, 64)
-		if err == nil && quality > 0 && quality <= 1 {
-			return true
+		q := mediaQuality(r.Header.Values("Accept"), candidate, candidate == legacyMedia)
+		if q > quality {
+			selected, quality = candidate, q
 		}
 	}
-	return false
-}
-func representation(r *http.Request) string {
-	if observationVersion(r) {
-		return observationMedia
-	}
-	return "application/json"
+	return selected
 }
 
-// observation.v1 is intentionally distinct from the unimplemented 0.4 realtime contract.
-func (s *Server) versionGate(next http.Handler) http.Handler {
-	legacy := researchVersionGate(next)
+func researchVersionPath(path string) bool {
+	return strings.HasPrefix(path, "/api/") && !strings.HasSuffix(path, "/pdf")
+}
+
+func representation(r *http.Request) string {
+	if selected, ok := r.Context().Value(representationKey{}).(string); ok {
+		return selected
+	}
+	return negotiateRepresentation(r, true, true)
+}
+
+func observationVersion(r *http.Request) bool { return representation(r) == observationMedia }
+func realtimeVersion(r *http.Request) bool    { return representation(r) == realtimeMedia }
+
+func planConfirmationVersion(mode string, quoteRequirement *string, media string) bool {
+	if quoteRequirement != nil {
+		return mode == "collect_latest" && media == realtimeMedia
+	}
+	if mode == "collect_latest" {
+		return media == observationMedia
+	}
+	return mode == "fixed_legacy" && media == legacyMedia
+}
+
+func requestRepresentationMatches(r *http.Request, selected string) bool {
+	if r.Method != http.MethodPost || (r.URL.Path != "/api/v1/research-plans" && r.URL.Path != "/api/v1/research-tasks") {
+		return true
+	}
+	content := r.Header.Get("Content-Type")
+	// Existing JSON clients may omit Content-Type; 0.4 creation always requires
+	// the explicit request media type, independently from Accept.
+	if content == "" {
+		return selected != realtimeMedia
+	}
+	media, _, err := mime.ParseMediaType(content)
+	if err != nil {
+		return false
+	}
+	if selected == realtimeMedia {
+		return strings.EqualFold(media, realtimeMedia)
+	}
+	return strings.EqualFold(media, legacyMedia) || (selected == observationMedia && strings.EqualFold(media, observationMedia))
+}
+
+func versionGate(next http.Handler, realtime, observation bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if observationVersion(r) && s.Engine.Brief != nil && strings.HasPrefix(r.URL.Path, "/api/") {
-			w.Header().Add("Vary", "Accept")
-			w.Header().Set("Content-Type", observationMedia+"; charset=utf-8")
+		if !researchVersionPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		legacy.ServeHTTP(w, r)
+		w.Header().Add("Vary", "Accept")
+		selected := negotiateRepresentation(r, realtime, observation)
+		if selected == "" {
+			httpx.Error(w, r, errs.New(http.StatusNotAcceptable, "REPRESENTATION_UNAVAILABLE", "请求的数据版本不可用"))
+			return
+		}
+		if !requestRepresentationMatches(r, selected) {
+			httpx.Error(w, r, errs.New(http.StatusUnsupportedMediaType, "REPRESENTATION_MISMATCH", "请求 Content-Type 必须与研究协议一致"))
+			return
+		}
+		w.Header().Set("Content-Type", selected+"; charset=utf-8")
+		r = r.WithContext(context.WithValue(r.Context(), representationKey{}, selected))
+		if selected != realtimeMedia {
+			w = &representationWriter{ResponseWriter: w, path: r.URL.Path, media: selected}
+		}
+		next.ServeHTTP(w, r)
 	})
+}
+
+// JSON and replay handlers write one complete JSON value. Transform that value
+// in Write, while the caller's source authorization transaction is still open;
+// delaying a flush until after the handler returned would break revocation locks.
+type representationWriter struct {
+	http.ResponseWriter
+	path, media string
+}
+
+func (w *representationWriter) Write(body []byte) (int, error) {
+	filtered := legacyJSON(body, w.path, w.media)
+	_, err := w.ResponseWriter.Write(filtered)
+	if err != nil {
+		return 0, err
+	}
+	return len(body), nil
+}
+
+func (w *representationWriter) WriteHeader(status int) {
+	w.Header().Del("Content-Length")
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func legacyJSON(body []byte, path, media string) []byte {
+	if media == realtimeMedia {
+		return body
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(body, &object) != nil || object == nil {
+		return body
+	}
+	fields := []string{}
+	switch {
+	case strings.HasPrefix(path, "/api/v1/research-plans"):
+		if media == legacyMedia {
+			fields = []string{"snapshot_mode", "quote_requirement"}
+		}
+		if plan, ok := object["plan"]; ok {
+			object["plan"] = stripJSONFields(plan, fields)
+			fields = nil
+		}
+	case strings.HasPrefix(path, "/api/v1/research-tasks"):
+		fields = []string{"quote_requirement"}
+		if media == legacyMedia {
+			fields = append(fields, "snapshot_mode", "snapshot_as_of")
+		}
+		if raw, ok := object["items"]; ok {
+			var items []json.RawMessage
+			if json.Unmarshal(raw, &items) == nil {
+				for i := range items {
+					items[i] = stripJSONFields(items[i], fields)
+				}
+				object["items"], _ = json.Marshal(items)
+			}
+			fields = nil
+		}
+	case strings.HasPrefix(path, "/api/v1/reports/"):
+		fields = []string{"source_freshness"}
+		if media == legacyMedia {
+			fields = append(fields, "snapshot_mode", "snapshot_as_of")
+		}
+	case strings.HasPrefix(path, "/api/v1/evidence/"):
+		if media == legacyMedia {
+			fields = []string{"event_at", "received_at", "latency_mode"}
+		}
+	}
+	for _, field := range fields {
+		delete(object, field)
+	}
+	result, err := json.Marshal(object)
+	if err != nil {
+		return body
+	}
+	return result
+}
+
+func stripJSONFields(body []byte, fields []string) []byte {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(body, &object) != nil || object == nil {
+		return body
+	}
+	for _, field := range fields {
+		delete(object, field)
+	}
+	result, err := json.Marshal(object)
+	if err != nil {
+		return body
+	}
+	return result
+}
+
+func researchVersionGate(next http.Handler) http.Handler { return versionGate(next, false, false) }
+
+func (s *Server) versionGate(next http.Handler) http.Handler {
+	return versionGate(next, s.Engine.RealtimeEnabled(), s.Engine.Brief != nil)
 }

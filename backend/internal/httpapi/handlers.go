@@ -32,7 +32,9 @@ func (s *Server) meBody(r *http.Request) (Me, error) {
 	_ = s.Pool.QueryRow(r.Context(), `SELECT display_name FROM users WHERE id=$1`, p.UserID).Scan(&name)
 	me := Me{UserID: p.UserID, WorkspaceID: p.WorkspaceID, CSRF: p.CSRF, Persona: p.Persona, Onboarded: p.WorkspaceID != nil,
 		Synthetic: s.Synthetic, DisplayName: name}
-	if s.Engine.Brief != nil {
+	if s.Engine.RealtimeEnabled() {
+		me.ResearchProtocol = "v0.4"
+	} else if s.Engine.Brief != nil {
 		me.ResearchProtocol = "observation.v1"
 	}
 	if ws != uuid.Nil {
@@ -261,17 +263,27 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 // ---- plans ----
 
 func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
-	if s.Engine.Brief != nil && !observationVersion(r) {
+	if s.Engine.Brief != nil && !realtimeVersion(r) && !observationVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "真实简报需要新版客户端")
 	}
 	var in struct {
-		Text      *string         `json:"text"`
-		SkillID   string          `json:"skill_id"`
-		SubjectID *uuid.UUID      `json:"subject_id"`
-		Params    json.RawMessage `json:"params"`
+		Text             *string         `json:"text"`
+		SkillID          string          `json:"skill_id"`
+		SubjectID        *uuid.UUID      `json:"subject_id"`
+		Params           json.RawMessage `json:"params"`
+		QuoteRequirement *string         `json:"quote_requirement"`
 	}
 	if err := httpx.Decode(r, &in); err != nil {
 		return err
+	}
+	if realtimeVersion(r) && in.QuoteRequirement == nil {
+		return errs.BadRequest("INVALID_BODY", "0.4 请求必须明确 quote_requirement")
+	}
+	if !realtimeVersion(r) && in.QuoteRequirement != nil {
+		return errs.BadRequest("INVALID_BODY", "旧版请求不支持 quote_requirement，请使用 0.4 协议")
+	}
+	if in.QuoteRequirement != nil && *in.QuoteRequirement != "realtime_trade" && *in.QuoteRequirement != "latest_available" {
+		return errs.Unprocessable("INVALID_QUOTE_REQUIREMENT", "quote_requirement 必须是 realtime_trade 或 latest_available")
 	}
 	_, ws := principal(r)
 	var res *harness.ParseResult
@@ -282,7 +294,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 			return errs.BadRequest("INVALID_BODY", "请输入 2–500 字")
 		}
 		var err error
-		if res, err = s.Engine.ParsePlan(r.Context(), ws, t); err != nil {
+		if realtimeVersion(r) {
+			res, err = s.Engine.ParseRealtimePlan(r.Context(), ws, t, *in.QuoteRequirement)
+			if err != nil {
+				return err
+			}
+		} else if res, err = s.Engine.ParsePlan(r.Context(), ws, t); err != nil {
 			return err
 		}
 	case in.Text == nil && in.SubjectID != nil && in.SkillID != "":
@@ -300,7 +317,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 				return errs.BadRequest("INVALID_BODY", "params 必须是对象")
 			}
 		}
-		p, err := s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
+		var p *harness.Plan
+		if realtimeVersion(r) {
+			p, err = s.Engine.BuildRealtimePlan(r.Context(), ws, in.SkillID, sub, params, *in.QuoteRequirement)
+		} else {
+			p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
+		}
 		if err != nil {
 			return err
 		}
@@ -333,7 +355,10 @@ func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if p.SnapshotMode == "collect_latest" && !observationVersion(r) {
+	if p.QuoteRequirement != nil && !realtimeVersion(r) {
+		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要 0.4 客户端")
+	}
+	if p.SnapshotMode == "collect_latest" && p.QuoteRequirement == nil && !observationVersion(r) && !realtimeVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要新版客户端")
 	}
 	httpx.JSON(w, r, 200, s.toPlan(p))
@@ -359,8 +384,8 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if plan.SnapshotMode == "collect_latest" && !observationVersion(r) {
-		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要新版客户端确认")
+	if !planConfirmationVersion(plan.SnapshotMode, plan.QuoteRequirement, representation(r)) {
+		return errs.Conflict("PLAN_VERSION_MISMATCH", "确认协议必须与创建计划的协议一致")
 	}
 	id, err := s.Engine.CreateTask(r.Context(), ws, in.PlanID, in.PlanHash, in.Disabled)
 	if err != nil {
@@ -375,7 +400,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-const taskCols = `t.id, t.skill_id, t.subject_id, t.status, t.revision, t.created_at, t.deadline, t.as_of, t.report_id, t.reason_code, t.reason_message, t.epoch, t.snapshot_mode, t.snapshot_as_of`
+const taskCols = `t.id, t.skill_id, t.subject_id, t.status, t.revision, t.created_at, t.deadline, t.as_of, t.report_id, t.reason_code, t.reason_message, t.epoch, t.snapshot_mode, t.snapshot_as_of, p.quote_requirement`
 
 type taskRow struct {
 	t       Task
@@ -387,7 +412,7 @@ type taskRow struct {
 func scanTask(row pgx.Row) (taskRow, error) {
 	var tr taskRow
 	err := row.Scan(&tr.t.ID, &tr.t.SkillID, &tr.subject, &tr.t.Status, &tr.t.Revision, &tr.t.CreatedAt, &tr.t.Deadline, &tr.t.AsOf, &tr.report,
-		&tr.t.ReasonCode, &tr.t.ReasonMessage, &tr.epoch, &tr.t.SnapshotMode, &tr.t.SnapshotAsOf)
+		&tr.t.ReasonCode, &tr.t.ReasonMessage, &tr.epoch, &tr.t.SnapshotMode, &tr.t.SnapshotAsOf, &tr.t.QuoteRequirement)
 	return tr, err
 }
 
@@ -404,7 +429,10 @@ func (s *Server) fillTasks(r *http.Request, ws uuid.UUID, rows []taskRow, withSt
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		for _, tr := range rows {
 			t := tr.t
-			if t.SnapshotMode == "collect_latest" && !observationVersion(r) {
+			if t.QuoteRequirement != nil && !realtimeVersion(r) {
+				return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该任务需要 0.4 客户端")
+			}
+			if t.SnapshotMode == "collect_latest" && t.QuoteRequirement == nil && !observationVersion(r) && !realtimeVersion(r) {
 				return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该任务需要新版客户端")
 			}
 			if _, ok := ents[tr.subject]; !ok {
@@ -441,7 +469,7 @@ func (s *Server) task(r *http.Request, ws, id uuid.UUID) (Task, error) {
 	var tr taskRow
 	err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		var err error
-		tr, err = scanTask(tx.QueryRow(r.Context(), `SELECT `+taskCols+` FROM research_tasks t WHERE t.id=$1`, id))
+		tr, err = scanTask(tx.QueryRow(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE t.id=$1`, id))
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -546,7 +574,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	skill, status := r.URL.Query().Get("skill_id"), r.URL.Query().Get("status")
 	var rows []taskRow
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		rs, err := tx.Query(r.Context(), `SELECT `+taskCols+` FROM research_tasks t WHERE ($1::timestamptz IS NULL OR (t.created_at, t.id) < ($1, $2))
+		rs, err := tx.Query(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE ($1::timestamptz IS NULL OR (t.created_at, t.id) < ($1, $2))
 			AND ($3 = '' OR t.skill_id=$3) AND ($4 = '' OR t.status=$4) AND ($5::uuid IS NULL OR t.subject_id=$5)
 			ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, at, cid, skill, status, subj, n+1)
 		if err != nil {
