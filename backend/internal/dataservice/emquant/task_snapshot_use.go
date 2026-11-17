@@ -20,7 +20,7 @@ func (r *Runtime) WithTaskSnapshotQuote(ctx context.Context, workspace, task uui
 	if r == nil || r.database == nil || workspace == uuid.Nil || task == uuid.Nil || fn == nil {
 		return errors.New("emquant: invalid snapshot use")
 	}
-	return pgx.BeginFunc(ctx, r.database, func(tx pgx.Tx) error {
+	return pgx.BeginTxFunc(ctx, r.database, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
 		var epoch, revision int64
 		var hash string
 		if err := tx.QueryRow(ctx, `SELECT t.epoch,m.task_revision,t.snapshot_manifest_hash

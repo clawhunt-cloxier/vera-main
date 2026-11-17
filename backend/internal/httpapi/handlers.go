@@ -741,6 +741,28 @@ func (s *Server) loadDoc(r *http.Request) (uuid.UUID, harness.Document, []byte, 
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return uuid.Nil, doc, nil, err
 	}
+	if doc.SnapshotMode == "" {
+		doc.SnapshotMode = "fixed_legacy"
+		if doc.SkillVersion == emquant.ObservationBriefVersion {
+			doc.SnapshotMode = "collect_latest"
+			doc.SnapshotAsOf = &doc.AsOf
+		}
+	}
+	// Old observation documents predate source_freshness. Read their exact
+	// frozen manifest for 0.4 display without rewriting the stored document or
+	// inventing event/publication/availability timestamps.
+	if realtimeVersion(r) && doc.SkillVersion == emquant.ObservationBriefVersion && len(doc.SourceFreshness) == 0 {
+		if s.Engine.Brief == nil {
+			return uuid.Nil, doc, nil, errs.Unavailable("SOURCE_UNAVAILABLE", "真实报告来源当前不可读取")
+		}
+		if err := s.Engine.Brief.WithSnapshot(r.Context(), ws, doc.TaskID, dataservice.SourceDisplay, func(o emquant.BriefObservation) error {
+			doc.SnapshotAsOf = &o.Cutoff
+			doc.SourceFreshness = harness.ObservationFreshness(o, s.Engine.Brief.ProviderID)
+			return nil
+		}); err != nil {
+			return uuid.Nil, doc, nil, err
+		}
+	}
 	return ws, doc, series, nil
 }
 
@@ -777,7 +799,7 @@ func (s *Server) getSeries(w http.ResponseWriter, r *http.Request) error {
 			ID string `json:"series_id"`
 		}
 		if json.Unmarshal(x, &head) == nil && head.ID == want {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Content-Type", representation(r)+"; charset=utf-8")
 			_, _ = w.Write(x)
 			return nil
 		}

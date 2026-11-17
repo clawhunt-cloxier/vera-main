@@ -45,7 +45,7 @@ func (s *Server) protectBriefRead(w http.ResponseWriter, r *http.Request, fn fun
 	if version != emquant.ObservationBriefVersion && version != harness.RealtimeBriefVersion {
 		return fn(w, r)
 	}
-	if s.Engine.Brief == nil {
+	if s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil {
 		return errs.Unavailable("SOURCE_UNAVAILABLE", "真实报告来源当前不可读取")
 	}
 	if version == harness.RealtimeBriefVersion {

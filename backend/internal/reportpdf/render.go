@@ -55,6 +55,16 @@ type Source struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+type SourceFreshness struct {
+	DatasetID   string  `json:"dataset_id"`
+	Provider    string  `json:"provider"`
+	EventAt     *string `json:"event_at"`
+	ReceivedAt  *string `json:"received_at"`
+	AvailableAt *string `json:"available_at"`
+	LatencyMode string  `json:"latency_mode"`
+	Note        string  `json:"note"`
+}
+
 type Subject struct {
 	Name   string  `json:"name"`
 	Symbol *string `json:"symbol"`
@@ -62,19 +72,20 @@ type Subject struct {
 
 // Report mirrors the API report document; the HTTP layer converts into it through JSON.
 type Report struct {
-	Title       string    `json:"title"`
-	SkillID     string    `json:"skill_id"`
-	Subject     Subject   `json:"subject"`
-	DataAsOf    string    `json:"data_as_of"`
-	ResultKind  string    `json:"result_kind"`
-	Synthetic   bool      `json:"synthetic"`
-	Version     int       `json:"version"`
-	DeliveredAt string    `json:"delivered_at"`
-	Sections    []Section `json:"sections"`
-	Claims      []Claim   `json:"claims"`
-	Limitations []string  `json:"limitations"`
-	Sources     []Source  `json:"sources"`
-	Disclaimer  string    `json:"disclaimer"`
+	Title           string            `json:"title"`
+	SkillID         string            `json:"skill_id"`
+	Subject         Subject           `json:"subject"`
+	DataAsOf        string            `json:"data_as_of"`
+	ResultKind      string            `json:"result_kind"`
+	Synthetic       bool              `json:"synthetic"`
+	Version         int               `json:"version"`
+	DeliveredAt     string            `json:"delivered_at"`
+	Sections        []Section         `json:"sections"`
+	Claims          []Claim           `json:"claims"`
+	Limitations     []string          `json:"limitations"`
+	Sources         []Source          `json:"sources"`
+	SourceFreshness []SourceFreshness `json:"source_freshness"`
+	Disclaimer      string            `json:"disclaimer"`
 }
 
 type SeriesLine struct {
@@ -925,6 +936,19 @@ func (d *doc) limits() {
 			rows = append(rows, []*string{sp(s.Provider), sp(s.DatasetID), sp(d.fmtTime(s.UpdatedAt))})
 		}
 		d.table(Table{Title: "数据来源", Columns: []string{"数据提供方", "数据集", "更新至"}, Rows: rows})
+	}
+	for _, source := range d.r.SourceFreshness {
+		value := func(v *string) *string {
+			if v == nil {
+				return sp("未确认 / 不适用")
+			}
+			return sp(d.fmtTime(*v))
+		}
+		latency := map[string]string{"real_time": "实时", "delayed": "延迟", "unknown": "未知"}[source.LatencyMode]
+		d.table(Table{Title: source.Provider + " · " + source.DatasetID + " 来源时点", Columns: []string{"字段", "实际时点 / 状态"}, Rows: [][]*string{
+			{sp("行情事件"), value(source.EventAt)}, {sp("系统接收"), value(source.ReceivedAt)},
+			{sp("系统可用"), value(source.AvailableAt)}, {sp("延迟性质"), sp(latency)}, {sp("说明"), sp(source.Note)},
+		}})
 	}
 	d.y += 5
 	d.legend()
