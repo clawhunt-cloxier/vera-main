@@ -8,8 +8,9 @@
 
 ## 发现
 
-1. **P2 — PDF 丢失来源时间精度和部分来源元数据。** `backend/internal/reportpdf/render.go:58` 的 `SourceFreshness` 未接收 `published_at`、`period`、`status`；`render.go:940` 的新增来源表复用 `fmtTime`，而该函数在 `render.go:326` 仅格式化到分钟。例：事件 `14:00:01`、接收 `14:00:02`、可用 `14:00:03` 在导出 PDF 中均成为 `14:00`，与网页/API 的实际秒级时点不一致，无法核对短时延；旧 observation 报告的期间也会丢失。建议来源时点使用独立秒级格式，并完整传递、展示上述字段；增加包含不同秒值与非空期间/披露时间的 PDF 验证样例。
-2. **P2 — 反馈写入先于显示授权失败（与 worker 审查一致）。** `backend/internal/httpapi/observation_brief.go:25` 的保护器覆盖 `/reports/` 下所有方法，实时路径在第 59 行先运行处理函数，随后才在第 62 行重新授权。`POST .../feedback` 的数据库插入已经发生时，许可撤销可令请求最终失败；客户端重试可能重复提交。建议只让 GET 报告表示经过显示门禁；反馈仍按 workspace 与已交付结论校验，或者将所需权限校验和写入放入同一事务。该问题不造成响应中的原始行情泄露，但会造成可见结果与持久化副作用不一致。
+1. **P1 — 实时 worker 覆盖了任务预览时点。** `backend/internal/harness/realtime_brief.go:131` 将 `t.AsOf` 直接赋为冻结快照的 `Cutoff`。数据库中的 `research_tasks.as_of` 仍是计划预览时点，但内存中的 task 被用于 writer 的日期上下文和 `harness.Document.AsOf`，因此最终报告的 `as_of` 与同一任务 API 的 `Task.as_of` 不一致；这也让报告无法同时保留 ADR-0004 要求的预览时点与冻结截止时间。应保留 `t.AsOf`，只设置 `t.Snapshot`/`SnapshotRevision`，让确定性检查使用单独的冻结截止上下文，报告通过 `snapshot_as_of`/`data_as_of` 表达冻结时间，并增加数据库/API/报告一致性测试。
+2. **P2 — PDF 丢失来源时间精度和部分来源元数据。** `backend/internal/reportpdf/render.go:58` 的 `SourceFreshness` 未接收 `published_at`、`period`、`status`；`render.go:940` 的新增来源表复用 `fmtTime`，而该函数在 `render.go:326` 仅格式化到分钟。例：事件 `14:00:01`、接收 `14:00:02`、可用 `14:00:03` 在导出 PDF 中均成为 `14:00`，与网页/API 的实际秒级时点不一致，无法核对短时延；旧 observation 报告的期间也会丢失。建议来源时点使用独立秒级格式，并完整传递、展示上述字段；增加包含不同秒值与非空期间/披露时间的 PDF 验证样例。
+3. **P2 — 反馈写入先于显示授权失败（与 worker 审查一致）。** `backend/internal/httpapi/observation_brief.go:25` 的保护器覆盖 `/reports/` 下所有方法，实时路径在第 59 行先运行处理函数，随后才在第 62 行重新授权。`POST .../feedback` 的数据库插入已经发生时，许可撤销可令请求最终失败；客户端重试可能重复提交。建议只让 GET 报告表示经过显示门禁；反馈仍按 workspace 与已交付结论校验，或者将所需权限校验和写入放入同一事务。该问题不造成响应中的原始行情泄露，但会造成可见结果与持久化副作用不一致。
 
 ## 已核对边界
 
@@ -22,4 +23,4 @@
 
 ## 结论
 
-`2d4e30f` 仍需修复以上 P2 项；在实际读取范围内未发现新的跨 workspace、原始对象 URL/凭证泄漏或实时数据用途授权绕过。现有新增自动测试主要覆盖 Harness、HTTP 计划确认和前端模拟响应；报告/PDF/证据撤权后的 HTTP 行为与真实厂商盘中条件仍须分别验证，不能凭本次只读审查宣称通过。
+`2d4e30f` 仍需修复以上 P1/P2 项；在实际读取范围内未发现新的跨 workspace、原始对象 URL/凭证泄漏或实时数据用途授权绕过。现有新增自动测试主要覆盖 Harness、HTTP 计划确认和前端模拟响应；报告/PDF/证据撤权后的 HTTP 行为与真实厂商盘中条件仍须分别验证，不能凭本次只读审查宣称通过。
