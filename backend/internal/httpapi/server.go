@@ -55,7 +55,7 @@ func (s *Server) Handler() http.Handler {
 			// Reports and evidence perform their own snapshot authorization
 			// through the final write. An outer buffer would release those
 			// grant locks before the protected bytes are actually sent.
-			boundRead := r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/api/v1/reports/") || strings.HasPrefix(r.URL.Path, "/api/v1/evidence/"))
+			boundRead := (r.Method == http.MethodGet || r.Method == http.MethodHead) && (strings.HasPrefix(r.URL.Path, "/api/v1/reports/") || strings.HasPrefix(r.URL.Path, "/api/v1/evidence/"))
 			if s.Engine.Brief != nil && !cancel && !boundRead && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
 				callErr = s.Engine.Brief.WithDisplayCatalog(r.Context(), func() error { return nil })
 				if callErr == nil {

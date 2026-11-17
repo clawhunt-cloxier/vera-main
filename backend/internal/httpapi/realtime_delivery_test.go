@@ -193,5 +193,9 @@ func TestRealtimeDeliveredReportEvidenceAndPDF(t *testing.T) {
 				t.Fatalf("revoked source leaked %s (%s): %d %s", path, media, status, body)
 			}
 		}
+		status, _, _ := c.do("HEAD", path, nil, apiHeaders(realtimeMedia))
+		if status < 400 {
+			t.Fatalf("revoked source accepted HEAD %s: %d", path, status)
+		}
 	}
 }

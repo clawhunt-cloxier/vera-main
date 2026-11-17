@@ -23,7 +23,7 @@ import (
 // This wraps all report representations, including PDF and series, for both
 // protocol versions. RLS lookup precedes system-side archive authorization.
 func (s *Server) protectBriefRead(w http.ResponseWriter, r *http.Request, fn func(http.ResponseWriter, *http.Request) error) error {
-	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/api/v1/reports/") {
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.HasPrefix(r.URL.Path, "/api/v1/reports/") {
 		return fn(w, r)
 	}
 	id, err := uuid.Parse(r.PathValue("id"))
