@@ -1,6 +1,6 @@
 # 首版数据模型与事务
 
-状态：依 ADR-0003 修订的逻辑模型与不变量。T012 负责写 goose 迁移和 sqlc 查询，并用真实 PostgreSQL 集成测试验证；目前没有迁移。数据服务的统一记录字段见 [DATA_SERVICE](docs/DATA_SERVICE.md) §4，Harness 的步骤与结论结构见 [HARNESS](docs/HARNESS.md)。
+状态：依 ADR-0003 修订的逻辑模型与不变量。正式 goose 迁移位于 `backend/internal/platform/db/migrations/`；下表是逻辑模型，不表示全部数据集已覆盖。数据服务的统一记录字段见 [DATA_SERVICE](docs/DATA_SERVICE.md) §4，Harness 的步骤与结论结构见 [HARNESS](docs/HARNESS.md)。
 
 ## 1. 表与所有权
 
@@ -11,8 +11,11 @@
 | users | issuer+subject 唯一；persona；invited_by | identity |
 | workspaces | 每用户一个；owner_user_id 唯一 | identity |
 | sessions | hash(session_id)、user、workspace、expires_at、csrf_hash、revoked_at | identity |
-| research_plans | id、skill_id/version、subject_id、params、as_of、snapshot_mode、sections、plan_hash、expires_at、consumed_task_id | harness |
-| research_tasks | id、plan_id 唯一、skill_id/version、subject_id、status、revision、epoch、deadline、budget、snapshot_hash、snapshot_as_of、report_ref、reason_code | research |
+| research_plans | id、skill_id/version、subject_id、params、as_of、snapshot_mode、quote_requirement、sections、plan_hash、expires_at、consumed_task_id | harness |
+| research_tasks | id、plan_id 唯一、skill_id/version、subject_id、status、revision、epoch、deadline、budget、snapshot_mode、snapshot_hash、snapshot_as_of、snapshot_manifest_hash、report_ref、reason_code | research |
+| quote_task_intents / quote_task_components | workspace + task + epoch/revision；已确认行情意图及候选组件 | dataservice |
+| task_snapshot_requirements / task_snapshot_manifests | workspace + task；不可变要求、冻结截止、行情组件及哈希 | dataservice |
+| observation_brief_snapshots | workspace + task；旧 observation 冻结清单 | dataservice |
 | task_events | task+sequence 唯一；event_type、expected_revision、epoch、payload | research |
 | task_steps | task+epoch+step_key+input_hash 唯一；status、lease_until、attempt、output_ref、output_hash | harness |
 | model_calls | step_id+attempt 唯一；profile、model_id、observed_model_version、request_hash、状态（SENT/SUCCEEDED/FAILED/UNKNOWN）、usage、cost、reserved_cost | harness |
@@ -42,9 +45,9 @@
 | calculation_runs | formula_id/version、输入引用与哈希、结果、单位、适用性 | harness |
 | audit_events | actor、action、resource、result、trace_id；只追加 | platform |
 
-快照和事实表放在共享区，是因为同一数据快照可以被多个用户的任务复用（例如同一交易日对同一股票的个股分析）。用户只能通过自己任务的 `snapshot_hash` 访问它们，读取接口校验任务归属。
+旧统一层快照和事实表可被多个用户的任务复用，用户只能通过自己任务的 `snapshot_hash` 访问。新单股路径的 `quote_task_intents`、`task_snapshot_requirements`、`task_snapshot_manifests` 及 observation 清单按 workspace 与任务绑定；底层归档和已发布行情候选共享。读取接口始终校验任务归属。
 
-ADR-0004 的 `snapshot_mode` 与 `snapshot_as_of` 是待实施的目标字段，不表示现有迁移已有这些列。`collect_latest` 的任务在冻结前截止为空；冻结事务必须同时固定截止和快照哈希，并用 epoch 与唯一约束保证并发重试只能采用同一结果。既有任务按 `fixed_legacy` 保留原时间及快照，不得重算。新增数据及血缘的 `available_at` 必须不早于其真实持久化完成；跨 S3 与 PostgreSQL 的提交顺序、崩溃恢复及可见性由实施迁移与集成测试证明，不能仅用对象接收时间代替数据库可见时间。
+迁移 `00015` 已加入 ADR-0004 的 `snapshot_mode`、`snapshot_as_of` 与清单哈希约束，`00016` 提供任务要求和不可变快照清单，T027 的 `00019` 保存不可变 `quote_requirement`；单股 demo.3 已接通确认和冻结。`collect_latest` 的任务在冻结前截止为空；冻结事务必须同时固定截止和快照哈希，并用 epoch 与唯一约束保证并发重试只能采用同一结果。既有任务按 `fixed_legacy` 保留原时间及快照，不得重算。新增数据及血缘的 `available_at` 必须不早于其真实持久化完成；跨 S3 与 PostgreSQL 的提交顺序、崩溃恢复及可见性由实施迁移与集成测试证明，不能仅用对象接收时间代替数据库可见时间。
 
 ## 2. 隔离
 
@@ -65,13 +68,13 @@ ADR-0004 的 `snapshot_mode` 与 `snapshot_as_of` 是待实施的目标字段，
 | 动作 | 原子边界 | 崩溃后 |
 | --- | --- | --- |
 | 确认计划 | 校验幂等键、计划未过期且未被使用、`plan_hash`；预留配额；写任务、首个事件和 River 作业；标记计划已使用 | 同一幂等键返回原结果 |
-| 冻结快照 | 先写对象并校验哈希；短事务写 snapshot + items，更新任务 snapshot_hash 与状态 | 未被引用的对象按保留期回收 |
+| 冻结快照 | 原始对象发布后，在固定 MVCC 视图按当前 task epoch/revision 选取并绑定不可变清单、snapshot_as_of 与清单哈希；旧统一层保留 snapshot + items | 重试读取原清单；未被引用对象的回收策略仍须实现 |
 | 领取步骤 | 条件更新 `task_steps`（PENDING 或租约过期，且 epoch 等于任务当前 epoch）| 旧 epoch 的执行无法提交结果 |
 | 模型调用 | 发送前写 `model_calls`（SENT）与费用预留；返回后写结果与实际费用 | 有成功记录则复用；SENT 且超时则转 UNKNOWN，按最大费用保留 |
 | 取消 | 锁任务；未完成则 epoch+1、状态 CANCEL_REQUESTED，写事件与 `research.cancel` 作业 | 后到的结果只记录费用 |
 | 交付 | 锁任务；校验 epoch、计划哈希、快照哈希、必需检查结果、当前权限；写 report_version、publication、任务 COMPLETED、事件；释放配额 | 重复交付返回同一 publication |
 
-默认隔离级别 READ COMMITTED。事务内不等待网络或模型；序列化失败和死锁的重试有次数上限。
+默认隔离级别 READ COMMITTED；实时发布选择、冻结和绑定快照读取使用 REPEATABLE READ。一般事务内不等待网络或模型；实时快照在原始对象核验、模型发送和最终响应写出期间保留用途授权锁，以保证使用时许可有效，这些路径有调用超时并在使用后释放事务。序列化失败和死锁的重试有次数上限。
 
 ## 5. 索引
 

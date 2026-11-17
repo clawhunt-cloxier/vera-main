@@ -1,6 +1,6 @@
 # 首版 HTTP API
 
-契约源：[contracts/openapi.json](contracts/openapi.json)（OpenAPI 3.1）；请求结构以 contracts/schemas/ 中的 JSON Schema 2020-12 为准。当前只实现了健康检查，其余是实现目标，见 TASKS。
+契约源：[contracts/openapi.json](contracts/openapi.json)（OpenAPI 3.1）；请求结构以 contracts/schemas/ 中的 JSON Schema 2020-12 为准。当前实现包含工作区研究、报告、证据、自选股及简报协议；具体功能覆盖和真实验收状态见 TASKS。
 
 ## 1. 身份与通用行为
 
@@ -9,8 +9,8 @@
 - 服务端从会话确定 workspace，客户端不提交 workspace 或租户 ID。访问不属于本 workspace 的资源一律返回 404。
 - 业务 JSON 响应带 `request_id`（健康检查和登录重定向除外）。日志不记录报告正文、密钥和 cookie。
 - 时间用 RFC3339；十进制数值用字符串；ID 为服务端生成的 UUID。
-- ADR-0004 的 [OpenAPI 0.4 目标草案](contracts/drafts/openapi-0.4.json)增加计划 `snapshot_mode`、任务/报告 `snapshot_as_of`、证据事件/接收时间与报告 `source_freshness`；现行 [0.3 契约](contracts/openapi.json)保持原样。`collect_latest` 的计划 `as_of` 是预览时点，任务冻结前 `snapshot_as_of=null`，冻结后与快照不可变绑定；既有请求及任务继续使用 `fixed_legacy` 原语义。
-- 目标协商协议：业务 JSON 接口请求 `Accept: application/vnd.vera.v0.4+json` 时使用 0.4 语义，成功 JSON 响应带相同 `Content-Type` 和 `Vary: Accept`；缺省或请求 `application/json` 沿用 0.3。尚未部署 0.4 的服务应返回 406，客户端还必须核对响应 `Content-Type`，防止旧服务忽略 `Accept` 并返回旧格式。健康检查、认证跳转和 PDF 按原媒体类型处理，错误可用原错误 JSON。新建 0.4 计划使用 `collect_latest`；读取历史任务时可返回 `fixed_legacy`。创建 0.4 计划和确认任务均须协商 0.4，不能跨版本确认；各版本的计划哈希按该版本规则计算并固定。此协议尚未实现，不能据此宣称服务已提供 0.4。
+- 现行 [OpenAPI 0.4 契约](contracts/openapi.json)已增加计划 `snapshot_mode`、任务/报告 `snapshot_as_of`、证据事件/接收时间与报告 `source_freshness`，并保留 0.3 与 observation.v1 的各自表示。[早期目标草案](contracts/drafts/openapi-0.4.json)保留设计背景，当前实现以主契约为准。`collect_latest` 的计划 `as_of` 是预览时点，任务冻结前 `snapshot_as_of=null`，冻结后与快照不可变绑定；既有请求及任务继续使用 `fixed_legacy` 原语义。
+- 版本协商协议：业务 JSON 接口请求 `Accept: application/vnd.vera.v0.4+json` 时使用 0.4 语义，成功 JSON 响应带相同 `Content-Type` 和 `Vary: Accept`；缺省或请求 `application/json` 沿用 0.3。尚未部署 0.4 的服务应返回 406，客户端还必须核对响应 `Content-Type`，防止旧服务忽略 `Accept` 并返回旧格式。健康检查、认证跳转和 PDF 按原媒体类型处理，错误可用原错误 JSON。新建 0.4 计划使用 `collect_latest`；读取历史任务时可返回 `fixed_legacy`。创建 0.4 计划和确认任务均须协商 0.4，不能跨版本确认；各版本的计划哈希按该版本规则计算并固定。T027 已为 `stock_analysis/1.1.0-demo.3` 实现该协议，创建和确认还须使用 0.4 `Content-Type`。创建计划必须显式提供 `quote_requirement=realtime_trade|latest_available`，其值参与哈希。`/me.research_protocol=v0.4` 表示已配置该路径；不证明真实字段与时延已验收。
 - 需要幂等的写请求带 `Idempotency-Key`（1–128 字符）。同一 workspace、方法、规范化路由和键：请求哈希相同则返回原响应，不同则返回 409。幂等记录保存 30 天。
 - 列表：`page_size` 默认 20、上限 100；不透明游标，按 `created_at` + `id` 稳定排序。
 
@@ -30,7 +30,7 @@
 | POST | /api/v1/research-tasks | 用 `plan_id` + `plan_hash` 确认计划并创建任务，幂等，202 |
 | GET | /api/v1/research-tasks | 任务列表，可按技能、状态、对象过滤 |
 | GET | /api/v1/research-tasks/{id} | 状态、revision、步骤进度、原因、`report_ref` |
-| POST | /api/v1/research-tasks/{id}/cancel | 校验 `expected_revision`；202 取消处理中 / 200 已取消 / 409 已完成；observation.v1 成功返回 204（无厂商数据，授权失效仍可取消） |
+| POST | /api/v1/research-tasks/{id}/cancel | 校验 `expected_revision`；202 取消处理中 / 200 已取消 / 409 已完成；observation.v1/0.4 成功返回 204（无厂商数据，授权失效仍可取消） |
 | GET | /api/v1/reports | 报告列表，可按对象、技能过滤 |
 | GET | /api/v1/reports/{id}/versions/{version} | 已交付的报告：抬头、章节、结论、表格、图表数据、限制 |
 | GET | /api/v1/reports/{id}/versions/{version}/series/{series_id} | 报告图表数据，来自该报告冻结的数据快照，不取实时数据 |
@@ -69,12 +69,12 @@
 
 OpenAPI 中的 Claim、Evidence 是报告页的读取投影，不是模型的输出结构；模型输出结构见 [HARNESS](docs/HARNESS.md) §6.2。浏览器不能回传或修改 Claim。证据的来源等级、口径和原文位置由数据服务写入，展示时不由模型补充。
 
-## 真实成交观察简报协议（已实现，待实际环境验收）
+## 真实成交观察简报协议
 
-`application/vnd.vera.observation.v1+json` 是休市可用的独立简报协议，不是尚未完整实现的 0.4 盘中协议。`/me.research_protocol=observation.v1` 表示当前部署启用该协议。客户端优先请求它并核对响应媒体类型；旧 fixture 部署可回退 application/json。0.4 原草案的强实时条件保持不变。
+`application/vnd.vera.observation.v1+json` 是休市可用的独立简报协议，保留 demo.2 的非实时语义。`/me.research_protocol=observation.v1` 表示当前部署启用该协议。客户端按部署声明选择协议并核对响应媒体类型；旧 fixture 部署使用 application/json。0.4 的实时条件保持不变。
 
 新计划版本 `stock_analysis/1.1.0-demo.2`，参数为空，`snapshot_mode=collect_latest`，`quote_requirement=null`。计划/任务 `as_of` 是预览时间；确认后采集，任务 `snapshot_as_of` 在冻结前为空、冻结后不可变。确认必须使用该协议；旧客户端不得创建或确认新计划。计划、任务与报告新增字段均为兼容的可选字段，旧任务仍用 fixed_legacy。报告 as_of 与 snapshot_as_of 均为实际冻结时间。
 
-报告只提供真实厂商日成交观察和完整来源追溯，标为 limited、非实时；证据的 received_at 是实际采集时间，event_at/published_at 为空表示未确认，不能由序列日期伪造。证据只对已交付且属于当前 workspace 的报告开放，每次读取（含 PDF/series）重新核验完整快照、原始对象及当前展示许可；模型每次发送也独立核验模型用途。未接入的财务/实时字段不送模型。
+报告只提供真实厂商日成交观察和完整来源追溯，标为 limited、非实时；证据的 received_at 是实际采集时间，event_at/published_at 为空表示未确认，不能由序列日期伪造。证据只对已交付且属于当前 workspace 的报告开放，每次读取（含 PDF/series）核验完整快照与原始对象。旧 observation 路径沿用当前凭证授权实现，不等于 demo.3 的 `source_licenses` 逐用途复核；demo.3 在模型发送和展示时分别验证当前模型/展示许可。未接入的财务/实时字段不送模型。
 
 真实成交观察的证券 `status` 可为 `unknown`，表示尚未核实交易状态；不得据此推断停牌或休市。证据 `origin` 使用既有 `vendor_derived`，不将厂商观察冒充交易所官方发布。

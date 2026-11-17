@@ -5,7 +5,7 @@
 ## 运行依赖与凭证
 
 - 项目采用 Go，Linux 原生绑定在 `backend/internal/dataservice/emquant`，通过 cgo 动态加载厂商库；不把 SDK 二进制、账号、密码、授权文件或登录日志提交仓库。账号密钥应由运行环境的 secret 机制传入，不放在命令行、日志、镜像或前端。
-- 厂商库及同目录的服务器配置必须由部署方按授权独立提供，SDK 会写入运行目录，应使用可写的隔离副本。组件当前只提供库接口，生产配置、进程管理和应用注册尚未实现。
+- 厂商库及同目录的服务器配置必须由部署方按授权独立提供，SDK 会写入运行目录，应使用可写的隔离副本。应用配置与生命周期接线已实现；生产隔离、进程恢复与部署验收仍需完成。
 - `OpenRuntime` 将原生 SDK、S3 兼容归档和 PostgreSQL 共享限流器组合为一个采集单元；缺少限流状态表时登录不会执行。T027 的单股 demo.3 worker 通过任务意图调用该采集、发布和冻结路径；其他数据集仍不会因此自动生成统一研究记录。账号、密码从部署密钥机制传入；不要打印配置或错误上下文中的敏感值。
 - 官方 Linux C++ SDK 的 `EmQuantAPI.h` 可从[厂商下载中心](https://quantapi.eastmoney.com/Download?from=web)获取。2026-11-13 下载的 x86-64 动态库与用户提供的 Python 包内同架构动态库 SHA-256 一致；这不保证未来版本 ABI 一致。
 - 用户已确认允许数据持久化、向用户展示及第三方模型处理；应用仍须登记具体数据产品和字段权限，再启用对应生产用途。迁移 `00012` 创建受控的 `source_licenses`，默认不生成任何许可；证据引用必须由管理侧依据实际产品权限维护，引用字符串本身不证明厂商授权。
@@ -26,7 +26,7 @@
 | `ctr` / `SECUMATCH` 证券简称匹配 | 厂商随附 2025 年指标手册列出 `SecuName`、`Priority` 和 `SECURITYSHORTNAME,SECUCODE`；`Priority=0` 为 AB 股优先 | 只接收明确的单个简称，保留厂商返回的所有行，不自动选择；真实账号权限、返回类型、市场覆盖和候选完整性尚未验证，不能当作完整实体目录 |
 | 融资融券序列 | 随附 2025 年指标手册列出 `TRADINGBALANCEM`、`PURCHASEWITHBORROWEDMONEYM`、`REPAYMENTTOBROKERM`、`SECLENDINGBALANCEVOLUMEM`、`SECLENDINGBALANCEM`，可按日查询 | 支持按产品、字段和证券授权采集并登记归档，保留逐字段原值及位置；单位、日期含义、发布时间、账号权限与真实响应形状尚未验证，不生成 `flow.margin` 或研究数据 |
 | 账户函数用量查询 | [官方 Python 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Python.html)列出 `datastatistics`，可查询函数用量、阈值和周期等 | 新增 CSD/CSS 只读诊断，返回值只在内存保留，不归档、不送模型；一次真实账号 CSD 查询返回非空表格，统计周期、额度单位和其他函数权限尚未验证，不能据此推断快照限频或数据使用许可 |
-| CSD/CSS 请求 | 官方手册说明单次最多 64 项指标、函数每分钟不超过 700 次 | 已限制指标数量；新增共享限流、超限冷却组件与数据库迁移，应用账户绑定和实际冷却配置仍未接入 |
+| CSD/CSS 请求 | 官方手册说明单次最多 64 项指标、函数每分钟不超过 700 次 | 已限制指标数量；OpenRuntime 已接共享限流及冷却配置，实际账户限额仍须核实 |
 
 厂商的[Python 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_Python.html)和 [Linux C++ 手册](https://quantapi.eastmoney.com/Upload/EMQuantAPI_CPP_Linux.pdf)定义 API、参数和内存释放；字段口径以具体数据产品及版本为准。用户提供的终端口径应在正式数据产品登记中记录来源与确认人，不把上述概括当作完整合同原文。
 
@@ -49,7 +49,7 @@
 
 ## 归档、验证与剩余工作
 
-SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写入 S3 兼容存储，关联请求指纹和字段位置。它不是厂商原始网络字节。迁移 `00011` 与 `ArchiveRegistry` 为经对象回读和哈希校验的 v2 归档登记请求指纹、来源和时间；`Runtime.RegisteredCollector` 对 CSD、CSS、交易日和行情快照在采集前及登记事务内分别核对产品、数据集、厂商方法、字段、证券或市场范围和存储用途的有效许可，登记成功后才返回采集结果。证券范围可明确登记为列出的代码或全部代码；全部代码需要相应授权依据，不能由单次成功请求推断。登记只建立可核验的原始层身份，不证明厂商来源或证据真实性、也不是研究可用时点；调用期间许可撤销或数据库失败时，已写入对象可能成为未登记对象，不能进入研究。单独调用 `ArchiveRegistry.RegisterCube` 产生的未绑定许可的记录仅供原始层准备，不能作为研究依据。T027 demo.3 任务路径已在采集时登记并在发布、冻结及模型/展示使用时重新核验；低频数据集仍未接入该完整路径。原始对象与统一记录的关联、可见时间、快照冻结、权限撤销和旧写入保护仍需遵守，不能丢弃 `MappedRecord` 的血缘后直接写入当前 `records` 表。
+SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写入 S3 兼容存储，关联请求指纹和字段位置。它不是厂商原始网络字节。迁移 `00011` 与 `ArchiveRegistry` 为经对象回读和哈希校验的 v2 归档登记请求指纹、来源和时间；在绑定非空 `LicenseID` 的路径中，`Runtime.RegisteredCollector` 对 CSD、CSS、交易日和行情快照在采集前及登记事务内分别核对产品、数据集、厂商方法、字段、证券或市场范围和存储用途的有效许可，登记成功后才返回采集结果。证券范围可明确登记为列出的代码或全部代码；全部代码需要相应授权依据，不能由单次成功请求推断。登记只建立可核验的原始层身份，不证明厂商来源或证据真实性、也不是研究可用时点；调用期间许可撤销或数据库失败时，已写入对象可能成为未登记对象，不能进入研究。单独调用 `ArchiveRegistry.RegisterCube` 产生的未绑定许可的记录仅供原始层准备，不能作为研究依据。T027 demo.3 任务路径已在采集时登记并在发布、冻结及模型/展示使用时重新核验；低频数据集仍未接入该完整路径。原始对象与统一记录的关联、可见时间、快照冻结、权限撤销和旧写入保护仍需遵守，不能丢弃 `MappedRecord` 的血缘后直接写入当前 `records` 表。
 
 行情映射准备组件从归档校验单证券 `TIME,NOW` 请求、数据哈希、接收时间与字段位置，拒绝过期或不匹配的数据；单精度价格按其实际精度转成十进制字符串。映射参数必须提供时间和单位的依据引用、许可引用及新鲜度阈值；声明实时或延迟还需延迟依据引用。**引用字符串本身不是验证**：生产数据治理层必须解析并核验真实依据、权限和适用产品；在此之前不能将映射结果作为已验证实时行情或写入研究快照。当前厂商 `NOW/TIME` 及延迟口径仍未确认。
 
@@ -67,7 +67,7 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 
 已按官方头文件新增 CFN 公告／资讯元数据调用与归档准备，模拟动态库覆盖模式、上游错误、归档失败和请求指纹；当前尚未用真实账户验证该接口的权限、响应形状或字段映射。厂商返回的 URL 和文本是不可信数据，不得执行其中的指令，也不得以返回的 URL 绕过已登记数据源进行任意抓取。元数据不等于公告正文。
 
-共享限流准备组件使用 PostgreSQL 会话锁和持久状态，将同一账号各类 SDK 调用串行化，调用结束后等待配置的最小间隔；必须直连 PostgreSQL 或使用保持会话亲和性的连接池，不能使用事务池化来承载会话锁。下限不快于 700 次/分钟，未知的账号或快照限额必须另行配置为更严格值，不能把该下限当作实际配额。收到已确认的厂商限频错误时，组件将另行配置的冷却时间持久化供所有进程遵守；它不自动重试，也不猜测实际账号所需冷却时间。限流状态写入失败、无法取得数据库连接、或发现上一次请求可能仍在执行时，均拒绝新请求；不能仅凭锁释放判断 SDK 调用已经结束。迁移 `00010` 创建 `emquant_rate_state`，由系统连接角色访问；工作区角色不能更新账户级限流状态，非空状态表不能直接回滚删除。采集器可以注入该限流器，但当前默认未注入，也未接入应用。必须确保同一厂商账号的所有进程及外部应用共享相同的非秘密 scope 且禁止绕过；否则不能宣称已实现账号级保护。未解决的 in-flight 状态必须先确认全部旧 SDK 进程已终止，并按已验证的账号冷却要求恢复；不能盲目清除。自动恢复机制、部署和真实账号限额仍未验证。
+共享限流准备组件使用 PostgreSQL 会话锁和持久状态，将同一账号各类 SDK 调用串行化，调用结束后等待配置的最小间隔；必须直连 PostgreSQL 或使用保持会话亲和性的连接池，不能使用事务池化来承载会话锁。下限不快于 700 次/分钟，未知的账号或快照限额必须另行配置为更严格值，不能把该下限当作实际配额。收到已确认的厂商限频错误时，组件将另行配置的冷却时间持久化供所有进程遵守；它不自动重试，也不猜测实际账号所需冷却时间。限流状态写入失败、无法取得数据库连接、或发现上一次请求可能仍在执行时，均拒绝新请求；不能仅凭锁释放判断 SDK 调用已经结束。迁移 `00010` 创建 `emquant_rate_state`，由系统连接角色访问；工作区角色不能更新账户级限流状态，非空状态表不能直接回滚删除。应用通过 OpenRuntime 注入该限流器；直接构造采集器的调用方也必须遵守该约束。必须确保同一厂商账号的所有进程及外部应用共享相同的非秘密 scope 且禁止绕过；否则不能宣称已实现账号级保护。未解决的 in-flight 状态必须先确认全部旧 SDK 进程已终止，并按已验证的账号冷却要求恢复；不能盲目清除。自动恢复机制、部署和真实账号限额仍未验证。
 
 开发验证：在 `backend` 执行 `go test -race ./internal/dataservice/emquant`；默认测试使用合成样本。`TestLiveSDK` 和 `TestLiveArchiveS3` 只在显式设置 `EMQUANT_INTEGRATION=1` 及相应环境后运行，使用真实账号会消耗厂商额度，后者会向指定 S3 桶写真实数据。`TestLiveCFN`、`TestLiveIndustry`、`TestLiveSecurity`、`TestLiveCodeLookup`、`TestLiveSecurityName`、`TestLiveDisclosureObservation`、`TestLiveMarginObservation` 和 `TestLiveUsageStatistics` 还分别要求 `EMQUANT_LIVE_CFN=1`、`EMQUANT_LIVE_INDUSTRY=1`、`EMQUANT_LIVE_SECURITY=1`、`EMQUANT_LIVE_CEC=1`、`EMQUANT_LIVE_NAME=1`、`EMQUANT_LIVE_DISCLOSURE=1`、`EMQUANT_LIVE_MARGIN=1`、`EMQUANT_LIVE_USAGE=1`。其中 `TestLiveSecurity` 和 `TestLiveUsageStatistics` 已于 2026-11-14 UTC 真实账号单次通过，其余上述测试尚未运行。`TestLiveRuntime` 还要求 `EMQUANT_LIVE_RUNTIME=1`、明确的测试 S3 端点和桶，以及 `EMQUANT_TEST_MIN_INTERVAL`、`EMQUANT_TEST_RATE_COOLDOWN`；测试数据库是独立的，只能使用未被其他应用使用的账号，不能代替共享生产限流。该测试也尚未运行。真实配置只由 secret 管理注入，不提交测试录制结果。
 
@@ -75,11 +75,11 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 
 `TestPreviouslyArchivedQuote` 通过 `EMQUANT_ARCHIVE_REPLAY=1` 和显式测试 S3 配置只读回放已有归档，不向厂商请求新数据。2026-11-13 UTC 使用先前真实 SDK 联调留存的本地测试桶运行通过：对象哈希和解码可验证，旧行情按当前时间被判定过期；这不证明厂商真实性、字段含义、实时权限或延迟承诺。
 
-后续还需要实体和行业目录、公告正文及财报版本、完整日线与资金数据集、跨 worker 限流、报告各来源时间展示、生产环境配置以及真实数据加真实模型的端到端验收。工程计划与当前状态见 [接入交接](handoffs/2026-11-12-emquant-probe-codex.md)及 [ADR-0004 目标契约](decisions/0004-intraday-data-cutoff.md)。
+后续还需要实体和行业目录、公告正文及财报版本、完整日线与资金数据集，以及真实盘中部署和账户限额验收。T027 已接共享限流和单股行情来源时间展示；非实时 observation 的真实验收见下节。工程计划与当前状态见 [接入交接](handoffs/2026-11-12-emquant-probe-codex.md)及 [ADR-0004 目标契约](decisions/0004-intraday-data-cutoff.md)。
 
-`Runtime.CollectAndPublishQuote` 将已登记产品的单证券行情采集、受许可约束的归档、政策映射与两阶段发布串接；在取数前拒绝不匹配的政策或证券，后续阶段再次检查许可和政策。发布失败若已创建候选则返回候选 ID，可用 `PublishStagedQuote` 恢复，不能把此结果视为任务快照。该入口尚未接入应用任务，也不证明账户实时权限。
+`Runtime.CollectAndPublishQuote` 将已登记产品的单证券行情采集、受许可约束的归档、政策映射与两阶段发布串接；在取数前拒绝不匹配的政策或证券，后续阶段再次检查许可和政策。发布失败若已创建候选则返回候选 ID，可用 `PublishStagedQuote` 恢复，不能把此结果视为任务快照。T027 的 CollectTaskQuotes 经该入口采集，成功仍不证明账户实时权限。
 
-单股 demo.3 已实现 0.4 计划、确认和任务媒体协商；不带 0.4 Accept 的旧版 JSON 继续按 0.3 处理，版本混用被拒绝。该实现范围不扩展到完整三项技能或所有数据集。
+启用 demo.3 须在已有 SDK/S3 配置上成对提供 `EMQUANT_QUOTE_LICENSE_ID` 和 `EMQUANT_QUOTE_POLICY_ID`；缺省保持 observation，仅配置其中一个会拒绝启动。具体迁移与部署顺序见 [DEPLOYMENT](DEPLOYMENT.md)。单股 demo.3 已实现 0.4 计划、确认和任务媒体协商；不带 0.4 Accept 的旧版 JSON 继续按 0.3 处理，版本混用被拒绝。该实现范围不扩展到完整三项技能或所有数据集。
 
 `Runtime.CollectTaskQuotes` 根据可信 0.4 确认流程预先登记的不可变行情意图确定证券，并在每次采集前后核对工作区、计划、任务 epoch、revision、状态和截止时间；T027 worker 已调用该方法，并在后续 `FreezeLatestSnapshot` 中绑定任务快照。取消期间已发布的候选仍只是数据源候选，不构成该任务快照；发生错误时返回的部分候选不能作为完整任务结果。
 
@@ -99,7 +99,7 @@ SDK 只暴露解码后的类型化结果；组件将该结果按内容哈希写�
 
 ## 休市真实成交简报
 
-用户于 2026-11-15 允许先交付非实时真实简报。`BriefService` 现已作为 Provider 接入应用，独立版本 demo.2 使用已确认单位的 VOLUME/AMOUNT/TURN 与当前证券名称观察。原有严格实时行情链路保持原门槛，未知字段不参与模型。新路径的原始归档、许可、不可变清单及每次模型/展示授权见 [技能规格](skills/stock-observation-brief.md) 和 [API](../API.md)。Canonical Records/Capabilities 仍不伪造完整覆盖；原登记的 ref.security/mkt.daily_bar 数据集仅分类原始对象，不宣称具备全部字段。
+用户于 2026-11-15 允许先交付非实时真实简报。`BriefService` 现已作为 Provider 接入应用，独立版本 demo.2 使用已确认单位的 VOLUME/AMOUNT/TURN 与当前证券名称观察。原有严格实时行情链路保持原门槛，未知字段不参与模型。该路径的原始归档、不可变清单和当前凭证授权见 [技能规格](skills/stock-observation-brief.md) 和 [API](../API.md)。其当前实现不等同 demo.3 的逐用途 source_licenses 检查。Canonical Records/Capabilities 仍不伪造完整覆盖；原登记的 ref.security/mkt.daily_bar 数据集仅分类原始对象，不宣称具备全部字段。
 
 2026-11-15 UTC 已用真实 Choice SDK、持久 SeaweedFS S3 与 deepseek-flash 完成应用链路验证：东方财富单股 limited 非实时简报，synthetic=false，4 次模型调用，报告数据最近日期为 2026-11-13。验收通过命令 `VERA_LIVE_BRIEF=1 go test ./internal/app -run TestLiveObservationBrief -count=1 -v`（其他秘密/授权变量单独注入）；真实原始数据与报告仅保存在受控本地/对象存储，不提交 Git。网站部署验收另记交接，不以本次进程内测试替代网站结果。
 
