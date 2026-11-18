@@ -70,7 +70,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 ## T027 单股行情简报 0.4
 
-部署前执行新增迁移 00019；API 与 worker 都必须支持 `1.1.0-demo.3`。由于新版 `/readyz` 会校验 UUID 对应的数据库行，激活必须按以下顺序进行：先保持宿主 `.env` 中 `EMQUANT_QUOTE_LICENSE_ID` 与 `EMQUANT_QUOTE_POLICY_ID` 均为空，部署新版镜像并确认旧 observation 模式仍可启动；然后在正在运行的 `vera` 容器内使用一次性环境变量执行 `vera emquant init-quote`，让同一数据库登记 `source_licenses` 与 `quote_mapping_policies`；命令成功并写入审计后，再将同一 UUID 对持久写入宿主 `.env` 并重启应用。不要用 `docker compose run` 执行初始化，它会启动第二个内嵌 PostgreSQL 实例。两项均为空时继续提供 observation.v1；配置不完整、零 UUID 或非 Choice provider 配置会导致启动失败。已有授权和映射登记必须覆盖实际产品、证券、TIME/NOW 及状态字段，不能用 SDK 登录成功自动生成。字段时区、单位、延迟、新鲜度阈值和状态映射未核实的部署不能宣称支持实时成交。
+部署前执行新增迁移 00019；API 与 worker 都必须支持 `1.1.0-demo.3`。先部署新版镜像并确认旧 observation 模式仍可启动；然后在正在运行的 `vera` 容器内使用一次性环境变量执行 `vera emquant init-quote`，让同一数据库登记或复用一个覆盖全部 A 股的 `source_licenses` 与 `quote_mapping_policies` 行。该命令生成并持久化治理行 ID，应用和部署配置不保存逐标的 ID。不要用 `docker compose run` 执行初始化，它会启动第二个内嵌 PostgreSQL 实例。未登记有效 all-scope Choice 行情治理行时继续提供 observation.v1；Choice SDK 登录成功不能替代授权、字段时区、单位、延迟、新鲜度阈值和状态映射核验。
 
 0.4 前端必须显式选择 `realtime_trade` 或 `latest_available`。选择实时成交时要求连续交易状态、已确认实时性质和满足阈值的事件时间；选择最近可用时保留实际延迟和交易状态，仍受登记的新鲜度阈值限制。采集失败、权限缺失或过期不会回退为 observation 或 fixture。回滚可关闭新计划入口，但须保留迁移和已经冻结的清单，并让支持该版本的 worker 处理在途任务。
 
@@ -78,8 +78,8 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 实时行情的许可和映射使用 `vera emquant init-quote` 登记。该命令要求单独提供许可、字段、时间/价格口径、延迟性质、新鲜度阈值和证据引用；相同 UUID 重复执行必须得到同一配置，任何冲突都拒绝覆盖。`EMQUANT_QUOTE_LATENCY_MODE=real_time` 还必须有经核实的状态字段，并至少映射一个 `continuous` 状态；无法证明时使用 `unknown`，前端只能选择 `latest_available`。命令只登记配置，不向 Choice 发起请求，也不授予不存在的厂商权限。
 
-当前 MVP 先登记 `unknown` 延迟策略并运行 `latest_available`。交易时段核对 Choice 终端的最新价、`TIME`、接收时间和连续交易状态后，若证据充分，再用新的 reviewed UUID 登记 `real_time`；旧策略不原地修改。
+当前 MVP 先登记 `unknown` 延迟策略并运行 `latest_available`。交易时段核对 Choice 终端的最新价、`TIME`、接收时间和连续交易状态后，若证据充分，再以新的 reviewed 配置登记 `real_time`；旧策略不原地修改。
 
-`/readyz` 现在会重新检查配置 UUID 对应的 provider、source license 和 mapping policy 是否存在、未撤销、未过期且允许存储/展示/模型处理；缺失时返回 `realtime_source_unavailable`，不会让前端误以为 0.4 已可用。
+`/readyz` 现在会重新检查 Choice provider、all-scope source license 和 mapping policy 是否存在、未撤销、未过期且允许存储/展示/模型处理；缺失时返回 `realtime_source_unavailable`，不会让前端误以为 0.4 已可用。
 
 现有 `npm run accept:live-realtime` 只验收 `real_time`/`realtime_trade`，不能代替本 MVP 的 `unknown`/`latest_available` 验收。首次启用后应使用受控账号手工完成 0.4 计划、采集、冻结、报告和证据核验，并记录 Choice `TIME`、系统接收时间、可用时间、最大年龄、原始归档对象、报告 ID 和镜像 SHA。

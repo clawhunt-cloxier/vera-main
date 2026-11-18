@@ -21,9 +21,6 @@ import (
 type quoteInitConfig struct {
 	ProviderID      string
 	Product         string
-	LicenseID       uuid.UUID
-	PolicyID        uuid.UUID
-	Codes           []string
 	Fields          []string
 	StatusIndicator string
 	StatusEvidence  string
@@ -52,6 +49,7 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 		return err
 	}
 
+	var licenseID, policyID uuid.UUID
 	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing)
 			VALUES($1,'Choice / 东方财富','vendor',true) ON CONFLICT DO NOTHING`, c.ProviderID); err != nil {
@@ -65,46 +63,42 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 		if !eligible {
 			return errors.New("existing provider is disabled, synthetic or model use revoked")
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO source_licenses
-			(id,provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,
-			 evidence_ref,verified_by,verified_at,valid_from,valid_until,allow_storage,allow_display,allow_model_processing)
-			VALUES($1,$2,$3,'mkt.intraday_quote','CSQSNAPSHOT',$4,'listed',$5,$6,$7,clock_timestamp(),clock_timestamp(),$8,true,true,true)
-			ON CONFLICT DO NOTHING`, c.LicenseID, c.ProviderID, c.Product, c.Fields, c.Codes, c.Evidence, c.VerifiedBy, c.ValidUntil); err != nil {
-			return err
+		err := tx.QueryRow(ctx, `SELECT id FROM source_licenses
+			WHERE provider_id=$1 AND product_code=$2 AND dataset_id='mkt.intraday_quote'
+			  AND vendor_method='CSQSNAPSHOT' AND field_names=$3 AND instrument_scope='all'
+			  AND cardinality(instrument_codes)=0 AND evidence_ref=$4 AND verified_by=$5
+			  AND valid_until=$6 AND revoked_at IS NULL AND allow_storage AND allow_display AND allow_model_processing
+			ORDER BY verified_at DESC, id DESC LIMIT 1`, c.ProviderID, c.Product, c.Fields, c.Evidence, c.VerifiedBy, c.ValidUntil).Scan(&licenseID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			licenseID = uuid.New()
+			_, err = tx.Exec(ctx, `INSERT INTO source_licenses
+				(id,provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,
+				 evidence_ref,verified_by,verified_at,valid_from,valid_until,allow_storage,allow_display,allow_model_processing)
+				VALUES($1,$2,$3,'mkt.intraday_quote','CSQSNAPSHOT',$4,'all','{}',$5,$6,clock_timestamp(),clock_timestamp(),$7,true,true,true)`, licenseID, c.ProviderID, c.Product, c.Fields, c.Evidence, c.VerifiedBy, c.ValidUntil)
 		}
-		var same bool
-		if err := tx.QueryRow(ctx, `SELECT provider_id=$2 AND product_code=$3 AND dataset_id='mkt.intraday_quote'
-			AND vendor_method='CSQSNAPSHOT' AND field_names=$4 AND instrument_scope='listed' AND instrument_codes=$5
-			AND evidence_ref=$6 AND verified_by=$7 AND valid_until=$8 AND revoked_at IS NULL
-			AND allow_storage AND allow_display AND allow_model_processing
-			FROM source_licenses WHERE id=$1`, c.LicenseID, c.ProviderID, c.Product, c.Fields, c.Codes, c.Evidence, c.VerifiedBy, c.ValidUntil).Scan(&same); err != nil {
+		if err != nil {
 			return err
-		}
-		if !same {
-			return errors.New("existing quote license conflicts; use a new reviewed identity")
 		}
 
-		if _, err := tx.Exec(ctx, `INSERT INTO quote_mapping_policies
-			(id,source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,
-			 price_unit,price_evidence_ref,latency_mode,latency_evidence_ref,max_age_ms,verified_by,verified_at,valid_from,valid_until,
-			 status_indicator,status_evidence_ref,status_mapping)
-			VALUES($1,$2,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai',$3,'CNY',$4,$5,$6,$7,$8,clock_timestamp(),clock_timestamp(),$9,$10,$11,$12)
-			ON CONFLICT DO NOTHING`, c.PolicyID, c.LicenseID, c.TimeEvidence, c.PriceEvidence, c.LatencyMode, nullableString(c.LatencyEvidence), c.MaxAge.Milliseconds(), c.VerifiedBy, c.ValidUntil, nullableString(c.StatusIndicator), nullableString(c.StatusEvidence), nullableJSON(c.StatusMapping)); err != nil {
-			return err
+		err = tx.QueryRow(ctx, `SELECT id FROM quote_mapping_policies
+			WHERE source_license_id=$1 AND dataset_id='mkt.intraday_quote' AND mapping_name='emquant-quote'
+			  AND mapping_version=1 AND time_convention='hhmmss-asia-shanghai' AND time_evidence_ref=$2 AND price_unit='CNY'
+			  AND price_evidence_ref=$3 AND latency_mode=$4 AND latency_evidence_ref IS NOT DISTINCT FROM $5
+			  AND max_age_ms=$6 AND verified_by=$7 AND valid_until=$8 AND revoked_at IS NULL
+			  AND status_indicator IS NOT DISTINCT FROM $9 AND status_evidence_ref IS NOT DISTINCT FROM $10
+			  AND status_mapping IS NOT DISTINCT FROM $11
+			ORDER BY verified_at DESC, id DESC LIMIT 1`, licenseID, c.TimeEvidence, c.PriceEvidence, c.LatencyMode,
+			nullableString(c.LatencyEvidence), c.MaxAge.Milliseconds(), c.VerifiedBy, c.ValidUntil, nullableString(c.StatusIndicator), nullableString(c.StatusEvidence), nullableJSON(c.StatusMapping)).Scan(&policyID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			policyID = uuid.New()
+			_, err = tx.Exec(ctx, `INSERT INTO quote_mapping_policies
+				(id,source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,
+				 price_unit,price_evidence_ref,latency_mode,latency_evidence_ref,max_age_ms,verified_by,verified_at,valid_from,valid_until,
+				 status_indicator,status_evidence_ref,status_mapping)
+				VALUES($1,$2,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai',$3,'CNY',$4,$5,$6,$7,$8,clock_timestamp(),clock_timestamp(),$9,$10,$11,$12)`, policyID, licenseID, c.TimeEvidence, c.PriceEvidence, c.LatencyMode, nullableString(c.LatencyEvidence), c.MaxAge.Milliseconds(), c.VerifiedBy, c.ValidUntil, nullableString(c.StatusIndicator), nullableString(c.StatusEvidence), nullableJSON(c.StatusMapping))
 		}
-		var policySame bool
-		if err := tx.QueryRow(ctx, `SELECT source_license_id=$2 AND dataset_id='mkt.intraday_quote' AND mapping_name='emquant-quote'
-			AND mapping_version=1 AND time_convention='hhmmss-asia-shanghai' AND time_evidence_ref=$3 AND price_unit='CNY'
-			AND price_evidence_ref=$4 AND latency_mode=$5 AND latency_evidence_ref IS NOT DISTINCT FROM $6
-			AND max_age_ms=$7 AND verified_by=$8 AND valid_until=$9 AND revoked_at IS NULL
-			AND status_indicator IS NOT DISTINCT FROM $10 AND status_evidence_ref IS NOT DISTINCT FROM $11
-			AND status_mapping IS NOT DISTINCT FROM $12
-			FROM quote_mapping_policies WHERE id=$1`, c.PolicyID, c.LicenseID, c.TimeEvidence, c.PriceEvidence, c.LatencyMode,
-			nullableString(c.LatencyEvidence), c.MaxAge.Milliseconds(), c.VerifiedBy, c.ValidUntil, nullableString(c.StatusIndicator), nullableString(c.StatusEvidence), nullableJSON(c.StatusMapping)).Scan(&policySame); err != nil {
+		if err != nil {
 			return err
-		}
-		if !policySame {
-			return errors.New("existing quote mapping policy conflicts; use a new reviewed identity")
 		}
 		return nil
 	})
@@ -116,8 +110,8 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	auditErr := pgx.BeginFunc(auditCtx, pool, func(tx pgx.Tx) error {
-		return audit.Record(auditCtx, tx, nil, "vera-emquant", "emquant.quote.init", "policy:"+c.PolicyID.String(), status, map[string]any{
-			"provider": c.ProviderID, "license_id": c.LicenseID.String(), "codes": c.Codes, "latency_mode": c.LatencyMode,
+		return audit.Record(auditCtx, tx, nil, "vera-emquant", "emquant.quote.init", "policy:"+policyID.String(), status, map[string]any{
+			"provider": c.ProviderID, "license_id": licenseID.String(), "instrument_scope": "all", "latency_mode": c.LatencyMode,
 		})
 	})
 	if auditErr != nil {
@@ -126,7 +120,7 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 	if err != nil {
 		return fmt.Errorf("quote configuration failed: %w", err)
 	}
-	_, err = fmt.Fprintf(out, "license_id=%s\npolicy_id=%s\nlatency_mode=%s\nmax_age_ms=%d\n", c.LicenseID, c.PolicyID, c.LatencyMode, c.MaxAge.Milliseconds())
+	_, err = fmt.Fprintf(out, "license_id=%s\npolicy_id=%s\ninstrument_scope=all\nlatency_mode=%s\nmax_age_ms=%d\n", licenseID, policyID, c.LatencyMode, c.MaxAge.Milliseconds())
 	return err
 }
 
@@ -156,24 +150,6 @@ func readQuoteInitConfig(get func(string) string) (quoteInitConfig, error) {
 		return quoteInitConfig{}, err
 	}
 	if c.PriceEvidence, err = required("EMQUANT_QUOTE_PRICE_EVIDENCE"); err != nil {
-		return quoteInitConfig{}, err
-	}
-	licenseText, err := required("EMQUANT_QUOTE_LICENSE_ID")
-	if err != nil {
-		return quoteInitConfig{}, err
-	}
-	if c.LicenseID, err = uuid.Parse(licenseText); err != nil || c.LicenseID == uuid.Nil {
-		return quoteInitConfig{}, errors.New("invalid EMQUANT_QUOTE_LICENSE_ID")
-	}
-	policyText, err := required("EMQUANT_QUOTE_POLICY_ID")
-	if err != nil {
-		return quoteInitConfig{}, err
-	}
-	if c.PolicyID, err = uuid.Parse(policyText); err != nil || c.PolicyID == uuid.Nil {
-		return quoteInitConfig{}, errors.New("invalid EMQUANT_QUOTE_POLICY_ID")
-	}
-	c.Codes, err = csvUpper(get, "EMQUANT_QUOTE_CODES")
-	if err != nil {
 		return quoteInitConfig{}, err
 	}
 	fields, err := csvUpper(get, "EMQUANT_QUOTE_FIELDS")
