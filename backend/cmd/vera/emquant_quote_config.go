@@ -120,7 +120,7 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 	if err != nil {
 		return fmt.Errorf("quote configuration failed: %w", err)
 	}
-	_, err = fmt.Fprintf(out, "license_id=%s\npolicy_id=%s\ninstrument_scope=all\nlatency_mode=%s\nmax_age_ms=%d\n", licenseID, policyID, c.LatencyMode, c.MaxAge.Milliseconds())
+	_, err = fmt.Fprintf(out, "instrument_scope=all\nlatency_mode=%s\nmax_age_ms=%d\n", c.LatencyMode, c.MaxAge.Milliseconds())
 	return err
 }
 

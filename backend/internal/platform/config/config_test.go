@@ -3,35 +3,16 @@ package config
 import (
 	"strings"
 	"testing"
-
-	"github.com/google/uuid"
 )
 
-func TestRealtimeSourceConfiguration(t *testing.T) {
+func TestRealtimeSourceGovernanceIsNotProcessConfiguration(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://x")
 	t.Setenv("VERA_DEV_OIDC", "true")
 	t.Setenv("VERA_DATA_PROVIDER", "emquant")
-	t.Setenv("EMQUANT_QUOTE_LICENSE_ID", "")
-	t.Setenv("EMQUANT_QUOTE_POLICY_ID", "")
-	c, err := Load()
-	if err != nil || c.QuoteLicenseID != uuid.Nil || c.QuotePolicyID != uuid.Nil {
-		t.Fatalf("unset quote config should keep observation mode: %v", err)
-	}
 	t.Setenv("EMQUANT_QUOTE_LICENSE_ID", "11111111-1111-1111-1111-111111111111")
-	if _, err := Load(); err == nil {
-		t.Fatal("partial quote source must fail")
-	}
-	t.Setenv("EMQUANT_QUOTE_POLICY_ID", "00000000-0000-0000-0000-000000000000")
-	if _, err := Load(); err == nil {
-		t.Fatal("zero policy must fail")
-	}
-	t.Setenv("EMQUANT_QUOTE_POLICY_ID", "22222222-2222-2222-2222-222222222222")
+	t.Setenv("EMQUANT_QUOTE_POLICY_ID", "not-a-config-variable")
 	if _, err := Load(); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("VERA_DATA_PROVIDER", "fixture")
-	if _, err := Load(); err == nil {
-		t.Fatal("fixture must not enable a live quote source")
+		t.Fatalf("quote UUID environment variables must not gate process configuration: %v", err)
 	}
 }
 
