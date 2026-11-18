@@ -78,8 +78,7 @@ export async function api<T>(
   };
   if (body !== undefined) {
     headers['Content-Type'] =
-      protocol &&
-      (path === '/api/v1/research-plans' || path === '/api/v1/research-tasks')
+      protocol && (path === '/api/v1/research-plans' || path === '/api/v1/research-tasks')
         ? mediaTypes[protocol]
         : 'application/json';
   }
