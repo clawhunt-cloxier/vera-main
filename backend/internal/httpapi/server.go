@@ -165,6 +165,29 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		fail("data_not_synced")
 		return
 	}
+	if source := s.Engine.RealtimeSource; source != nil {
+		var configured bool
+		err := s.Pool.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1
+			FROM quote_mapping_policies q
+			JOIN source_licenses l ON l.id=q.source_license_id
+			JOIN providers p ON p.id=l.provider_id
+			WHERE q.id=$1 AND l.id=$2 AND l.provider_id=$3 AND l.product_code=$4
+			  AND q.dataset_id='mkt.intraday_quote' AND l.dataset_id=q.dataset_id
+			  AND p.kind='vendor' AND p.enabled AND NOT p.synthetic AND p.allow_model_processing
+			  AND l.revoked_at IS NULL AND l.allow_storage AND l.allow_display AND l.allow_model_processing
+			  AND q.revoked_at IS NULL AND q.verified_at<=clock_timestamp() AND q.valid_from<=clock_timestamp()
+			  AND (q.valid_until IS NULL OR q.valid_until>clock_timestamp())
+		)`, source.PolicyID, source.LicenseID, source.ProviderID, source.Product).Scan(&configured)
+		if err != nil {
+			fail("realtime_source_schema_unavailable")
+			return
+		}
+		if !configured {
+			fail("realtime_source_unavailable")
+			return
+		}
+	}
 	httpx.JSON(w, r, 200, map[string]string{"status": "ready"})
 }
 

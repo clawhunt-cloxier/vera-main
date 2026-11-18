@@ -26,7 +26,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T024 | 管理 CLI | T013、T017 | IN_PROGRESS | Claude-Code / agent/claude/T024-admin | vera-admin 全部命令（OPERATIONS §4），写审计事件；领取于 2026-11-12T08:08:50Z，计划与差距见 [盘点](docs/handoffs/2026-11-12-T012-T024-plan-claude.md) |
 | T025 | MVP 前后端、PDF 导出与测试环境 CD | T010 | REVIEW | Claude-Code / agent/claude/mvp | README-MVP、[MVP 交接](docs/handoffs/2026-11-07-mvp-claude.md)、[DEPLOYMENT](docs/DEPLOYMENT.md)；PDF 为服务器端排版；真实数据厂商与 T011–T024 的完整实现仍未完成 |
 | T026 | 盘中行情与最新可用数据规格 | T001 | IN_PROGRESS | Codex / agent/codex/T026-intraday-contract | 领取于 2026-11-12T05:39:22Z（PR #16 已合入）；2026-11-13T03:08:01Z 在新分支继续；范围：根规格、DATA_SERVICE、相关技能规格及评测样例、数据与 API 契约；依据用户要求记录行情实时性、各数据实际时点、过期降级与权限，不代表实现完成。 |
-| T027 | 数据治理实时研报主链路 | T014b、T018、T022、T026 | REVIEW | Codex / agent/codex/T027-data-governance | 领取于 2026-11-17T05:00:24Z；已接通单股 `stock_analysis/1.1.0-demo.3` 的 0.4 计划/媒体协商、Choice 采集发布冻结、Harness 与前端报告/证据，保留 0.3/observation 兼容；新增 `vera emquant init-quote` 对行情许可与映射做幂等登记、冲突拒绝和审计。PR #37：`d1ba289` 全量 verify 通过，已增加真实浏览器验收入口；实际盘中端到端仍待核实本账号快照权限、时间与状态口径并部署验证。完整低频数据集未接入。 |
+| T027 | 数据治理实时研报主链路 | T014b、T018、T022、T026 | REVIEW | Codex / agent/codex/T027-data-governance | 领取于 2026-11-17T05:00:24Z；已接通单股 `stock_analysis/1.1.0-demo.3` 的 0.4 计划/媒体协商、Choice 采集发布冻结、Harness 与前端报告/证据，保留 0.3/observation 兼容；新增 `vera emquant init-quote` 对行情许可与映射做幂等登记、冲突拒绝和审计，并让 `/readyz` 校验实时来源完整性。PR #37：`d1ba289` 全量 verify 通过，已增加真实浏览器验收入口；实际盘中端到端仍待核实本账号快照权限、时间与状态口径并部署验证。完整低频数据集未接入。 |
 | T023 | test 环境部署、性能与恢复 | T019a、T022、T024 | TODO | 未领取 | 镜像、Compose 生产配置、Caddy/TLS、备份恢复演练、压测、告警、费用总上限开关；EXT-03；V08 |
 
 ## 里程碑

@@ -79,3 +79,5 @@ curl -fsS http://127.0.0.1:8080/readyz
 实时行情的许可和映射使用 `vera emquant init-quote` 登记。该命令要求单独提供许可、字段、时间/价格口径、延迟性质、新鲜度阈值和证据引用；相同 UUID 重复执行必须得到同一配置，任何冲突都拒绝覆盖。`EMQUANT_QUOTE_LATENCY_MODE=real_time` 还必须有经核实的状态字段，并至少映射一个 `continuous` 状态；无法证明时使用 `unknown`，前端只能选择 `latest_available`。命令只登记配置，不向 Choice 发起请求，也不授予不存在的厂商权限。
 
 当前 MVP 先登记 `unknown` 延迟策略并运行 `latest_available`。交易时段核对 Choice 终端的最新价、`TIME`、接收时间和连续交易状态后，若证据充分，再用新的 reviewed UUID 登记 `real_time`；旧策略不原地修改。
+
+`/readyz` 现在会重新检查配置 UUID 对应的 provider、source license 和 mapping policy 是否存在、未撤销、未过期且允许存储/展示/模型处理；缺失时返回 `realtime_source_unavailable`，不会让前端误以为 0.4 已可用。
