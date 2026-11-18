@@ -119,6 +119,9 @@ func (e *Engine) realtimePipeline(ctx, parent context.Context, t *taskRow, sk *S
 				if current := e.stillCurrent(ctx, t); current != nil {
 					return realtimeCollect{}, current
 				}
+				if errors.Is(err, emquant.ErrIPRestricted) {
+					return realtimeCollect{}, abstain("DATA_SOURCE_UNAVAILABLE", "Choice 限制海外 IP 访问，当前服务器无法获取行情快照")
+				}
 				return realtimeCollect{}, abstain("DATA_SOURCE_UNAVAILABLE", "行情采集、归档或用途许可校验失败")
 			}
 		}
