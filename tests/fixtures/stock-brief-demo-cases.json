@@ -1,15 +1,18 @@
 {
-  "version": "1",
+  "version": "2",
   "synthetic": true,
-  "status": "specification_examples_not_executable_yet",
+  "status": "specification_examples_with_synthetic_integration_coverage",
   "skill_id": "stock_analysis",
-  "skill_version": "1.1.0-demo.1",
+  "skill_version": "1.1.0-demo.3",
   "cases": [
     {"id": "BRIEF-01", "scenario": "verified_fresh_realtime_quote_optional_financial_missing", "expect": "limited_with_quote_evidence_and_missing_data"},
-    {"id": "BRIEF-02", "scenario": "unknown_or_delayed_quote", "expect": "abstain_no_fixture_fallback"},
+    {"id": "BRIEF-02", "scenario": "realtime_trade_with_unknown_or_delayed_quote", "expect": "unavailable_or_abstain_no_fixture_fallback"},
     {"id": "BRIEF-03", "scenario": "missing_quote_permission_or_expired_quote", "expect": "abstain_no_fixture_fallback"},
     {"id": "BRIEF-04", "scenario": "financial_disclosure_or_revision_unverified", "expect": "omit_financial_fact_and_explain"},
     {"id": "BRIEF-05", "scenario": "restart_after_snapshot_freeze", "expect": "reuse_exact_snapshot"},
-    {"id": "BRIEF-06", "scenario": "untraceable_number_or_investment_advice", "expect": "remove_claim"}
+    {"id": "BRIEF-06", "scenario": "untraceable_number_or_investment_advice", "expect": "remove_claim"},
+    {"id": "BRIEF-07", "scenario": "latest_available_with_verified_delayed_or_closed_quote", "expect": "limited_with_explicit_latency_and_market_state"},
+    {"id": "BRIEF-08", "scenario": "realtime_trade_with_closed_quote", "expect": "abstain_no_older_quote_fallback"},
+    {"id": "BRIEF-09", "scenario": "cancelled_or_cross_workspace_or_revoked_source", "expect": "no_report_or_data_access"}
   ]
 }

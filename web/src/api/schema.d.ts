@@ -455,6 +455,8 @@ export interface components {
              * @description 真实成交观察协议：冻结截止时间，未冻结为 null。
              */
             snapshot_as_of?: string | null;
+            /** @description 0.4 plan requirement; null for fixed_legacy and observation.v1 history. */
+            quote_requirement?: components["schemas"]["QuoteRequirement"] | null;
         };
         Entity: {
             /** Format: uuid */
@@ -496,10 +498,12 @@ export interface components {
             synthetic: boolean;
             display_name: string;
             /**
-             * @description 当前部署支持确认后采集的真实简报。
+             * @description 当前部署支持的研究协议；v0.4 要求创建计划时明确 quote_requirement。
              * @enum {string}
              */
-            research_protocol?: "observation.v1";
+            research_protocol?: "observation.v1" | "v0.4";
+            /** @description 仅当全市场行情策略支持实时成交要求时为 true；缺省不开放此入口，实际证券的行情仍须在采集时核验。 */
+            realtime_trade_available?: boolean;
         };
         Cancel: {
             expected_revision: number;
@@ -616,6 +620,8 @@ export interface components {
              * @description 真实成交观察协议：冻结截止时间，未冻结为 null。
              */
             snapshot_as_of?: string | null;
+            /** @description Per-source data times and limitations; required for collect_latest reports. */
+            source_freshness?: components["schemas"]["SourceFreshness"][];
         };
         /** @enum {unknown} */
         SkillId: "deep_research" | "stock_analysis" | "capital_flow";
@@ -673,7 +679,7 @@ export interface components {
              */
             snapshot_mode?: "fixed_legacy" | "collect_latest";
             /**
-             * @description 真实成交观察简报为 null，不声明盘中行情。
+             * @description 0.4 plans explicitly choose a quote requirement; legacy plans are null.
              * @enum {string|null}
              */
             quote_requirement?: "latest_available" | "realtime_trade" | null;
@@ -796,6 +802,193 @@ export interface components {
             /** @enum {unknown} */
             persona: "fund_manager" | "analyst" | "individual" | "unspecified";
         };
+        /** @description 0.4 plan creation: the user explicitly chooses the quote requirement; free text remains untrusted. */
+        CreatePlanV04: {
+            text: string;
+            quote_requirement: components["schemas"]["QuoteRequirement"];
+        } | {
+            skill_id: components["schemas"]["SkillId"];
+            /** Format: uuid */
+            subject_id: string;
+            params: Record<string, never>;
+            quote_requirement: components["schemas"]["QuoteRequirement"];
+        };
+        /**
+         * @description realtime_trade requires authorized fresh quotes during verified continuous trading; latest_available accepts a policy-marked delayed quote.
+         * @enum {string}
+         */
+        QuoteRequirement: "realtime_trade" | "latest_available";
+        SourceFreshness: {
+            dataset_id: string;
+            provider: string;
+            /** Format: date-time */
+            event_at: string | null;
+            /** Format: date-time */
+            published_at: string | null;
+            /** Format: date-time */
+            received_at: string | null;
+            period: string | null;
+            /** @enum {unknown} */
+            latency_mode: "real_time" | "delayed" | "unknown";
+            /** @enum {unknown} */
+            status: "fresh" | "stale" | "unavailable" | "unknown";
+            note: string;
+            /** Format: date-time */
+            available_at: string | null;
+        } & unknown;
+        /** @description 0.4 representation, including historical observation.v1 plans whose collect_latest mode has null quote_requirement. */
+        ResearchPlanV04: {
+            /** Format: uuid */
+            id: string;
+            plan_hash: string;
+            skill_id: components["schemas"]["SkillId"];
+            skill_version: string;
+            subject: components["schemas"]["Entity"];
+            params: Record<string, never>;
+            /** Format: date-time */
+            as_of: string;
+            sections: components["schemas"]["PlanSection"][];
+            executable: boolean;
+            reason_code: string | null;
+            estimate: {
+                p95_seconds: number;
+                quota_cost: number;
+            };
+            /** Format: date-time */
+            expires_at: string;
+            /**
+             * @description 真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。
+             * @enum {string}
+             */
+            snapshot_mode: "fixed_legacy" | "collect_latest";
+            /**
+             * @description 0.4 plans explicitly choose a quote requirement; legacy plans are null.
+             * @enum {string|null}
+             */
+            quote_requirement: "latest_available" | "realtime_trade" | null;
+        } & (unknown & unknown);
+        TaskV04: {
+            /** Format: uuid */
+            id: string;
+            skill_id: components["schemas"]["SkillId"];
+            subject: components["schemas"]["Entity"];
+            /** @enum {unknown} */
+            status: "QUEUED" | "COLLECTING" | "ANALYZING" | "ASSEMBLING" | "DELIVERING" | "CANCEL_REQUESTED" | "COMPLETED" | "ABSTAINED" | "BUDGET_EXHAUSTED" | "CANCELLED" | "BLOCKED" | "FAILED";
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            deadline: string;
+            /** Format: date-time */
+            as_of: string;
+            steps: components["schemas"]["TaskStep"][];
+            report_ref: components["schemas"]["ReportRef"] | null;
+            reason_code: string | null;
+            reason_message: string | null;
+            /**
+             * @description 真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。
+             * @enum {string}
+             */
+            snapshot_mode: "fixed_legacy" | "collect_latest";
+            /**
+             * Format: date-time
+             * @description 真实成交观察协议：冻结截止时间，未冻结为 null。
+             */
+            snapshot_as_of: string | null;
+            /** @description 0.4 plan requirement; null for fixed_legacy and observation.v1 history. */
+            quote_requirement: components["schemas"]["QuoteRequirement"] | null;
+        };
+        ReportV04: {
+            /** Format: uuid */
+            id: string;
+            version: number;
+            /** Format: uuid */
+            task_id: string;
+            title: string;
+            skill_id: components["schemas"]["SkillId"];
+            skill_version: string;
+            subject: components["schemas"]["Entity"];
+            /** Format: date-time */
+            as_of: string;
+            /** @description e.g. 2026-11-05 close */
+            data_as_of: string;
+            /** @enum {unknown} */
+            result_kind: "full" | "limited";
+            synthetic: boolean;
+            /** @constant */
+            ai_generated: true;
+            summary_claim_refs: string[];
+            sections: components["schemas"]["Section"][];
+            claims: components["schemas"]["Claim"][];
+            limitations: string[];
+            sources: {
+                provider: string;
+                dataset_id: string;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
+            disclaimer: string;
+            /** Format: date-time */
+            delivered_at: string;
+            /**
+             * @description 真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。
+             * @enum {string}
+             */
+            snapshot_mode: "fixed_legacy" | "collect_latest";
+            /**
+             * Format: date-time
+             * @description 真实成交观察协议：冻结截止时间，未冻结为 null。
+             */
+            snapshot_as_of?: string | null;
+            /** @description Per-source data times and limitations; required for collect_latest reports. */
+            source_freshness?: components["schemas"]["SourceFreshness"][];
+        } & unknown;
+        PlanResultV04: {
+            /** @enum {unknown} */
+            kind: "plan" | "choose" | "unsupported";
+            plan: components["schemas"]["ResearchPlanV04"] | null;
+            candidates: {
+                skill_id: components["schemas"]["SkillId"];
+                subject: components["schemas"]["Entity"];
+                label: string;
+            }[];
+            unsupported_reason: string | null;
+            suggestions: string[];
+        };
+        EvidenceV04: {
+            /** Format: uuid */
+            id: string;
+            dataset_id: string;
+            provider: string;
+            /** @enum {unknown} */
+            origin: "exchange" | "company_filing" | "regulator" | "vendor_derived" | "media" | "broker" | "computed";
+            /** @enum {unknown} */
+            source_tier: "L1" | "L2" | "L3" | "L4";
+            title: string;
+            label: string;
+            value: string | null;
+            unit: string | null;
+            basis: string | null;
+            period: string | null;
+            published_at: string | null;
+            /** Format: date-time */
+            available_at: string;
+            locator: string | null;
+            excerpt: string | null;
+            content_hash: string;
+            /**
+             * Format: date-time
+             * @description Time received by the system; unknown is null.
+             */
+            received_at?: string | null;
+            /**
+             * Format: date-time
+             * @description Verified source event time; unknown is null.
+             */
+            event_at?: string | null;
+            /** @enum {unknown} */
+            latency_mode?: "real_time" | "delayed" | "unknown" | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -910,6 +1103,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Me"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Me"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Me"];
                 };
             };
             /** @description Structured error */
@@ -920,6 +1114,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -947,6 +1142,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Me"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Me"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Me"];
                 };
             };
             /** @description Structured error */
@@ -957,6 +1153,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -985,6 +1182,9 @@ export interface operations {
                     "application/vnd.vera.observation.v1+json": {
                         items: components["schemas"]["Entity"][];
                     };
+                    "application/vnd.vera.v0.4+json": {
+                        items: components["schemas"]["Entity"][];
+                    };
                 };
             };
             /** @description Structured error */
@@ -995,6 +1195,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1028,6 +1229,10 @@ export interface operations {
                         items: components["schemas"]["Task"][];
                         next_cursor: string | null;
                     };
+                    "application/vnd.vera.v0.4+json": {
+                        items: components["schemas"]["TaskV04"][];
+                        next_cursor: string | null;
+                    };
                 };
             };
             /** @description Structured error */
@@ -1038,6 +1243,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1055,6 +1261,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CreateTask"];
+                "application/vnd.vera.v0.4+json": components["schemas"]["CreateTask"];
             };
         };
         responses: {
@@ -1066,6 +1273,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Task"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Task"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["TaskV04"];
                 };
             };
             /** @description Structured error */
@@ -1076,6 +1284,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1099,6 +1308,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Task"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Task"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["TaskV04"];
                 };
             };
             /** @description Structured error */
@@ -1109,6 +1319,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1139,6 +1350,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Task"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Task"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["TaskV04"];
                 };
             };
             /** @description Success */
@@ -1149,6 +1361,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Task"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Task"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["TaskV04"];
                 };
             };
             /** @description 真实简报模式的取消命令已处理；无厂商数据响应，展示授权失效时仍可取消。 */
@@ -1166,6 +1379,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1190,6 +1404,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Report"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Report"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["ReportV04"];
                 };
             };
             /** @description Structured error */
@@ -1200,6 +1415,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1223,6 +1439,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Evidence"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Evidence"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["EvidenceV04"];
                 };
             };
             /** @description Structured error */
@@ -1233,6 +1450,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1256,6 +1474,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Calculation"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Calculation"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Calculation"];
                 };
             };
             /** @description Structured error */
@@ -1266,6 +1485,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1297,6 +1517,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Feedback"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Feedback"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Feedback"];
                 };
             };
             /** @description Structured error */
@@ -1307,6 +1528,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1413,6 +1635,9 @@ export interface operations {
                     "application/vnd.vera.observation.v1+json": {
                         items: components["schemas"]["Skill"][];
                     };
+                    "application/vnd.vera.v0.4+json": {
+                        items: components["schemas"]["Skill"][];
+                    };
                 };
             };
             /** @description Structured error */
@@ -1423,6 +1648,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1439,6 +1665,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CreatePlan"];
+                "application/vnd.vera.v0.4+json": components["schemas"]["CreatePlanV04"];
             };
         };
         responses: {
@@ -1450,6 +1677,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PlanResult"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["PlanResult"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["PlanResultV04"];
                 };
             };
             /** @description Structured error */
@@ -1460,6 +1688,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1483,6 +1712,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ResearchPlan"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["ResearchPlan"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["ResearchPlanV04"];
                 };
             };
             /** @description Structured error */
@@ -1493,6 +1723,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1525,6 +1756,10 @@ export interface operations {
                         items: components["schemas"]["ReportSummary"][];
                         next_cursor: string | null;
                     };
+                    "application/vnd.vera.v0.4+json": {
+                        items: components["schemas"]["ReportSummary"][];
+                        next_cursor: string | null;
+                    };
                 };
             };
             /** @description Structured error */
@@ -1535,6 +1770,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1560,6 +1796,9 @@ export interface operations {
                     "application/vnd.vera.observation.v1+json": {
                         items: components["schemas"]["WatchItem"][];
                     };
+                    "application/vnd.vera.v0.4+json": {
+                        items: components["schemas"]["WatchItem"][];
+                    };
                 };
             };
             /** @description Structured error */
@@ -1570,6 +1809,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1598,6 +1838,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WatchItem"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["WatchItem"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["WatchItem"];
                 };
             };
             /** @description Structured error */
@@ -1608,6 +1849,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1640,6 +1882,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1669,6 +1912,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WatchItem"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["WatchItem"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["WatchItem"];
                 };
             };
             /** @description Structured error */
@@ -1679,6 +1923,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1704,6 +1949,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ChartSeries"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["ChartSeries"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["ChartSeries"];
                 };
             };
             /** @description Structured error */
@@ -1714,6 +1960,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1741,6 +1988,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Me"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Me"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Me"];
                 };
             };
             /** @description Structured error */
@@ -1751,6 +1999,7 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
+                    "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
                 };
             };
         };

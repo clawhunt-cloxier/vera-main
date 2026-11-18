@@ -1,6 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { get, post, skillTitle, statusLabel, terminal, type Task } from '../api/client';
+import {
+  fmtDataTime,
+  fmtTime,
+  get,
+  post,
+  skillTitle,
+  statusLabel,
+  terminal,
+  type Task,
+} from '../api/client';
 import { useMe } from '../api/hooks';
 import { ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
 
@@ -48,10 +57,15 @@ export function TaskDetail({ id }: { id: string }) {
             >
               {statusLabel[t.data.status]}
             </Tag>
-            <span className="muted">
-              创建于 {new Date(t.data.created_at).toLocaleString('zh-CN')}
-            </span>
+            <span className="muted">创建于 {fmtTime(t.data.created_at)}</span>
           </div>
+          {t.data.snapshot_mode === 'collect_latest' && (
+            <p className="muted">
+              {t.data.snapshot_as_of
+                ? `快照截止 ${fmtDataTime(t.data.snapshot_as_of)}（北京时间）`
+                : '数据快照尚未冻结，采集完成后确定截止时间。'}
+            </p>
+          )}
           {t.data.reason_message && <p className="notice">{t.data.reason_message}</p>}
           {t.data.status === 'COMPLETED' && t.data.report_ref && (
             <p>

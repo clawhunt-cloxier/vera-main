@@ -7,6 +7,19 @@ on:
       - "**.md"
       - "docs/**"
   workflow_dispatch:
+    inputs:
+      check_choice_quote:
+        description: Check test-site Choice quote activation after deployment
+        type: boolean
+        default: false
+      probe_choice_quote:
+        description: Briefly stop the test site and query one real Choice snapshot for 600000.SH
+        type: boolean
+        default: false
+      enable_choice_latest:
+        description: Register test-site Choice latest-available research for all mainland stocks
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-test
@@ -101,6 +114,41 @@ jobs:
         run: |
           # stdin carries only the token; the script was uploaded in the previous step.
           echo "$GHCR_PAT" | ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" "GHCR_USER='${GHCR_USER}' NEW_IMAGE='${NEW_IMAGE}' bash /opt/vera/remote-deploy.sh"
+
+      - name: Enable latest-available Choice reports on the test site
+        if: github.event_name == 'workflow_dispatch' && inputs.enable_choice_latest
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" 'docker exec vera /app/backend/vera emquant init-latest --demo-db'
+
+      - name: Read Choice quote activation status
+        if: github.event_name == 'workflow_dispatch' && inputs.check_choice_quote
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" 'docker exec vera /app/backend/vera emquant quote-status --demo-db'
+
+      - name: Probe one Choice snapshot and restore the test site
+        if: github.event_name == 'workflow_dispatch' && inputs.probe_choice_quote
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" 'bash -se' <<'REMOTE'
+          cd /opt/vera
+          export VERA_IMAGE="$(docker inspect --format '{{.Config.Image}}' vera)"
+          restore() {
+            docker compose -f compose.yml start vera || return 1
+            for i in $(seq 1 40); do
+              if curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1; then echo "test site ready"; return 0; fi
+              sleep 3
+            done
+            return 1
+          }
+          trap 'restore || exit 1' EXIT
+          docker compose -f compose.yml stop vera
+          timeout --kill-after=30s 180s docker compose -f compose.yml run --rm --no-deps -T vera demo --probe-choice 600000.SH
+          REMOTE
 
       - name: Cleanup SSH material
         if: always()

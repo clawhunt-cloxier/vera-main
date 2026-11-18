@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Vera P0 API",
-    "version": "0.3.0",
-    "description": "Implementation target per ADR-0003. Only health/readiness implemented."
+    "version": "0.4.0",
+    "description": "Implemented API contracts: legacy JSON, observation.v1, and explicitly negotiated v0.4 realtime research. Real source availability remains deployment-controlled."
   },
   "security": [
     {
@@ -191,6 +191,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Me"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
               }
             }
           },
@@ -203,6 +208,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -247,6 +257,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Me"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
               }
             }
           },
@@ -259,6 +274,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -309,6 +329,23 @@
                     "items"
                   ]
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Entity"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
               }
             }
           },
@@ -321,6 +358,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -366,6 +408,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Task"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskV04"
+                }
               }
             }
           },
@@ -378,6 +425,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -409,6 +461,11 @@
           "required": true,
           "content": {
             "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTask"
+              }
+            },
+            "application/vnd.vera.v0.4+json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateTask"
               }
@@ -470,6 +527,30 @@
                     "next_cursor"
                   ]
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TaskV04"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ]
+                }
               }
             }
           },
@@ -482,6 +563,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -562,6 +648,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Task"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskV04"
+                }
               }
             }
           },
@@ -574,6 +665,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -611,6 +707,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Task"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskV04"
+                }
               }
             }
           },
@@ -623,6 +724,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -640,6 +746,11 @@
               "application/vnd.vera.observation.v1+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Task"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskV04"
                 }
               }
             }
@@ -706,6 +817,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Report"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportV04"
+                }
               }
             }
           },
@@ -718,6 +834,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -764,6 +885,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Evidence"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceV04"
+                }
               }
             }
           },
@@ -776,6 +902,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -813,6 +944,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Calculation"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calculation"
+                }
               }
             }
           },
@@ -825,6 +961,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -862,6 +1003,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Feedback"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Feedback"
+                }
               }
             }
           },
@@ -874,6 +1020,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1046,6 +1197,23 @@
                     "items"
                   ]
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Skill"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
               }
             }
           },
@@ -1058,6 +1226,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1088,6 +1261,11 @@
               "schema": {
                 "$ref": "#/components/schemas/CreatePlan"
               }
+            },
+            "application/vnd.vera.v0.4+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlanV04"
+              }
             }
           }
         },
@@ -1104,6 +1282,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/PlanResult"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResultV04"
+                }
               }
             }
           },
@@ -1116,6 +1299,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1153,6 +1341,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ResearchPlan"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchPlanV04"
+                }
               }
             }
           },
@@ -1165,6 +1358,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1263,6 +1461,30 @@
                     "next_cursor"
                   ]
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReportSummary"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ]
+                }
               }
             }
           },
@@ -1275,6 +1497,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1325,6 +1552,23 @@
                     "items"
                   ]
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WatchItem"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
               }
             }
           },
@@ -1337,6 +1581,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1391,6 +1640,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/WatchItem"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchItem"
+                }
               }
             }
           },
@@ -1403,6 +1657,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1458,6 +1717,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/WatchItem"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchItem"
+                }
               }
             }
           },
@@ -1470,6 +1734,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1513,6 +1782,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1569,6 +1843,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/ChartSeries"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartSeries"
+                }
               }
             }
           },
@@ -1581,6 +1860,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1627,6 +1911,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/Me"
                 }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
               }
             }
           },
@@ -1639,6 +1928,11 @@
                 }
               },
               "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
@@ -1885,6 +2179,17 @@
             ],
             "format": "date-time",
             "description": "真实成交观察协议：冻结截止时间，未冻结为 null。"
+          },
+          "quote_requirement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteRequirement"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0.4 plan requirement; null for fixed_legacy and observation.v1 history."
           }
         },
         "required": [
@@ -2053,9 +2358,14 @@
           "research_protocol": {
             "type": "string",
             "enum": [
-              "observation.v1"
+              "observation.v1",
+              "v0.4"
             ],
-            "description": "当前部署支持确认后采集的真实简报。"
+            "description": "当前部署支持的研究协议；v0.4 要求创建计划时明确 quote_requirement。"
+          },
+          "realtime_trade_available": {
+            "type": "boolean",
+            "description": "仅当全市场行情策略支持实时成交要求时为 true；缺省不开放此入口，实际证券的行情仍须在采集时核验。"
           }
         },
         "required": [
@@ -2520,6 +2830,13 @@
             ],
             "format": "date-time",
             "description": "真实成交观察协议：冻结截止时间，未冻结为 null。"
+          },
+          "source_freshness": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceFreshness"
+            },
+            "description": "Per-source data times and limitations; required for collect_latest reports."
           }
         },
         "required": [
@@ -2756,7 +3073,7 @@
               "realtime_trade",
               null
             ],
-            "description": "真实成交观察简报为 null，不声明盘中行情。"
+            "description": "0.4 plans explicitly choose a quote requirement; legacy plans are null."
           }
         },
         "required": [
@@ -3378,6 +3695,819 @@
         },
         "required": [
           "persona"
+        ]
+      },
+      "CreatePlanV04": {
+        "description": "0.4 plan creation: the user explicitly chooses the quote requirement; free text remains untrusted.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 500,
+                "pattern": "\\S"
+              },
+              "quote_requirement": {
+                "$ref": "#/components/schemas/QuoteRequirement"
+              }
+            },
+            "required": [
+              "text",
+              "quote_requirement"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "skill_id": {
+                "$ref": "#/components/schemas/SkillId"
+              },
+              "subject_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "params": {
+                "type": "object"
+              },
+              "quote_requirement": {
+                "$ref": "#/components/schemas/QuoteRequirement"
+              }
+            },
+            "required": [
+              "skill_id",
+              "subject_id",
+              "params",
+              "quote_requirement"
+            ]
+          }
+        ]
+      },
+      "QuoteRequirement": {
+        "type": "string",
+        "enum": [
+          "realtime_trade",
+          "latest_available"
+        ],
+        "description": "realtime_trade requires authorized fresh quotes during verified continuous trading; latest_available accepts a policy-marked delayed quote."
+      },
+      "SourceFreshness": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "event_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "period": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "latency_mode": {
+            "enum": [
+              "real_time",
+              "delayed",
+              "unknown"
+            ]
+          },
+          "status": {
+            "enum": [
+              "fresh",
+              "stale",
+              "unavailable",
+              "unknown"
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "available_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "provider",
+          "event_at",
+          "published_at",
+          "received_at",
+          "period",
+          "latency_mode",
+          "status",
+          "note",
+          "available_at"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "latency_mode": {
+                  "const": "real_time"
+                }
+              },
+              "required": [
+                "latency_mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "event_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "received_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "available_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ResearchPlanV04": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_hash": {
+            "type": "string"
+          },
+          "skill_id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "skill_version": {
+            "type": "string"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "params": {
+            "type": "object"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanSection"
+            }
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimate": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "p95_seconds": {
+                "type": "integer"
+              },
+              "quota_cost": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "p95_seconds",
+              "quota_cost"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "snapshot_mode": {
+            "type": "string",
+            "enum": [
+              "fixed_legacy",
+              "collect_latest"
+            ],
+            "description": "真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。"
+          },
+          "quote_requirement": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "latest_available",
+              "realtime_trade",
+              null
+            ],
+            "description": "0.4 plans explicitly choose a quote requirement; legacy plans are null."
+          }
+        },
+        "required": [
+          "id",
+          "plan_hash",
+          "skill_id",
+          "skill_version",
+          "subject",
+          "params",
+          "as_of",
+          "sections",
+          "executable",
+          "reason_code",
+          "estimate",
+          "expires_at",
+          "snapshot_mode",
+          "quote_requirement"
+        ],
+        "description": "0.4 representation, including historical observation.v1 plans whose collect_latest mode has null quote_requirement.",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "snapshot_mode": {
+                  "const": "fixed_legacy"
+                }
+              },
+              "required": [
+                "snapshot_mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "quote_requirement": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "skill_version": {
+                  "const": "1.1.0-demo.3"
+                }
+              },
+              "required": [
+                "skill_version"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot_mode": {
+                  "const": "collect_latest"
+                },
+                "quote_requirement": {
+                  "$ref": "#/components/schemas/QuoteRequirement"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "TaskV04": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skill_id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "status": {
+            "enum": [
+              "QUEUED",
+              "COLLECTING",
+              "ANALYZING",
+              "ASSEMBLING",
+              "DELIVERING",
+              "CANCEL_REQUESTED",
+              "COMPLETED",
+              "ABSTAINED",
+              "BUDGET_EXHAUSTED",
+              "CANCELLED",
+              "BLOCKED",
+              "FAILED"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskStep"
+            }
+          },
+          "report_ref": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot_mode": {
+            "type": "string",
+            "enum": [
+              "fixed_legacy",
+              "collect_latest"
+            ],
+            "description": "真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。"
+          },
+          "snapshot_as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "真实成交观察协议：冻结截止时间，未冻结为 null。"
+          },
+          "quote_requirement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteRequirement"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0.4 plan requirement; null for fixed_legacy and observation.v1 history."
+          }
+        },
+        "required": [
+          "id",
+          "skill_id",
+          "subject",
+          "status",
+          "revision",
+          "created_at",
+          "deadline",
+          "as_of",
+          "steps",
+          "report_ref",
+          "reason_code",
+          "reason_message",
+          "snapshot_mode",
+          "snapshot_as_of",
+          "quote_requirement"
+        ]
+      },
+      "ReportV04": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "skill_id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "skill_version": {
+            "type": "string"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/Entity"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data_as_of": {
+            "type": "string",
+            "description": "e.g. 2026-11-05 close"
+          },
+          "result_kind": {
+            "enum": [
+              "full",
+              "limited"
+            ]
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "ai_generated": {
+            "const": true
+          },
+          "summary_claim_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Section"
+            }
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "provider": {
+                  "type": "string"
+                },
+                "dataset_id": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "provider",
+                "dataset_id",
+                "updated_at"
+              ]
+            }
+          },
+          "disclaimer": {
+            "type": "string"
+          },
+          "delivered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "snapshot_mode": {
+            "type": "string",
+            "enum": [
+              "fixed_legacy",
+              "collect_latest"
+            ],
+            "description": "真实成交观察协议：collect_latest 在确认后采集冻结，as_of 在计划和任务中为预览时间。"
+          },
+          "snapshot_as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "真实成交观察协议：冻结截止时间，未冻结为 null。"
+          },
+          "source_freshness": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceFreshness"
+            },
+            "description": "Per-source data times and limitations; required for collect_latest reports."
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "task_id",
+          "title",
+          "skill_id",
+          "skill_version",
+          "subject",
+          "as_of",
+          "data_as_of",
+          "result_kind",
+          "synthetic",
+          "ai_generated",
+          "summary_claim_refs",
+          "sections",
+          "claims",
+          "limitations",
+          "sources",
+          "disclaimer",
+          "delivered_at",
+          "snapshot_mode"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "skill_version": {
+                  "const": "1.1.0-demo.3"
+                }
+              },
+              "required": [
+                "skill_version"
+              ]
+            },
+            "then": {
+              "properties": {
+                "snapshot_mode": {
+                  "const": "collect_latest"
+                },
+                "snapshot_as_of": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "source_freshness": {
+                  "type": "array",
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "snapshot_as_of",
+                "source_freshness"
+              ]
+            }
+          }
+        ]
+      },
+      "PlanResultV04": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "plan",
+              "choose",
+              "unsupported"
+            ]
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchPlanV04"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "skill_id": {
+                  "$ref": "#/components/schemas/SkillId"
+                },
+                "subject": {
+                  "$ref": "#/components/schemas/Entity"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "skill_id",
+                "subject",
+                "label"
+              ]
+            }
+          },
+          "unsupported_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "plan",
+          "candidates",
+          "unsupported_reason",
+          "suggestions"
+        ]
+      },
+      "EvidenceV04": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "exchange",
+              "company_filing",
+              "regulator",
+              "vendor_derived",
+              "media",
+              "broker",
+              "computed"
+            ]
+          },
+          "source_tier": {
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "basis": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "locator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "excerpt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Time received by the system; unknown is null."
+          },
+          "event_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Verified source event time; unknown is null."
+          },
+          "latency_mode": {
+            "enum": [
+              "real_time",
+              "delayed",
+              "unknown",
+              null
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "dataset_id",
+          "provider",
+          "origin",
+          "source_tier",
+          "title",
+          "label",
+          "value",
+          "unit",
+          "basis",
+          "period",
+          "published_at",
+          "available_at",
+          "locator",
+          "excerpt",
+          "content_hash"
         ]
       }
     }

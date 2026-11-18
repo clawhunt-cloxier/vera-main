@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func TestRealtimeSourceGovernanceIsNotProcessConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("VERA_DEV_OIDC", "true")
+	t.Setenv("VERA_DATA_PROVIDER", "emquant")
+	t.Setenv("EMQUANT_QUOTE_LICENSE_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("EMQUANT_QUOTE_POLICY_ID", "not-a-config-variable")
+	if _, err := Load(); err != nil {
+		t.Fatalf("quote UUID environment variables must not gate process configuration: %v", err)
+	}
+}
+
 func TestProductionRefusesFixtureAndSimulatedModels(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://x")
 	t.Setenv("VERA_DEV_OIDC", "true")

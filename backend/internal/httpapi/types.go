@@ -44,7 +44,7 @@ func toEntity(e dataservice.EntityRow, skills map[string]*harness.Skill) Entity 
 	for _, id := range skillOrder {
 		sk := skills[id]
 		es := EntitySkill{SkillID: id, Available: slices.Contains(sk.Subjects, e.Kind)}
-		if skills["stock_analysis"].Version == emquant.ObservationBriefVersion && id != "stock_analysis" {
+		if (skills["stock_analysis"].Version == emquant.ObservationBriefVersion || skills["stock_analysis"].Version == harness.RealtimeBriefVersion) && id != "stock_analysis" {
 			es.Available = false
 		}
 		if !es.Available {
@@ -63,15 +63,16 @@ func toEntity(e dataservice.EntityRow, skills map[string]*harness.Skill) Entity 
 type Quota = harness.Quota
 
 type Me struct {
-	ResearchProtocol string     `json:"research_protocol,omitempty"`
-	UserID           uuid.UUID  `json:"user_id"`
-	WorkspaceID      *uuid.UUID `json:"workspace_id"`
-	CSRF             string     `json:"csrf_token"`
-	Persona          string     `json:"persona"`
-	Quota            Quota      `json:"quota"`
-	Onboarded        bool       `json:"onboarded"`
-	Synthetic        bool       `json:"synthetic"`
-	DisplayName      string     `json:"display_name"`
+	RealtimeTradeAvailable bool       `json:"realtime_trade_available,omitempty"`
+	ResearchProtocol       string     `json:"research_protocol,omitempty"`
+	UserID                 uuid.UUID  `json:"user_id"`
+	WorkspaceID            *uuid.UUID `json:"workspace_id"`
+	CSRF                   string     `json:"csrf_token"`
+	Persona                string     `json:"persona"`
+	Quota                  Quota      `json:"quota"`
+	Onboarded              bool       `json:"onboarded"`
+	Synthetic              bool       `json:"synthetic"`
+	DisplayName            string     `json:"display_name"`
 }
 
 type Skill struct {
@@ -129,7 +130,7 @@ func paramsMap(p harness.Params, skill string) map[string]any {
 
 func (s *Server) toPlan(p *harness.Plan) ResearchPlan {
 	out := ResearchPlan{SnapshotMode: p.SnapshotMode, ID: p.ID, PlanHash: p.Hash, SkillID: p.SkillID, SkillVersion: p.SkillVersion, Subject: toEntity(p.Subject, s.Engine.Skills),
-		Params: paramsMap(p.Params, p.SkillID), AsOf: p.AsOf, Executable: p.Executable, ReasonCode: p.ReasonCode,
+		QuoteRequirement: p.QuoteRequirement, Params: paramsMap(p.Params, p.SkillID), AsOf: p.AsOf, Executable: p.Executable, ReasonCode: p.ReasonCode,
 		Estimate: Estimate{P95Seconds: p.P95Seconds, QuotaCost: p.QuotaCost}, ExpiresAt: p.ExpiresAt, Sections: []PlanSection{}}
 	if p.SnapshotMode == "collect_latest" {
 		out.Params = map[string]any{}
@@ -166,20 +167,21 @@ type ReportRef struct {
 }
 
 type Task struct {
-	SnapshotMode  string     `json:"snapshot_mode,omitempty"`
-	SnapshotAsOf  *time.Time `json:"snapshot_as_of"`
-	ID            uuid.UUID  `json:"id"`
-	SkillID       string     `json:"skill_id"`
-	Subject       Entity     `json:"subject"`
-	Status        string     `json:"status"`
-	Revision      int64      `json:"revision"`
-	CreatedAt     time.Time  `json:"created_at"`
-	Deadline      time.Time  `json:"deadline"`
-	AsOf          time.Time  `json:"as_of"`
-	Steps         []TaskStep `json:"steps"`
-	ReportRef     *ReportRef `json:"report_ref"`
-	ReasonCode    *string    `json:"reason_code"`
-	ReasonMessage *string    `json:"reason_message"`
+	SnapshotMode     string     `json:"snapshot_mode,omitempty"`
+	SnapshotAsOf     *time.Time `json:"snapshot_as_of"`
+	QuoteRequirement *string    `json:"quote_requirement"`
+	ID               uuid.UUID  `json:"id"`
+	SkillID          string     `json:"skill_id"`
+	Subject          Entity     `json:"subject"`
+	Status           string     `json:"status"`
+	Revision         int64      `json:"revision"`
+	CreatedAt        time.Time  `json:"created_at"`
+	Deadline         time.Time  `json:"deadline"`
+	AsOf             time.Time  `json:"as_of"`
+	Steps            []TaskStep `json:"steps"`
+	ReportRef        *ReportRef `json:"report_ref"`
+	ReasonCode       *string    `json:"reason_code"`
+	ReasonMessage    *string    `json:"reason_message"`
 }
 
 type ReportSummary struct {
@@ -193,27 +195,28 @@ type ReportSummary struct {
 }
 
 type Report struct {
-	SnapshotMode string               `json:"snapshot_mode,omitempty"`
-	SnapshotAsOf *time.Time           `json:"snapshot_as_of,omitempty"`
-	ID           uuid.UUID            `json:"id"`
-	Version      int                  `json:"version"`
-	TaskID       uuid.UUID            `json:"task_id"`
-	Title        string               `json:"title"`
-	SkillID      string               `json:"skill_id"`
-	SkillVersion string               `json:"skill_version"`
-	Subject      Entity               `json:"subject"`
-	AsOf         time.Time            `json:"as_of"`
-	DataAsOf     string               `json:"data_as_of"`
-	ResultKind   string               `json:"result_kind"`
-	Synthetic    bool                 `json:"synthetic"`
-	AIGenerated  bool                 `json:"ai_generated"`
-	SummaryRefs  []string             `json:"summary_claim_refs"`
-	Sections     []harness.DocSection `json:"sections"`
-	Claims       []harness.DocClaim   `json:"claims"`
-	Limitations  []string             `json:"limitations"`
-	Sources      []harness.DocSource  `json:"sources"`
-	Disclaimer   string               `json:"disclaimer"`
-	DeliveredAt  time.Time            `json:"delivered_at"`
+	SnapshotMode    string                    `json:"snapshot_mode,omitempty"`
+	SnapshotAsOf    *time.Time                `json:"snapshot_as_of,omitempty"`
+	SourceFreshness []harness.SourceFreshness `json:"source_freshness,omitempty"`
+	ID              uuid.UUID                 `json:"id"`
+	Version         int                       `json:"version"`
+	TaskID          uuid.UUID                 `json:"task_id"`
+	Title           string                    `json:"title"`
+	SkillID         string                    `json:"skill_id"`
+	SkillVersion    string                    `json:"skill_version"`
+	Subject         Entity                    `json:"subject"`
+	AsOf            time.Time                 `json:"as_of"`
+	DataAsOf        string                    `json:"data_as_of"`
+	ResultKind      string                    `json:"result_kind"`
+	Synthetic       bool                      `json:"synthetic"`
+	AIGenerated     bool                      `json:"ai_generated"`
+	SummaryRefs     []string                  `json:"summary_claim_refs"`
+	Sections        []harness.DocSection      `json:"sections"`
+	Claims          []harness.DocClaim        `json:"claims"`
+	Limitations     []string                  `json:"limitations"`
+	Sources         []harness.DocSource       `json:"sources"`
+	Disclaimer      string                    `json:"disclaimer"`
+	DeliveredAt     time.Time                 `json:"delivered_at"`
 }
 
 type Evidence struct {

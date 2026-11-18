@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,24 +15,29 @@ import (
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/app"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/config"
 )
 
 // demo runs everything in one process for local evaluation and browser tests. It refuses non-development
 // environments: the development OIDC issuer accepts any username.
-func demo(ctx context.Context) error {
+func demo(ctx context.Context, args []string) error {
 	if v := os.Getenv("VERA_ENV"); v != "" && v != "development" && v != "test" {
 		return errors.New("vera demo 只能在 development/test 环境运行")
+	}
+	probe := len(args) == 2 && args[0] == "--probe-choice" && emquant.ValidQuoteProbeCode(args[1])
+	if len(args) != 0 && !probe {
+		return errors.New("usage: vera demo [--probe-choice CODE]")
 	}
 	dir := os.Getenv("VERA_DEMO_DIR")
 	if dir == "" {
 		home, _ := os.UserCacheDir()
 		dir = filepath.Join(home, "vera-demo")
 	}
-	port := 55432
-	if p := os.Getenv("VERA_DEMO_PG_PORT"); p != "" {
-		_, _ = fmt.Sscanf(p, "%d", &port)
+	port, err := demoDatabasePort(os.Getenv)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -44,7 +50,7 @@ func demo(ctx context.Context) error {
 	}
 	defer func() { _ = pg.Stop() }()
 	setDefault("VERA_ENV", "development")
-	setDefault("DATABASE_URL", fmt.Sprintf("postgres://vera:vera-demo@127.0.0.1:%d/vera?sslmode=disable", port))
+	setDefault("DATABASE_URL", demoDatabaseURL(port))
 	setDefault("VERA_DEV_OIDC", "true")
 	setDefault("VERA_REGISTRATION_ENABLED", "true") // demo opens workspaces with invites
 	setDefault("VERA_COOKIE_SECURE", "false")
@@ -59,6 +65,16 @@ func demo(ctx context.Context) error {
 		return err
 	}
 	defer a.Close()
+	if probe {
+		if a.Brief == nil || a.Brief.Runtime == nil {
+			return errors.New("quote probe requires the real Choice provider")
+		}
+		result, probeErr := a.Brief.Runtime.ProbeQuote(ctx, args[1])
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			return err
+		}
+		return probeErr
+	}
 	if err := a.Sync(ctx); err != nil {
 		return err
 	}

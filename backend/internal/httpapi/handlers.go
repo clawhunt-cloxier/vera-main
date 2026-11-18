@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -32,7 +31,14 @@ func (s *Server) meBody(r *http.Request) (Me, error) {
 	_ = s.Pool.QueryRow(r.Context(), `SELECT display_name FROM users WHERE id=$1`, p.UserID).Scan(&name)
 	me := Me{UserID: p.UserID, WorkspaceID: p.WorkspaceID, CSRF: p.CSRF, Persona: p.Persona, Onboarded: p.WorkspaceID != nil,
 		Synthetic: s.Synthetic, DisplayName: name}
-	if s.Engine.Brief != nil {
+	quote, err := s.quoteCapabilities(r.Context())
+	if err != nil {
+		return me, err
+	}
+	if quote.Latest {
+		me.ResearchProtocol = "v0.4"
+		me.RealtimeTradeAvailable = quote.Realtime
+	} else if s.Engine.Brief != nil {
 		me.ResearchProtocol = "observation.v1"
 	}
 	if ws != uuid.Nil {
@@ -102,14 +108,22 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	queryCode := strings.ToUpper(q)
 	for _, e := range ents {
+		if s.Engine.Brief != nil && (kind == "" || kind == "stock") {
+			// The local index is fuzzy. A near match must not mask a new
+			// qualified code; a bare code needs all vendor market candidates.
+			if isStockCode(q) || (emquantBriefCodeLike(queryCode) && (e.Kind != "stock" || e.Code != queryCode)) {
+				continue
+			}
+		}
 		items = append(items, toEntity(e, s.Engine.Skills))
 	}
 
 	// If local search found nothing and we have a real vendor, query Choice in real-time
 	if len(items) == 0 && s.Engine.Brief != nil {
 		if vendorEnts, err := s.searchVendorStocks(r, q, kind); err != nil {
-			slog.Warn("vendor stock search failed", "query", q, "err", err)
+			return errs.Unavailable("STOCK_SEARCH_UNAVAILABLE", "证券搜索暂时不可用，请稍后重试")
 		} else {
 			for _, e := range vendorEnts {
 				items = append(items, toEntity(e, s.Engine.Skills))
@@ -152,15 +166,18 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 	}
 	runtime := s.Engine.Brief.Runtime
 	if runtime == nil {
-		return nil, nil
+		return nil, errors.New("stock search runtime unavailable")
 	}
 
 	var table emquant.Table
 	colName, colCode := -1, -1
+	queryCode := strings.ToUpper(q)
+	qualified := emquantBriefCodeLike(queryCode)
+	codeLookup := qualified || isStockCode(q)
 
 	switch {
-	case isStockCode(q):
-		t, _, err := runtime.CollectStockCodeCandidates(r.Context(), q)
+	case codeLookup:
+		t, _, err := runtime.CollectStockCodeCandidates(r.Context(), queryCode[:6])
 		if err != nil {
 			return nil, err
 		}
@@ -169,9 +186,6 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 			if strings.EqualFold(col, "FULLCODES") {
 				colCode = i
 			}
-		}
-		if colCode == -1 && len(table.Columns) > 0 {
-			colCode = 0
 		}
 	case isStockName(q):
 		t, _, err := runtime.CollectStockNameCandidates(r.Context(), q)
@@ -191,8 +205,11 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 		return nil, nil
 	}
 
-	if table.Rows == 0 || len(table.Columns) == 0 {
+	if table.Rows == 0 {
 		return nil, nil
+	}
+	if len(table.Columns) == 0 || colCode < 0 || (!codeLookup && colName < 0) || table.Rows != len(table.Values)/len(table.Columns) || len(table.Values)%len(table.Columns) != 0 {
+		return nil, emquant.ErrShape
 	}
 
 	numCols := len(table.Columns)
@@ -201,32 +218,39 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 
 	for row := 0; row < table.Rows; row++ {
 		base := row * numCols
-		var name, code string
+		var name string
 		if colName >= 0 && base+colName < len(table.Values) {
 			name, _ = table.Values[base+colName].Value.(string)
 		}
-		if colCode >= 0 && base+colCode < len(table.Values) {
-			rawCode, _ := table.Values[base+colCode].Value.(string)
-			if idx := strings.Index(rawCode, ","); idx >= 0 {
-				rawCode = rawCode[:idx]
+		rawCode, _ := table.Values[base+colCode].Value.(string)
+		for _, code := range matchedSearchCodes(rawCode, queryCode, codeLookup) {
+			if seen[code] {
+				continue
 			}
-			code = strings.TrimSpace(rawCode)
+			seen[code] = true
+			label := name
+			if label == "" {
+				label = code
+			}
+			e, err := s.Store.UpsertSearchEntity(r.Context(), "stock", code, label, nil)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, e)
 		}
-		if name == "" && code != "" {
-			name = strings.Split(code, ".")[0]
-		}
-		if code == "" || seen[code] || !emquantBriefCodeLike(code) {
-			continue
-		}
-		seen[code] = true
-		e, err := s.Store.UpsertSearchEntity(r.Context(), "stock", code, name, nil)
-		if err != nil {
-			slog.Warn("failed to upsert vendor search entity", "code", code, "err", err)
-			continue
-		}
-		out = append(out, e)
 	}
 	return out, nil
+}
+
+func matchedSearchCodes(raw, query string, codeLookup bool) []string {
+	var codes []string
+	for _, part := range strings.Split(raw, ",") {
+		code := strings.ToUpper(strings.TrimSpace(part))
+		if emquantBriefCodeLike(code) && (!codeLookup || query == code || query == code[:6]) {
+			codes = append(codes, code)
+		}
+	}
+	return codes
 }
 
 // emquantBriefCodeLike checks that a code looks like a qualified A-share code (NNNNNN.XX).
@@ -252,6 +276,9 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 	items := []Skill{}
 	for _, id := range skillOrder {
 		sk := s.Engine.Skills[id]
+		if id == "stock_analysis" && realtimeVersion(r) && s.Engine.RealtimeEnabled() {
+			sk = harness.RealtimeBriefSkill()
+		}
 		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (s.Engine.Brief == nil || id == "stock_analysis")})
 	}
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
@@ -261,31 +288,47 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 // ---- plans ----
 
 func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
-	if s.Engine.Brief != nil && !observationVersion(r) {
+	if s.Engine.Brief != nil && !realtimeVersion(r) && !observationVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "真实简报需要新版客户端")
 	}
 	var in struct {
-		Text      *string         `json:"text"`
-		SkillID   string          `json:"skill_id"`
-		SubjectID *uuid.UUID      `json:"subject_id"`
-		Params    json.RawMessage `json:"params"`
+		Text             *string         `json:"text"`
+		SkillID          string          `json:"skill_id"`
+		SubjectID        *uuid.UUID      `json:"subject_id"`
+		Params           json.RawMessage `json:"params"`
+		QuoteRequirement json.RawMessage `json:"quote_requirement"`
 	}
 	if err := httpx.Decode(r, &in); err != nil {
 		return err
 	}
+	if realtimeVersion(r) && len(in.QuoteRequirement) == 0 {
+		return errs.BadRequest("INVALID_BODY", "0.4 请求必须明确 quote_requirement")
+	}
+	if !realtimeVersion(r) && len(in.QuoteRequirement) != 0 {
+		return errs.BadRequest("INVALID_BODY", "旧版请求不支持 quote_requirement，请使用 0.4 协议")
+	}
+	var requirement string
+	if realtimeVersion(r) && (json.Unmarshal(in.QuoteRequirement, &requirement) != nil || (requirement != "realtime_trade" && requirement != "latest_available")) {
+		return errs.Unprocessable("INVALID_QUOTE_REQUIREMENT", "quote_requirement 必须是 realtime_trade 或 latest_available")
+	}
 	_, ws := principal(r)
 	var res *harness.ParseResult
 	switch {
-	case in.Text != nil && in.SubjectID == nil && in.SkillID == "":
+	case in.Text != nil && in.SubjectID == nil && in.SkillID == "" && len(in.Params) == 0:
 		t := strings.TrimSpace(*in.Text)
 		if n := len([]rune(t)); n < 2 || n > 500 {
 			return errs.BadRequest("INVALID_BODY", "请输入 2–500 字")
 		}
 		var err error
-		if res, err = s.Engine.ParsePlan(r.Context(), ws, t); err != nil {
+		if realtimeVersion(r) {
+			res, err = s.Engine.ParseRealtimePlan(r.Context(), ws, t, requirement)
+			if err != nil {
+				return err
+			}
+		} else if res, err = s.Engine.ParsePlan(r.Context(), ws, t); err != nil {
 			return err
 		}
-	case in.Text == nil && in.SubjectID != nil && in.SkillID != "":
+	case in.Text == nil && in.SubjectID != nil && in.SkillID != "" && len(in.Params) > 0 && string(in.Params) != "null":
 		ents, err := s.Store.Entities(r.Context(), []uuid.UUID{*in.SubjectID})
 		if err != nil {
 			return err
@@ -295,12 +338,15 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 			return errs.Unprocessable("UNKNOWN_SUBJECT", "研究对象不存在")
 		}
 		params := map[string]any{}
-		if len(in.Params) > 0 && string(in.Params) != "null" {
-			if err := json.Unmarshal(in.Params, &params); err != nil {
-				return errs.BadRequest("INVALID_BODY", "params 必须是对象")
-			}
+		if err := json.Unmarshal(in.Params, &params); err != nil || params == nil {
+			return errs.BadRequest("INVALID_BODY", "params 必须是对象")
 		}
-		p, err := s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
+		var p *harness.Plan
+		if realtimeVersion(r) {
+			p, err = s.Engine.BuildRealtimePlan(r.Context(), ws, in.SkillID, sub, params, requirement)
+		} else {
+			p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
+		}
 		if err != nil {
 			return err
 		}
@@ -333,7 +379,10 @@ func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if p.SnapshotMode == "collect_latest" && !observationVersion(r) {
+	if p.QuoteRequirement != nil && !realtimeVersion(r) {
+		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要 0.4 客户端")
+	}
+	if p.SnapshotMode == "collect_latest" && p.QuoteRequirement == nil && !observationVersion(r) && !realtimeVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要新版客户端")
 	}
 	httpx.JSON(w, r, 200, s.toPlan(p))
@@ -359,8 +408,8 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if plan.SnapshotMode == "collect_latest" && !observationVersion(r) {
-		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要新版客户端确认")
+	if !planConfirmationVersion(plan.SnapshotMode, plan.QuoteRequirement, representation(r)) {
+		return errs.Conflict("PLAN_VERSION_MISMATCH", "确认协议必须与创建计划的协议一致")
 	}
 	id, err := s.Engine.CreateTask(r.Context(), ws, in.PlanID, in.PlanHash, in.Disabled)
 	if err != nil {
@@ -375,7 +424,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-const taskCols = `t.id, t.skill_id, t.subject_id, t.status, t.revision, t.created_at, t.deadline, t.as_of, t.report_id, t.reason_code, t.reason_message, t.epoch, t.snapshot_mode, t.snapshot_as_of`
+const taskCols = `t.id, t.skill_id, t.subject_id, t.status, t.revision, t.created_at, t.deadline, t.as_of, t.report_id, t.reason_code, t.reason_message, t.epoch, t.snapshot_mode, t.snapshot_as_of, p.quote_requirement`
 
 type taskRow struct {
 	t       Task
@@ -387,7 +436,7 @@ type taskRow struct {
 func scanTask(row pgx.Row) (taskRow, error) {
 	var tr taskRow
 	err := row.Scan(&tr.t.ID, &tr.t.SkillID, &tr.subject, &tr.t.Status, &tr.t.Revision, &tr.t.CreatedAt, &tr.t.Deadline, &tr.t.AsOf, &tr.report,
-		&tr.t.ReasonCode, &tr.t.ReasonMessage, &tr.epoch, &tr.t.SnapshotMode, &tr.t.SnapshotAsOf)
+		&tr.t.ReasonCode, &tr.t.ReasonMessage, &tr.epoch, &tr.t.SnapshotMode, &tr.t.SnapshotAsOf, &tr.t.QuoteRequirement)
 	return tr, err
 }
 
@@ -404,7 +453,10 @@ func (s *Server) fillTasks(r *http.Request, ws uuid.UUID, rows []taskRow, withSt
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		for _, tr := range rows {
 			t := tr.t
-			if t.SnapshotMode == "collect_latest" && !observationVersion(r) {
+			if t.QuoteRequirement != nil && !realtimeVersion(r) {
+				return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该任务需要 0.4 客户端")
+			}
+			if t.SnapshotMode == "collect_latest" && t.QuoteRequirement == nil && !observationVersion(r) && !realtimeVersion(r) {
 				return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该任务需要新版客户端")
 			}
 			if _, ok := ents[tr.subject]; !ok {
@@ -441,7 +493,7 @@ func (s *Server) task(r *http.Request, ws, id uuid.UUID) (Task, error) {
 	var tr taskRow
 	err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		var err error
-		tr, err = scanTask(tx.QueryRow(r.Context(), `SELECT `+taskCols+` FROM research_tasks t WHERE t.id=$1`, id))
+		tr, err = scanTask(tx.QueryRow(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE t.id=$1`, id))
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -546,7 +598,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	skill, status := r.URL.Query().Get("skill_id"), r.URL.Query().Get("status")
 	var rows []taskRow
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		rs, err := tx.Query(r.Context(), `SELECT `+taskCols+` FROM research_tasks t WHERE ($1::timestamptz IS NULL OR (t.created_at, t.id) < ($1, $2))
+		rs, err := tx.Query(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE ($1::timestamptz IS NULL OR (t.created_at, t.id) < ($1, $2))
 			AND ($3 = '' OR t.skill_id=$3) AND ($4 = '' OR t.status=$4) AND ($5::uuid IS NULL OR t.subject_id=$5)
 			ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, at, cid, skill, status, subj, n+1)
 		if err != nil {
@@ -713,6 +765,28 @@ func (s *Server) loadDoc(r *http.Request) (uuid.UUID, harness.Document, []byte, 
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return uuid.Nil, doc, nil, err
 	}
+	if doc.SnapshotMode == "" {
+		doc.SnapshotMode = "fixed_legacy"
+		if doc.SkillVersion == emquant.ObservationBriefVersion {
+			doc.SnapshotMode = "collect_latest"
+			doc.SnapshotAsOf = &doc.AsOf
+		}
+	}
+	// Old observation documents predate source_freshness. Read their exact
+	// frozen manifest for 0.4 display without rewriting the stored document or
+	// inventing event/publication/availability timestamps.
+	if realtimeVersion(r) && doc.SkillVersion == emquant.ObservationBriefVersion && len(doc.SourceFreshness) == 0 {
+		if s.Engine.Brief == nil {
+			return uuid.Nil, doc, nil, errs.Unavailable("SOURCE_UNAVAILABLE", "真实报告来源当前不可读取")
+		}
+		if err := s.Engine.Brief.WithSnapshot(r.Context(), ws, doc.TaskID, dataservice.SourceDisplay, func(o emquant.BriefObservation) error {
+			doc.SnapshotAsOf = &o.Cutoff
+			doc.SourceFreshness = harness.ObservationFreshness(o, s.Engine.Brief.ProviderID)
+			return nil
+		}); err != nil {
+			return uuid.Nil, doc, nil, err
+		}
+	}
 	return ws, doc, series, nil
 }
 
@@ -725,13 +799,11 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	mode := "fixed_legacy"
-	var snapshotAt *time.Time
-	if d.SkillVersion == "1.1.0-demo.2" {
-		mode = "collect_latest"
-		snapshotAt = &d.AsOf
+	mode := d.SnapshotMode
+	if mode == "" {
+		mode = "fixed_legacy"
 	}
-	httpx.JSON(w, r, 200, Report{SnapshotMode: mode, SnapshotAsOf: snapshotAt, ID: d.ID, Version: d.Version, TaskID: d.TaskID, Title: d.Title, SkillID: d.SkillID, SkillVersion: d.SkillVersion,
+	httpx.JSON(w, r, 200, Report{SnapshotMode: mode, SnapshotAsOf: d.SnapshotAsOf, SourceFreshness: d.SourceFreshness, ID: d.ID, Version: d.Version, TaskID: d.TaskID, Title: d.Title, SkillID: d.SkillID, SkillVersion: d.SkillVersion,
 		Subject: toEntity(ents[d.SubjectID], s.Engine.Skills), AsOf: d.AsOf, DataAsOf: d.DataAsOf, ResultKind: d.ResultKind, Synthetic: d.Synthetic,
 		AIGenerated: true, SummaryRefs: d.SummaryRefs, Sections: d.Sections, Claims: d.Claims, Limitations: d.Limitations, Sources: d.Sources,
 		Disclaimer: d.Disclaimer, DeliveredAt: d.DeliveredAt})
@@ -751,7 +823,7 @@ func (s *Server) getSeries(w http.ResponseWriter, r *http.Request) error {
 			ID string `json:"series_id"`
 		}
 		if json.Unmarshal(x, &head) == nil && head.ID == want {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Content-Type", representation(r)+"; charset=utf-8")
 			_, _ = w.Write(x)
 			return nil
 		}

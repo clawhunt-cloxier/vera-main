@@ -53,7 +53,7 @@ func main() {
 	case "harness":
 		err = withApp(ctx, func(a *app.App) error { return harnessCmd(ctx, a, os.Args[2:]) })
 	case "demo":
-		err = demo(ctx)
+		err = demo(ctx, os.Args[2:])
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

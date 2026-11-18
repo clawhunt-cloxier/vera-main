@@ -15,7 +15,11 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\"",
     "gen:api": "openapi-typescript ../contracts/openapi.json -o src/api/schema.d.ts",
-    "check:api": "node scripts/check-api-types.mjs"
+    "check:api": "node scripts/check-api-types.mjs",
+    "test:api-client": "node --test scripts/research-protocol.test.mjs",
+    "test:realtime-ui": "node --test scripts/realtime-ui.test.mjs",
+    "accept:live-realtime": "node scripts/live-realtime.mjs",
+    "accept:live-latest": "node scripts/live-realtime.mjs --latest-available"
   },
   "dependencies": {
     "@tanstack/react-query": "5.106.1",

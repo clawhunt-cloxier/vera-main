@@ -39,7 +39,7 @@ func (s *Server) getReportPDF(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	rep := Report{ID: d.ID, Version: d.Version, TaskID: d.TaskID, Title: d.Title, SkillID: d.SkillID, SkillVersion: d.SkillVersion,
+	rep := Report{SnapshotMode: d.SnapshotMode, SnapshotAsOf: d.SnapshotAsOf, SourceFreshness: d.SourceFreshness, ID: d.ID, Version: d.Version, TaskID: d.TaskID, Title: d.Title, SkillID: d.SkillID, SkillVersion: d.SkillVersion,
 		Subject: toEntity(ents[d.SubjectID], s.Engine.Skills), AsOf: d.AsOf, DataAsOf: d.DataAsOf, ResultKind: d.ResultKind, Synthetic: d.Synthetic,
 		AIGenerated: true, SummaryRefs: d.SummaryRefs, Sections: d.Sections, Claims: d.Claims, Limitations: d.Limitations, Sources: d.Sources,
 		Disclaimer: d.Disclaimer, DeliveredAt: d.DeliveredAt}

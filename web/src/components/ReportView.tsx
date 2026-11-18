@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
+  fmtDataTime,
   fmtTime,
   kindLabel,
   skillTitle,
@@ -24,6 +25,20 @@ const tierLabel: Record<string, string> = {
   L3: 'L3 授权媒体',
   L4: 'L4 厂商加工口径',
 };
+
+const latencyLabel: Record<string, string> = {
+  real_time: '实时传输',
+  delayed: '延迟行情',
+  unknown: '延迟性质未知',
+};
+const freshnessLabel: Record<string, string> = {
+  fresh: '符合新鲜度策略',
+  stale: '已过期',
+  unavailable: '不可用',
+  unknown: '新鲜度未知',
+};
+
+const sourceTime = (value: string | null | undefined) => (value ? fmtDataTime(value) : '未提供');
 
 function EvidencePanel({
   claim,
@@ -120,9 +135,45 @@ function EvidencePanel({
               {e.value ? '：' + e.value + (e.unit ? ' ' + e.unit : '') : ''}
             </div>
             <div className="muted">
-              {tierLabel[e.source_tier] ?? e.source_tier} · {e.provider} · {e.period ?? ''} ·
-              可用时点 {fmtTime(e.available_at)}
+              {tierLabel[e.source_tier] ?? e.source_tier} · {e.provider}
             </div>
+            <dl className="source-times">
+              {e.period && (
+                <>
+                  <dt>数据期间</dt>
+                  <dd>{e.period}</dd>
+                </>
+              )}
+              {e.published_at && (
+                <>
+                  <dt>披露时间</dt>
+                  <dd>
+                    {e.published_at.includes('T') ? fmtDataTime(e.published_at) : e.published_at}
+                  </dd>
+                </>
+              )}
+              {(e.event_at || e.latency_mode) && (
+                <>
+                  <dt>行情事件时间</dt>
+                  <dd>{sourceTime(e.event_at)}</dd>
+                </>
+              )}
+              {(e.received_at || e.latency_mode) && (
+                <>
+                  <dt>系统接收时间</dt>
+                  <dd>{sourceTime(e.received_at)}</dd>
+                </>
+              )}
+              <dt>可用时间</dt>
+              <dd>{sourceTime(e.available_at)}</dd>
+              {e.latency_mode && (
+                <>
+                  <dt>延迟性质</dt>
+                  <dd>{latencyLabel[e.latency_mode]}</dd>
+                </>
+              )}
+            </dl>
+            <p className="muted">以上时间按北京时间显示。</p>
             {e.basis && <div className="muted">口径：{e.basis}</div>}
             {e.locator && <div className="muted">位置：{e.locator}</div>}
             {e.excerpt && <blockquote>{e.excerpt}</blockquote>}
@@ -175,10 +226,17 @@ export function ReportView({
             <Tag tone="info">AI 生成</Tag>
             {report.synthetic && <Tag tone="bad">模拟数据</Tag>}
             <span className="muted">
-              数据截止 {report.data_as_of} · 版本 {report.version} · 交付{' '}
-              {fmtTime(report.delivered_at)}
+              {report.snapshot_mode === 'collect_latest'
+                ? `快照截止 ${sourceTime(report.snapshot_as_of)}（北京时间）`
+                : `数据截止 ${report.data_as_of}`}{' '}
+              · 版本 {report.version} · 交付 {fmtTime(report.delivered_at)}
             </span>
           </div>
+          {report.snapshot_mode === 'collect_latest' && (
+            <p className="muted">
+              快照截止是本次研究冻结数据的时间；各来源的实际事件与披露时间见“数据与限制”。
+            </p>
+          )}
           {actions && <div className="actions">{actions}</div>}
         </header>
         {report.sections.map((s) => (
@@ -279,13 +337,50 @@ export function ReportView({
             ))}
           </ul>
           <h3>数据来源</h3>
-          <ul className="sources">
-            {report.sources.map((s) => (
-              <li key={s.dataset_id}>
-                {s.provider} · {s.dataset_id} · 更新至 {fmtTime(s.updated_at)}
-              </li>
-            ))}
-          </ul>
+          {report.source_freshness && report.source_freshness.length > 0 ? (
+            <div className="sources">
+              <p className="muted">
+                各来源时间按北京时间显示；实时传输不代表休市或停牌时发生新成交。
+              </p>
+              {report.source_freshness.map((source, index) => (
+                <div
+                  key={`${source.dataset_id}-${source.provider}-${index}`}
+                  className="card small"
+                >
+                  <strong>
+                    {source.provider} · {source.dataset_id}
+                  </strong>{' '}
+                  <Tag tone={source.status === 'fresh' ? 'ok' : 'warn'}>
+                    {freshnessLabel[source.status]}
+                  </Tag>{' '}
+                  <Tag tone={source.latency_mode === 'real_time' ? 'info' : 'warn'}>
+                    {latencyLabel[source.latency_mode]}
+                  </Tag>
+                  <dl className="source-times">
+                    <dt>行情事件时间</dt>
+                    <dd>{sourceTime(source.event_at)}</dd>
+                    <dt>披露时间</dt>
+                    <dd>{sourceTime(source.published_at)}</dd>
+                    <dt>系统接收时间</dt>
+                    <dd>{sourceTime(source.received_at)}</dd>
+                    <dt>可用时间</dt>
+                    <dd>{sourceTime(source.available_at)}</dd>
+                    <dt>数据期间</dt>
+                    <dd>{source.period ?? '未提供'}</dd>
+                  </dl>
+                  {source.note && <p className="muted">{source.note}</p>}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <ul className="sources">
+              {report.sources.map((s) => (
+                <li key={s.dataset_id}>
+                  {s.provider} · {s.dataset_id} · 更新至 {fmtTime(s.updated_at)}
+                </li>
+              ))}
+            </ul>
+          )}
           <p className="disclaimer">{report.disclaimer}</p>
         </section>
       </article>

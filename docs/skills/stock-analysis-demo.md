@@ -1,8 +1,8 @@
-# 单股真实数据简报 stock_analysis v1.1.0-demo.1
+# 单股真实数据简报 stock_analysis v1.1.0-demo.3
 
-状态：用户授权的演示目标，尚未接入计划 API、worker、证据 API 或网站；不等同完整的 stock_analysis v1.1.0。范围及验收以 [ADR-0005](../decisions/0005-real-data-demo.md) 为准。
+状态：已接入 0.4 计划确认、按任务行情采集、发布与不可变快照、worker 和报告证据路径；不等同完整的 stock_analysis v1.1.0。真实 Choice 及部署验收仍按 T014b/T027 交接记录。范围及验收以 [ADR-0005](../decisions/0005-real-data-demo.md) 为准。
 
-输入为一只非模拟 A 股和用户确认的实时成交行情要求。计划预览时点不是数据截止，采集完成后以固定视图冻结一次快照；标的、版本、预览时点、实时要求、章节与数据集要求必须纳入计划哈希。行情缺失、过期、无权限、延迟未知或交易状态无法证明满足实时成交时，必需部分不可用并弃权，不用 fixture 或历史收盘价替代。
+输入为一只非模拟 A 股和用户明确选择的 `quote_requirement`：`realtime_trade` 要求已验证的实时成交条件；`latest_available` 接受按策略核验且明确标注延迟性质与交易状态的最近可用行情。计划预览时点不是数据截止，采集完成后以固定视图冻结一次快照；标的、版本、预览时点、实时要求、章节与数据集要求必须纳入计划哈希。两种要求下，行情缺失、过期或无权限都使必需部分不可用；`realtime_trade` 还拒绝延迟未知、非实时以及非连续交易状态。`latest_available` 可以展示经过核验的延迟或收盘状态，但必须明确标注，不能声称交易中的实时成交。不会回退到 fixture 或历史收盘价。
 
 | 数据和章节 | 必需性 | 规则 |
 | --- | --- | --- |
@@ -15,4 +15,6 @@
 
 章节为 S1 核心要点、S2 行情与市场事实、S3 公司与财务事实；S1、S2 必需，S3 可选，来源与限制为必需的模板部分。
 
-规格评测样例见 [stock-brief-demo-cases.json](../../tests/fixtures/stock-brief-demo-cases.json)，这些样例不代表端到端能力已实现。
+版本 `demo.1` 的计划定义和 `demo.2` 的非实时成交简报继续保持各自语义；`demo.3` 仅通过 0.4 协商创建。确认在同一事务登记取数意图、数据集要求、任务与作业；worker 先归档、发布、冻结，后生成事实表。冻结后的重试保持原清单和冻结 revision，不能因为任务进度 revision 变化重新取数。每次模型发送和报告展示都重新验证该冻结来源的当前用途许可。
+
+规格评测样例见 [stock-brief-demo-cases.json](../../tests/fixtures/stock-brief-demo-cases.json)。`TestRealtimeBriefPipelineAndRecovery` 使用模拟 native ABI、模拟 S3 transport、真实 PostgreSQL、River 任务与模型网关，覆盖实时/最近可用、收盘/过期/延迟、固定快照恢复、跨 workspace、取消与撤销许可；它不替代真实 Choice 账号和部署验收。

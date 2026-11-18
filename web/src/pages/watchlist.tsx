@@ -1,10 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import { api, get, newKey, post, type PlanResult, type WatchItem } from '../api/client';
+import {
+  api,
+  get,
+  newKey,
+  post,
+  type PlanResult,
+  type QuoteRequirement,
+  type WatchItem,
+} from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
-import { Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
+import { QuoteRequirementField } from '../components/QuoteRequirementField';
+import { Dialog, Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
 
 const ruleLabel: Record<string, string> = {
   price_above: '价格高于阈值',
@@ -16,12 +25,17 @@ const ruleLabel: Record<string, string> = {
 
 export function Watchlist() {
   const me = useMe();
+  const realtime = me.data?.research_protocol === 'v0.4';
   const items = useQuery({
     queryKey: ['watchlist'],
     queryFn: () => get<{ items: WatchItem[] }>('/api/v1/watchlist'),
     staleTime: 10_000,
   });
   const [adding, setAdding] = useState(false);
+  const [researchItem, setResearchItem] = useState<WatchItem | null>(null);
+  const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
+  const allowRealtime = me.data?.realtime_trade_available === true;
+  const quoteRequirement = allowRealtime ? selection : 'latest_available';
   const qc = useQueryClient();
   const nav = useNavigate();
   const add = useMutation({
@@ -33,10 +47,16 @@ export function Watchlist() {
   });
   const analyze = useMutation({
     mutationFn: async (subject_id: string) => {
+      if (realtime && !quoteRequirement) throw new Error('请选择行情要求');
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
-        { skill_id: 'stock_analysis', subject_id, params: {} },
-        { idem: newKey() }
+        {
+          skill_id: 'stock_analysis',
+          subject_id,
+          params: {},
+          ...(realtime ? { quote_requirement: quoteRequirement } : {}),
+        },
+        { idem: newKey(), protocol: realtime ? 'v0.4' : undefined }
       );
       if (r.kind === 'plan' && r.plan) {
         nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
@@ -109,8 +129,16 @@ export function Watchlist() {
                   <td>
                     <button
                       className="ghost small"
-                      disabled={analyze.isPending}
-                      onClick={() => analyze.mutate(it.entity.id)}
+                      disabled={!me.data || analyze.isPending}
+                      onClick={() => {
+                        if (realtime) {
+                          setQuoteRequirement('latest_available');
+                          setResearchItem(it);
+                          analyze.reset();
+                        } else {
+                          analyze.mutate(it.entity.id);
+                        }
+                      }}
                     >
                       分析
                     </button>
@@ -123,6 +151,26 @@ export function Watchlist() {
             })}
           </tbody>
         </table>
+      )}
+      {researchItem && (
+        <Dialog title={`研究 ${researchItem.entity.name}`} onClose={() => setResearchItem(null)}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              analyze.mutate(researchItem.entity.id);
+            }}
+          >
+            <QuoteRequirementField
+              value={quoteRequirement}
+              onChange={setQuoteRequirement}
+              allowRealtime={allowRealtime}
+            />
+            <button type="submit" disabled={!quoteRequirement || analyze.isPending}>
+              {analyze.isPending ? '准备中…' : '生成研究计划'}
+            </button>
+            {analyze.error && <ErrorBox error={analyze.error} />}
+          </form>
+        </Dialog>
       )}
       {adding && (
         <div className="overlay" onClick={() => setAdding(false)}>

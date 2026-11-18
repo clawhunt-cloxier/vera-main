@@ -30,26 +30,45 @@ type summaryPoint struct {
 
 // Document is the stored report (contracts Report minus the expanded subject entity).
 type Document struct {
-	ID           uuid.UUID      `json:"id"`
-	Version      int            `json:"version"`
-	TaskID       uuid.UUID      `json:"task_id"`
-	Title        string         `json:"title"`
-	SkillID      string         `json:"skill_id"`
-	SkillVersion string         `json:"skill_version"`
-	SubjectID    uuid.UUID      `json:"subject_id"`
-	AsOf         time.Time      `json:"as_of"`
-	DataAsOf     string         `json:"data_as_of"`
-	ResultKind   string         `json:"result_kind"`
-	Synthetic    bool           `json:"synthetic"`
-	AIGenerated  bool           `json:"ai_generated"`
-	SummaryRefs  []string       `json:"summary_claim_refs"`
-	Sections     []DocSection   `json:"sections"`
-	Claims       []DocClaim     `json:"claims"`
-	Limitations  []string       `json:"limitations"`
-	Sources      []DocSource    `json:"sources"`
-	Disclaimer   string         `json:"disclaimer"`
-	DeliveredAt  time.Time      `json:"delivered_at"`
-	Series       []facts.Series `json:"-"`
+	ID              uuid.UUID         `json:"id"`
+	Version         int               `json:"version"`
+	TaskID          uuid.UUID         `json:"task_id"`
+	Title           string            `json:"title"`
+	SkillID         string            `json:"skill_id"`
+	SkillVersion    string            `json:"skill_version"`
+	SubjectID       uuid.UUID         `json:"subject_id"`
+	AsOf            time.Time         `json:"as_of"`
+	SnapshotMode    string            `json:"snapshot_mode"`
+	SnapshotAsOf    *time.Time        `json:"snapshot_as_of,omitempty"`
+	SourceFreshness []SourceFreshness `json:"source_freshness,omitempty"`
+	DataAsOf        string            `json:"data_as_of"`
+	ResultKind      string            `json:"result_kind"`
+	Synthetic       bool              `json:"synthetic"`
+	AIGenerated     bool              `json:"ai_generated"`
+	SummaryRefs     []string          `json:"summary_claim_refs"`
+	Sections        []DocSection      `json:"sections"`
+	Claims          []DocClaim        `json:"claims"`
+	Limitations     []string          `json:"limitations"`
+	Sources         []DocSource       `json:"sources"`
+	Disclaimer      string            `json:"disclaimer"`
+	DeliveredAt     time.Time         `json:"delivered_at"`
+	Series          []facts.Series    `json:"-"`
+}
+
+// SourceFreshness keeps the independent event, publication, receipt and
+// availability times visible to readers. A dataset may have no applicable
+// timestamp; nil values are represented explicitly in the 0.4 contract.
+type SourceFreshness struct {
+	DatasetID   string     `json:"dataset_id"`
+	Provider    string     `json:"provider"`
+	EventAt     *time.Time `json:"event_at"`
+	PublishedAt *time.Time `json:"published_at"`
+	ReceivedAt  *time.Time `json:"received_at"`
+	AvailableAt *time.Time `json:"available_at"`
+	Period      *string    `json:"period"`
+	LatencyMode string     `json:"latency_mode"`
+	Status      string     `json:"status"`
+	Note        string     `json:"note"`
 }
 
 type DocSection struct {
@@ -204,9 +223,14 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject dataservice.EntityRow, sheet *facts.Sheet, secs []Section,
 	results []SectionResult, final []finalClaim, points []summaryPoint) (Document, error) {
 	doc := Document{ID: uuid.NewSHA1(t.ID, []byte("report")), Version: 1, TaskID: t.ID, Title: sk.Name(subject, t.Params), SkillID: sk.ID,
-		SkillVersion: sk.Version, SubjectID: subject.ID, AsOf: t.AsOf, DataAsOf: t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间）",
+		SkillVersion: sk.Version, SubjectID: subject.ID, AsOf: t.AsOf, SnapshotMode: t.SnapshotMode, DataAsOf: t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间）",
 		ResultKind: "full", Synthetic: e.Synthetic || subject.Synthetic, AIGenerated: true, Disclaimer: Disclaimer, Claims: []DocClaim{},
 		Limitations: []string{}, Sources: []DocSource{}, SummaryRefs: []string{}}
+	if t.Version == RealtimeBriefVersion {
+		// Deterministic fact checks use t.AsOf as the frozen evaluation
+		// cutoff; the public 0.4 as_of retains the user's plan preview time.
+		doc.AsOf = t.PreviewAt
+	}
 	// S1 summary claims
 	s1 := DocSection{ID: "S1", Title: "核心要点", Status: "ok", ClaimRefs: []string{}, Tables: []facts.Table{}, Charts: []DocChart{}}
 	byRef := map[string]finalClaim{}
@@ -277,6 +301,17 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 		doc.Sections = append(doc.Sections, ds)
 	}
 	doc.Limitations = append(doc.Limitations, sheet.Limitations...)
+	if t.SnapshotMode == "collect_latest" {
+		cutoff, freshness, freshnessErr := e.realtimeFreshness(ctx, t)
+		if freshnessErr != nil {
+			return doc, freshnessErr
+		}
+		if cutoff != nil {
+			doc.SnapshotAsOf = cutoff
+			doc.SourceFreshness = freshness
+			doc.DataAsOf = "数据冻结截止时点：" + cutoff.In(cst).Format("2006-01-02 15:04:05") + "（北京时间）"
+		}
+	}
 	if t.Version == emquant.ObservationBriefVersion {
 		doc.ResultKind = "limited"
 		doc.DataAsOf = "数据采集后的冻结时点：" + t.AsOf.In(cst).Format("2006-01-02 15:04:05") + "（北京时间；非实时）"
@@ -287,6 +322,11 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 	provs, err := e.providerNames(ctx)
 	if t.Version == emquant.ObservationBriefVersion && e.Brief != nil {
 		err = e.Pool.QueryRow(ctx, `SELECT name FROM providers WHERE id=$1 AND enabled AND NOT synthetic`, e.Brief.ProviderID).Scan(&provs)
+	}
+	if t.Version == RealtimeBriefVersion && len(doc.SourceFreshness) > 0 {
+		// A report must name only providers that contributed to its frozen
+		// snapshot; the platform's enabled-provider aggregate is not lineage.
+		err = e.Pool.QueryRow(ctx, `SELECT name FROM providers WHERE id=$1 AND enabled`, doc.SourceFreshness[0].Provider).Scan(&provs)
 	}
 	if err != nil {
 		return doc, err
@@ -301,6 +341,72 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 		doc.Sources = append(doc.Sources, DocSource{Provider: provs, DatasetID: ds, UpdatedAt: sheet.Sources[ds]})
 	}
 	return doc, nil
+}
+
+// realtimeFreshness reads and reauthorizes the immutable quote bound to the
+// task. It never chooses a newer record from a progress revision or wall clock.
+func (e *Engine) realtimeFreshness(ctx context.Context, t *taskRow) (*time.Time, []SourceFreshness, error) {
+	if t.Version == emquant.ObservationBriefVersion {
+		if e.Brief == nil {
+			return nil, nil, errors.New("harness: observation source unavailable")
+		}
+		var cutoff *time.Time
+		var fresh []SourceFreshness
+		err := e.Brief.WithSnapshot(ctx, t.Workspace, t.ID, dataservice.SourceDisplay, func(o emquant.BriefObservation) error {
+			cutoff = timePtr(o.Cutoff)
+			fresh = ObservationFreshness(o, e.Brief.ProviderID)
+			return nil
+		})
+		return cutoff, fresh, err
+	}
+	if t.Version != RealtimeBriefVersion {
+		return nil, nil, nil
+	}
+	if e.Brief == nil || e.Brief.Runtime == nil {
+		return nil, nil, errors.New("harness: realtime source unavailable")
+	}
+	var cutoff *time.Time
+	var fresh []SourceFreshness
+	err := e.Brief.Runtime.WithTaskSnapshotQuote(ctx, t.Workspace, t.ID, dataservice.SourceDisplay, func(view emquant.QuoteView) error {
+		cutoff = timePtr(view.Cutoff)
+		for _, q := range view.Quotes {
+			status := "fresh"
+			if q.LatencyMode == "unknown" || q.MarketState == "unknown" {
+				status = "unknown"
+			}
+			state := map[string]string{"continuous": "连续交易", "closed": "非交易状态", "suspended": "停牌", "unknown": "未确认"}[q.MarketState]
+			fresh = append(fresh, SourceFreshness{DatasetID: "mkt.intraday_quote", Provider: q.ProviderID,
+				EventAt: timePtr(q.EventAt), ReceivedAt: timePtr(q.ReceivedAt), AvailableAt: timePtr(q.AvailableAt),
+				LatencyMode: q.LatencyMode, Status: status, Note: "冻结时已通过时点与新鲜度校验；交易状态：" + state})
+		}
+		if cutoff == nil || len(fresh) != 1 || len(view.Unavailable) != 0 {
+			return errors.New("harness: realtime report snapshot is incomplete")
+		}
+		return nil
+	})
+	return cutoff, fresh, err
+}
+
+// ObservationFreshness keeps legacy brief metadata honest when a 0.4 client
+// reads it: collection is known, but event/publication/availability times are
+// not established by the returned date labels.
+func ObservationFreshness(o emquant.BriefObservation, provider string) []SourceFreshness {
+	var period *string
+	if len(o.Rows) > 0 {
+		last := o.Rows[len(o.Rows)-1].TradeDate
+		period = &last
+	}
+	return []SourceFreshness{{DatasetID: "mkt.daily_bar", Provider: provider,
+		ReceivedAt: timePtr(o.Manifest.Liquidity.Source.ReceivedAt), Period: period,
+		LatencyMode: "unknown", Status: "unknown", Note: "非实时日成交观察；期间标签不证明事件、披露或首次可用时间，不提供历史 PIT 保证"}}
+}
+
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 func (e *Engine) providerNames(ctx context.Context) (string, error) {
@@ -318,14 +424,17 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 	versions, _ := json.Marshal(map[string]string{"skill": doc.SkillVersion, "rules": check.RulesVersion, "formulas": facts.FormulaVersion,
 		"prompts": PromptVersion, "policy": e.Policy.Version, "prices": e.priceVersion()})
 	return e.deliverTransaction(ctx, t, func(tx pgx.Tx) error {
-		var epoch int64
+		var epoch, revision int64
 		var status, planHash string
 		var snapshot *string
-		if err := tx.QueryRow(ctx, `SELECT t.epoch, t.status, coalesce(t.snapshot_hash,t.snapshot_manifest_hash), p.plan_hash FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id
-			WHERE t.id=$1 FOR UPDATE OF t`, t.ID).Scan(&epoch, &status, &snapshot, &planHash); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT t.epoch, t.status, coalesce(t.snapshot_hash,t.snapshot_manifest_hash), p.plan_hash, t.revision FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id
+			WHERE t.id=$1 FOR UPDATE OF t`, t.ID).Scan(&epoch, &status, &snapshot, &planHash, &revision); err != nil {
 			return err
 		}
-		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.Version == emquant.ObservationBriefVersion && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
+		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.SnapshotMode == "collect_latest" && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
+			return errStale
+		}
+		if t.Version == RealtimeBriefVersion && revision != t.Revision {
 			return errStale
 		}
 		if err := event(ctx, tx, t.Workspace, t.ID, t.Epoch, "DELIVERING", nil); err != nil {

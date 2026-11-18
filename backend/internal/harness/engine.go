@@ -29,17 +29,18 @@ import (
 
 // Engine wires the data service, model gateway, policy and skills. One per process.
 type Engine struct {
-	Brief     *emquant.BriefService
-	Pool      *pgxpool.Pool
-	Store     *dataservice.Store
-	Gateway   *model.Gateway
-	Policy    *policy.Policy
-	Skills    map[string]*Skill
-	Now       func() time.Time // data clock: fixture as_of in demo, wall clock with vendors
-	Synthetic bool
-	Basis     map[string]string
-	River     *river.Client[pgx.Tx]
-	Prompts   string // prompt set version, frozen into reports
+	Brief          *emquant.BriefService
+	RealtimeSource *BriefQuoteSource
+	Pool           *pgxpool.Pool
+	Store          *dataservice.Store
+	Gateway        *model.Gateway
+	Policy         *policy.Policy
+	Skills         map[string]*Skill
+	Now            func() time.Time // data clock: fixture as_of in demo, wall clock with vendors
+	Synthetic      bool
+	Basis          map[string]string
+	River          *river.Client[pgx.Tx]
+	Prompts        string // prompt set version, frozen into reports
 	// RealResearch is VERA_REAL_RESEARCH_ENABLED: required before plans and tasks run on real data or real models.
 	RealResearch bool
 }
@@ -63,21 +64,22 @@ type PlanSection struct {
 }
 
 type Plan struct {
-	ID           uuid.UUID             `json:"id"`
-	Hash         string                `json:"plan_hash"`
-	SkillID      string                `json:"skill_id"`
-	SkillVersion string                `json:"skill_version"`
-	Subject      dataservice.EntityRow `json:"-"`
-	Params       Params                `json:"params"`
-	AsOf         time.Time             `json:"as_of"`
-	Sections     []PlanSection         `json:"sections"`
-	Executable   bool                  `json:"executable"`
-	ReasonCode   *string               `json:"reason_code"`
-	Notes        []string              `json:"notes"`
-	P95Seconds   int                   `json:"p95_seconds"`
-	QuotaCost    int                   `json:"quota_cost"`
-	ExpiresAt    time.Time             `json:"expires_at"`
-	SnapshotMode string                `json:"-"`
+	ID               uuid.UUID             `json:"id"`
+	Hash             string                `json:"plan_hash"`
+	SkillID          string                `json:"skill_id"`
+	SkillVersion     string                `json:"skill_version"`
+	Subject          dataservice.EntityRow `json:"-"`
+	Params           Params                `json:"params"`
+	AsOf             time.Time             `json:"as_of"`
+	Sections         []PlanSection         `json:"sections"`
+	Executable       bool                  `json:"executable"`
+	ReasonCode       *string               `json:"reason_code"`
+	Notes            []string              `json:"notes"`
+	P95Seconds       int                   `json:"p95_seconds"`
+	QuotaCost        int                   `json:"quota_cost"`
+	ExpiresAt        time.Time             `json:"expires_at"`
+	SnapshotMode     string                `json:"-"`
+	QuoteRequirement *string               `json:"-"`
 }
 
 const planTTL = 30 * time.Minute
@@ -165,9 +167,9 @@ func (e *Engine) LoadPlan(ctx context.Context, ws, id uuid.UUID) (*Plan, error) 
 	var params, secs []byte
 	var subject uuid.UUID
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT id, plan_hash, skill_id, skill_version, subject_id, params, sections, as_of, executable, reason_code, expires_at, snapshot_mode
+		return tx.QueryRow(ctx, `SELECT id, plan_hash, skill_id, skill_version, subject_id, params, sections, as_of, executable, reason_code, expires_at, snapshot_mode, quote_requirement
 			FROM research_plans WHERE id=$1`, id).Scan(&p.ID, &p.Hash, &p.SkillID, &p.SkillVersion, &subject, &params, &secs, &p.AsOf,
-			&p.Executable, &p.ReasonCode, &p.ExpiresAt, &p.SnapshotMode)
+			&p.Executable, &p.ReasonCode, &p.ExpiresAt, &p.SnapshotMode, &p.QuoteRequirement)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errs.NotFound()
@@ -287,9 +289,9 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 	if err != nil {
 		return uuid.Nil, err
 	}
-	sk := e.Skills[plan.SkillID]
+	sk := e.SkillVersion(plan.SkillID, plan.SkillVersion)
 	switch {
-	case plan.SnapshotMode != "fixed_legacy" && (plan.SnapshotMode != "collect_latest" || plan.SkillVersion != emquant.ObservationBriefVersion || e.Brief == nil):
+	case !e.supportsSnapshotMode(plan.SnapshotMode, plan.SkillVersion):
 		return uuid.Nil, errs.Conflict("PLAN_VERSION_MISMATCH", "该计划需要新版确认流程")
 	case plan.Hash != hash:
 		return uuid.Nil, errs.Conflict("PLAN_CHANGED", "研究计划已变更，请重新确认")
@@ -363,6 +365,19 @@ func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 		if _, err := tx.Exec(ctx, `UPDATE research_plans SET consumed_task_id=$2 WHERE id=$1`, planID, taskID); err != nil {
 			return err
 		}
+		if plan.SkillVersion == RealtimeBriefVersion {
+			// Trusted confirmation derives the immutable intent before the
+			// workspace role is restored for ordinary writes.
+			if _, err := tx.Exec(ctx, "RESET ROLE"); err != nil {
+				return err
+			}
+			if err := RegisterBriefIntent(ctx, tx, ws, taskID, 1, plan.Hash, *e.RealtimeSource); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, "SET LOCAL ROLE vera_app"); err != nil {
+				return err
+			}
+		}
 		if err := e.insertSteps(ctx, tx, ws, taskID, 1, sk, plan.Params, secs); err != nil {
 			return err
 		}
@@ -414,24 +429,32 @@ type taskRow struct {
 	Params                 Params
 	Sections               []PlanSection
 	AsOf, Deadline         time.Time
+	PreviewAt              time.Time // persisted plan/task time before a collect_latest evaluation cutoff
 	Budget                 policy.Budget
 	Snapshot               *string
 	PlanHash               string
 	SnapshotMode           string
+	Revision               int64
+	SnapshotRevision       int64
 }
 
 func (e *Engine) loadTask(ctx context.Context, ws, id uuid.UUID) (*taskRow, error) {
 	var t taskRow
 	var params, secs, budget []byte
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT t.id, t.workspace_id, t.subject_id, t.skill_id, t.skill_version, t.status, t.epoch, t.params, t.sections,
-			t.as_of, t.deadline, t.budget, t.snapshot_hash, p.plan_hash, t.snapshot_mode FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id WHERE t.id=$1`, id).
+		if err := tx.QueryRow(ctx, `SELECT t.id, t.workspace_id, t.subject_id, t.skill_id, t.skill_version, t.status, t.epoch, t.params, t.sections,
+			t.as_of, t.deadline, t.budget, coalesce(t.snapshot_hash,t.snapshot_manifest_hash), p.plan_hash, t.snapshot_mode, t.revision
+			FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id WHERE t.id=$1`, id).
 			Scan(&t.ID, &t.Workspace, &t.Subject, &t.Skill, &t.Version, &t.Status, &t.Epoch, &params, &secs, &t.AsOf, &t.Deadline, &budget,
-				&t.Snapshot, &t.PlanHash, &t.SnapshotMode)
+				&t.Snapshot, &t.PlanHash, &t.SnapshotMode, &t.Revision); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	t.PreviewAt = t.AsOf
 	_ = json.Unmarshal(params, &t.Params)
 	_ = json.Unmarshal(secs, &t.Sections)
 	_ = json.Unmarshal(budget, &t.Budget)
@@ -456,6 +479,7 @@ func (e *Engine) transition(ctx context.Context, t *taskRow, from []string, to s
 			return errStale
 		}
 		t.Status = to
+		t.Revision++
 		return event(ctx, tx, t.Workspace, t.ID, t.Epoch, to, map[string]any{"reason_code": code})
 	})
 }
@@ -632,10 +656,10 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	if t.Epoch != epoch || IsTerminal(t.Status) || t.Status == "CANCEL_REQUESTED" {
 		return nil
 	}
-	if t.SnapshotMode != "fixed_legacy" && (t.Version != emquant.ObservationBriefVersion || e.Brief == nil) {
+	if !e.supportsSnapshotMode(t.SnapshotMode, t.Version) {
 		return ErrSnapshotModeUnsupported
 	}
-	sk := e.Skills[t.Skill]
+	sk := e.SkillVersion(t.Skill, t.Version)
 	if sk == nil || sk.Version != t.Version {
 		return e.finish(ctx, t, "FAILED", "SKILL_VERSION_MISSING", "技能版本不可用")
 	}
@@ -643,9 +667,12 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	runCtx, cancel := context.WithDeadline(ctx, t.Deadline.Add(-30*time.Second))
 	defer cancel()
 	go e.watchCancel(runCtx, cancel, t)
-	if t.Version == emquant.ObservationBriefVersion {
+	switch t.Version {
+	case RealtimeBriefVersion:
+		err = e.realtimePipeline(runCtx, ctx, t, sk)
+	case emquant.ObservationBriefVersion:
 		err = e.observationPipeline(runCtx, ctx, t, sk)
-	} else {
+	default:
 		err = e.pipeline(runCtx, ctx, t, sk)
 	}
 	var ab *abstainError

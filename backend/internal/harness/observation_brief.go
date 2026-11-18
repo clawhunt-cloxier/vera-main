@@ -59,6 +59,9 @@ func ObservationBriefSkill() *Skill {
 // complete rechecks the frozen inputs and holds current license locks for each
 // model use, including cached step retries and summary/verifier calls.
 func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (json.RawMessage, model.Meta, error) {
+	if t.Version == RealtimeBriefVersion {
+		return e.completeRealtime(ctx, t, req)
+	}
 	if t.Version != emquant.ObservationBriefVersion {
 		return e.Gateway.Complete(ctx, req)
 	}
@@ -229,6 +232,17 @@ func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Pla
 }
 
 func (e *Engine) deliverTransaction(ctx context.Context, t *taskRow, fn func(pgx.Tx) error) error {
+	if t.Version == RealtimeBriefVersion {
+		return e.withRealtimeSnapshot(ctx, t, dataservice.SourceDisplay, func(tx pgx.Tx, _ emquant.QuoteView) error {
+			if _, err := tx.Exec(ctx, "SET LOCAL ROLE vera_app"); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, "SELECT set_config('app.workspace_id',$1,true)", t.Workspace.String()); err != nil {
+				return err
+			}
+			return fn(tx)
+		})
+	}
 	if t.Version != emquant.ObservationBriefVersion {
 		return db.InWorkspace(ctx, e.Pool, t.Workspace, fn)
 	}

@@ -6,8 +6,9 @@ import (
 )
 
 var (
-	ErrRateLimited = errors.New("emquant: request rate limited")
-	ErrUnavailable = errors.New("emquant: upstream unavailable")
+	ErrRateLimited  = errors.New("emquant: request rate limited")
+	ErrUnavailable  = errors.New("emquant: upstream unavailable")
+	ErrIPRestricted = errors.New("emquant: upstream access restricted by source IP")
 )
 
 // SDKError retains the vendor code for diagnosis without exposing credentials
@@ -22,5 +23,7 @@ func (e *SDKError) Error() string {
 }
 
 func (e *SDKError) Is(target error) bool {
-	return (e.Code == 10000016 && target == ErrRateLimited) || (e.Code == 10002002 && target == ErrUnavailable)
+	return (e.Code == 10000016 && target == ErrRateLimited) ||
+		(e.Code == 10002002 && target == ErrUnavailable) ||
+		(e.Code == 10000017 && target == ErrIPRestricted)
 }
