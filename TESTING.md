@@ -19,6 +19,31 @@ Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch 
 
 前端页面验收可运行 `cd web && npm ci && npx playwright install --with-deps chromium && npm run test:realtime-ui`。该命令需要下载 Playwright Chromium 及系统依赖；使用标注为模拟的 API 响应，在桌面和手机视口检查 0.4 选择、确认、冻结时间、证据展示，并回归旧 observation 计划、历史报告与取消流程，不调用真实数据厂商或模型。浏览器用例不替代真实行情时点与授权的端到端验收。
 
+### 真实部署的盘中浏览器验收（显式运行）
+
+`npm run accept:live-realtime` 通过部署网站正常选择证券、选择“交易中实时成交行情”、检查计划、提交一次任务、等待交付、打开报告和证据侧栏。脚本只观察浏览器收到的响应，不拦截、模拟或直接调用计划/任务 API；会消耗真实厂商和模型额度，并保留一项真实研究任务。它不在默认测试、`make verify` 或 CI 中运行，CI 环境显式拒绝。脚本没有实现真实厂商语义证明，成功仍依赖已核实的 TIME、交易状态、延迟及用途许可登记；非交易时段、停牌、弃权、权限不足或协议降级均为验收失败。
+
+运维先用已有测试账户登录目标站点，在仓库外的受控目录保存 Playwright `storageState`；文件须由当前用户持有且权限为 `0600`，不要提交文件、cookie、账号口令、CSRF 或授权材料。脚本不创建账户、不读取账号口令、不保存或更新登录状态，不自动重新提交失败或超时的任务。超时后应在该测试账户的正常任务页核对在途任务，避免直接重跑产生第二项研究。
+
+运行前安装已有锁定依赖与 Chromium（`cd web && npm ci && npx playwright install --with-deps chromium`），并在本机设置以下配置，在 `web/` 目录运行命令。示例站点、代码、厂商 ID/名称和路径均为占位内容，必须替换为测试环境中的实际登记值。`VERA_LIVE_MAX_AGE_MS` 必须显式取自该来源已核实的新鲜度策略；它校验**冻结时**的行情年龄，不以模型完成或查看报告的时间重新判断历史快照。操作机时钟须与服务端同步，脚本容许 5 秒差异。
+
+```sh
+export VERA_LIVE_BROWSER=1
+export VERA_LIVE_BASE_URL=https://vera-test.example.invalid
+export VERA_LIVE_STORAGE_STATE=/secure/vera-acceptance/storage-state.json
+export VERA_LIVE_STOCK_CODE=000000.SZ
+export VERA_LIVE_PROVIDER_ID=registered-provider-id
+export VERA_LIVE_PROVIDER_NAME='已登记的厂商显示名称'
+export VERA_LIVE_MAX_AGE_MS=60000
+export VERA_LIVE_TASK_TIMEOUT_MS=180000
+npm run accept:live-realtime -- --check-config
+npm run accept:live-realtime
+```
+
+`--check-config` 只离线校验配置及登录状态文件，返回 `configuration_valid` 不代表实时验收通过。缺配置、会话失效、运行错误或断言失败都返回非零退出码，不跳过或输出假成功。运行时关闭 `DEBUG`、`PWDEBUG`、`NODE_DEBUG`；脚本不输出异常原文、响应正文、报价、报告文本、用户/workspace/任务 ID，也不保存截图、trace、HAR 或视频。仅输出 JSON 验收元数据：结果/阶段/错误码、技能版本、来源校验结果、真实标记、来源与冻结时点、新鲜度、结论/证据数量和耗时。
+
+验收同时检查 `Me.synthetic=false`、报告 `synthetic=false`、计划/任务的 `realtime_trade`、0.4 媒体类型、不可混淆的预览与冻结时点、`real_time`/`fresh`、连续交易说明、报告与证据的事件/接收/可用时间完全一致及先后关系、指定厂商 ID/显示名称、归档哈希定位，以及网页中秒级时间与来源展示。当前 Evidence 没有独立 `synthetic` 或结构化交易状态字段：脚本从同一报告引用取得证据，核对来源与连续交易说明，不能把 `fresh` 当成交易状态。
+
 ## 2. 按任务补齐的测试
 
 每个任务在实现时加入真实的测试命令；任务未完成时不提供永远成功的占位脚本。
