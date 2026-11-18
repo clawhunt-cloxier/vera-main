@@ -16,6 +16,10 @@ on:
         description: Briefly stop the test site and query one real Choice snapshot for 600000.SH
         type: boolean
         default: false
+      enable_choice_latest:
+        description: Register test-site Choice latest-available research for all mainland stocks
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-test
@@ -110,6 +114,13 @@ jobs:
         run: |
           # stdin carries only the token; the script was uploaded in the previous step.
           echo "$GHCR_PAT" | ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" "GHCR_USER='${GHCR_USER}' NEW_IMAGE='${NEW_IMAGE}' bash /opt/vera/remote-deploy.sh"
+
+      - name: Enable latest-available Choice reports on the test site
+        if: github.event_name == 'workflow_dispatch' && inputs.enable_choice_latest
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "deploy@${DEPLOY_HOST}" 'docker exec vera /app/backend/vera emquant init-latest --demo-db'
 
       - name: Read Choice quote activation status
         if: github.event_name == 'workflow_dispatch' && inputs.check_choice_quote
