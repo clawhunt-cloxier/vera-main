@@ -303,7 +303,11 @@ async function run(config, progress) {
   const { chromium } = await import('@playwright/test');
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    const proxy = process.env.VERA_LIVE_HTTP_PROXY;
+    browser = await chromium.launch({
+      headless: true,
+      ...(proxy ? { proxy: { server: proxy } } : {}),
+    });
     const context = await browser.newContext({
       storageState: config.state,
       serviceWorkers: 'block',

@@ -67,7 +67,7 @@ func demo(ctx context.Context, args []string) error {
 	defer a.Close()
 	if probe {
 		if a.Brief == nil || a.Brief.Runtime == nil {
-			return errors.New("Choice probe requires the real provider")
+			return errors.New("quote probe requires the real Choice provider")
 		}
 		result, probeErr := a.Brief.Runtime.ProbeQuote(ctx, args[1])
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
