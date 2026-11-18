@@ -1,0 +1,38 @@
+name: Verify latest available report on test deployment
+description: Submit one research task with a dedicated, provisioned test session
+inputs:
+  storage-state:
+    description: Playwright storageState JSON for the test workspace
+    required: true
+outputs:
+  receipt:
+    description: Runner-local private file containing the report ID
+    value: ${{ steps.accept.outputs.receipt }}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: web
+      run: |
+        test "$GITHUB_EVENT_NAME" = workflow_dispatch
+        npm ci
+        npx playwright install --with-deps chromium
+    - id: accept
+      shell: bash
+      working-directory: web
+      env:
+        TEST_SESSION_JSON: ${{ inputs.storage-state }}
+        VERA_LIVE_BROWSER: "1"
+        VERA_LIVE_DEPLOY_ACCEPT: "1"
+        VERA_LIVE_STOCK_CODE: 600000.SH
+      run: |
+        umask 077
+        private_dir=$(mktemp -d "$RUNNER_TEMP/vera-accept.XXXXXXXX")
+        export VERA_LIVE_STORAGE_STATE="$private_dir/session.json"
+        export VERA_LIVE_PRIVATE_RECEIPT="$private_dir/report.json"
+        trap 'rm -f "$VERA_LIVE_STORAGE_STATE"' EXIT
+        printf '%s' "$TEST_SESSION_JSON" > "$VERA_LIVE_STORAGE_STATE"
+        unset TEST_SESSION_JSON
+        npm run accept:live-latest -- --check-config
+        npm run accept:live-latest
+        echo "receipt=$VERA_LIVE_PRIVATE_RECEIPT" >> "$GITHUB_OUTPUT"

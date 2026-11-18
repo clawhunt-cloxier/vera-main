@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -47,7 +47,11 @@ function integer(value, code, max) {
 // This preflight is offline. It never prints configuration or session contents.
 export function readConfig(env) {
   requireValue(env.VERA_LIVE_BROWSER === '1', 'EXPLICIT_LIVE_OPT_IN_REQUIRED');
-  requireValue(!env.CI, 'LIVE_RUN_NOT_ALLOWED_IN_CI');
+  const deployment =
+    env.GITHUB_ACTIONS === 'true' &&
+    env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
+    env.VERA_LIVE_DEPLOY_ACCEPT === '1';
+  requireValue(!env.CI || deployment, 'LIVE_RUN_NOT_ALLOWED_IN_CI');
   requireValue(!env.DEBUG && !env.PWDEBUG && !env.NODE_DEBUG, 'DEBUG_LOGGING_NOT_ALLOWED');
   let base;
   try {
@@ -515,6 +519,13 @@ async function run(config, progress) {
       'BROWSER_FLOW_INVALID'
     );
     progress.phase = 'complete';
+    if (process.env.VERA_LIVE_PRIVATE_RECEIPT) {
+      writeFileSync(
+        process.env.VERA_LIVE_PRIVATE_RECEIPT,
+        JSON.stringify({ report_id: report.id }) + '\n',
+        { flag: 'wx', mode: 0o600 }
+      );
+    }
     return {
       result: 'passed',
       quote_requirement: config.requirement,
