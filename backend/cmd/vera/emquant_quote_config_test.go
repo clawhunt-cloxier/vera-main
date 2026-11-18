@@ -150,3 +150,29 @@ func TestQuoteDatabaseSelection(t *testing.T) {
 		t.Fatal("demo flag in production")
 	}
 }
+
+func TestInitLatestTestSite(t *testing.T) {
+	pool := dbtest.New(t)
+	env := map[string]string{"VERA_ENV": "production", "EMQUANT_PROVIDER_ID": "choice-test", "EMQUANT_PRODUCT": "choice-test", "DATABASE_URL": pool.Config().ConnString()}
+	get := func(k string) string { return env[k] }
+	run := func() error { return emquantCommand(t.Context(), []string{"init-latest"}, &bytes.Buffer{}, get) }
+	if err := run(); err == nil {
+		t.Fatal("production bootstrap accepted")
+	}
+	env["VERA_ENV"] = "test"
+	for range 2 {
+		if err := run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM quote_mapping_policies q JOIN source_licenses l ON l.id=q.source_license_id WHERE l.provider_id=$1 AND l.instrument_scope='all' AND q.latency_mode='unknown' AND q.valid_until IS NULL AND l.valid_until IS NULL`, env["EMQUANT_PROVIDER_ID"]).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE provider_id=$1`, env["EMQUANT_PROVIDER_ID"]); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(); err == nil {
+		t.Fatal("revoked source reactivated")
+	}
+}

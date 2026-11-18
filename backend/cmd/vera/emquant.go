@@ -27,6 +27,7 @@ vera emquant publish --candidate UUID
 vera emquant init-brief （仅依据已核实范围显式登记真实成交简报许可）
 vera emquant quote-status [--demo-db] （只读检查行情入口与登记输入）
 vera emquant init-quote [--demo-db] （登记已核实的实时行情许可与字段映射）
+vera emquant init-latest [--demo-db] （测试站登记全市场最近可用原始快照）
 
 从已登记并验证的 Choice 产品采集一只证券行情，归档并发布候选；不创建研究快照。
 数据库、SDK、账号、对象存储、产品及限流配置通过环境变量提供，详见 docs/EMQUANT_INTEGRATION.md。
@@ -110,13 +111,16 @@ func emquantCommand(ctx context.Context, args []string, out io.Writer, get func(
 	if args[0] == "init-brief" {
 		return emquantInitBrief(ctx, out, get)
 	}
-	if args[0] == "init-quote" || args[0] == "quote-status" {
+	if args[0] == "init-quote" || args[0] == "quote-status" || args[0] == "init-latest" {
 		get, err := quoteDatabaseEnv(args[1:], get)
 		if err != nil {
 			return err
 		}
 		if args[0] == "quote-status" {
 			return emquantQuoteStatus(ctx, out, get)
+		}
+		if args[0] == "init-latest" {
+			return emquantInitLatest(ctx, out, get)
 		}
 		return emquantInitQuote(ctx, out, get)
 	}

@@ -32,7 +32,7 @@ type quoteInitConfig struct {
 	MaxAge          time.Duration
 	Evidence        string
 	VerifiedBy      string
-	ValidUntil      time.Time
+	ValidUntil      *time.Time
 }
 
 func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) string) error {
@@ -40,6 +40,28 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 	if err != nil {
 		return err
 	}
+	return registerQuoteConfig(ctx, out, get, c)
+}
+
+func emquantInitLatest(ctx context.Context, out io.Writer, get func(string) string) error {
+	if env := get("VERA_ENV"); env != "test" && env != "development" {
+		return errors.New("init-latest requires test or development")
+	}
+	c := quoteInitConfig{
+		ProviderID: get("EMQUANT_PROVIDER_ID"), Product: get("EMQUANT_PRODUCT"),
+		Fields: []string{"TIME", "NOW"}, LatencyMode: "unknown", MaxAge: 24 * time.Hour,
+		Evidence:      "test operator scope and uses: docs/handoffs/2026-11-12-emquant-probe-codex.md and docs/EMQUANT_INTEGRATION.md",
+		VerifiedBy:    "vera-test-operator/init-latest",
+		TimeEvidence:  "docs/EMQUANT_INTEGRATION.md: Choice Dates + raw TIME interpreted as Shanghai HHMMSS",
+		PriceEvidence: "docs/EMQUANT_INTEGRATION.md: raw Choice NOW for mainland A shares in CNY",
+	}
+	if c.ProviderID == "" || c.Product == "" {
+		return errors.New("quote provider and product are required")
+	}
+	return registerQuoteConfig(ctx, out, get, c)
+}
+
+func registerQuoteConfig(ctx context.Context, out io.Writer, get func(string) string, c quoteInitConfig) error {
 	pool, err := db.Open(ctx, get("DATABASE_URL"))
 	if err != nil {
 		return err
@@ -51,6 +73,9 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 
 	var licenseID, policyID uuid.UUID
 	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, c.ProviderID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing)
 			VALUES($1,'Choice / 东方财富','vendor',true) ON CONFLICT DO NOTHING`, c.ProviderID); err != nil {
 			return err
@@ -63,11 +88,27 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 		if !eligible {
 			return errors.New("existing provider is disabled, synthetic or model use revoked")
 		}
+		if c.ValidUntil == nil {
+			var conflict bool
+			err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM source_licenses l
+			    LEFT JOIN quote_mapping_policies q ON q.source_license_id=l.id
+			    WHERE l.provider_id=$1 AND l.product_code=$2 AND l.dataset_id='mkt.intraday_quote'
+			      AND l.vendor_method='CSQSNAPSHOT' AND (l.evidence_ref<>$3 OR l.revoked_at IS NOT NULL
+			        OR NOT (l.allow_storage AND l.allow_display AND l.allow_model_processing)
+			        OR l.valid_until IS NOT NULL OR q.revoked_at IS NOT NULL OR q.valid_until IS NOT NULL
+			        OR q.verified_by<>$4))`, c.ProviderID, c.Product, c.Evidence, c.VerifiedBy).Scan(&conflict)
+			if err != nil {
+				return err
+			}
+			if conflict {
+				return errors.New("existing Choice governance requires operator review")
+			}
+		}
 		err := tx.QueryRow(ctx, `SELECT id FROM source_licenses
 			WHERE provider_id=$1 AND product_code=$2 AND dataset_id='mkt.intraday_quote'
 			  AND vendor_method='CSQSNAPSHOT' AND field_names=$3 AND instrument_scope='all'
 			  AND cardinality(instrument_codes)=0 AND evidence_ref=$4 AND verified_by=$5
-			  AND valid_until=$6 AND revoked_at IS NULL AND allow_storage AND allow_display AND allow_model_processing
+			  AND valid_until IS NOT DISTINCT FROM $6 AND revoked_at IS NULL AND allow_storage AND allow_display AND allow_model_processing
 			ORDER BY verified_at DESC, id DESC LIMIT 1`, c.ProviderID, c.Product, c.Fields, c.Evidence, c.VerifiedBy, c.ValidUntil).Scan(&licenseID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			licenseID = uuid.New()
@@ -84,7 +125,7 @@ func emquantInitQuote(ctx context.Context, out io.Writer, get func(string) strin
 			WHERE source_license_id=$1 AND dataset_id='mkt.intraday_quote' AND mapping_name='emquant-quote'
 			  AND mapping_version=1 AND time_convention='hhmmss-asia-shanghai' AND time_evidence_ref=$2 AND price_unit='CNY'
 			  AND price_evidence_ref=$3 AND latency_mode=$4 AND latency_evidence_ref IS NOT DISTINCT FROM $5
-			  AND max_age_ms=$6 AND verified_by=$7 AND valid_until=$8 AND revoked_at IS NULL
+			  AND max_age_ms=$6 AND verified_by=$7 AND valid_until IS NOT DISTINCT FROM $8 AND revoked_at IS NULL
 			  AND status_indicator IS NOT DISTINCT FROM $9 AND status_evidence_ref IS NOT DISTINCT FROM $10
 			  AND status_mapping IS NOT DISTINCT FROM $11
 			ORDER BY verified_at DESC, id DESC LIMIT 1`, licenseID, c.TimeEvidence, c.PriceEvidence, c.LatencyMode,
@@ -213,10 +254,11 @@ func readQuoteInitConfig(get func(string) string) (quoteInitConfig, error) {
 	if err != nil {
 		return quoteInitConfig{}, err
 	}
-	c.ValidUntil, err = time.Parse(time.RFC3339, validUntilText)
-	if err != nil || !c.ValidUntil.After(time.Now()) {
+	until, err := time.Parse(time.RFC3339, validUntilText)
+	if err != nil || !until.After(time.Now()) {
 		return quoteInitConfig{}, errors.New("invalid or expired EMQUANT_QUOTE_LICENSE_VALID_UNTIL")
 	}
+	c.ValidUntil = &until
 	return c, nil
 }
 
