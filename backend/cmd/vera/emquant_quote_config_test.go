@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -95,5 +96,57 @@ func TestEmquantInitQuoteRegistersIdempotently(t *testing.T) {
 	var auditCount int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action='emquant.quote.init'`).Scan(&auditCount); err != nil || auditCount != 3 {
 		t.Fatalf("expected three audited attempts, count=%d err=%v", auditCount, err)
+	}
+}
+
+func TestQuoteStatusSeparatesDatabaseFromRegistrationInputs(t *testing.T) {
+	ctx := t.Context()
+	pool := dbtest.New(t)
+	env := quoteInitEnv(t)
+	env["DATABASE_URL"] = pool.Config().ConnString()
+	get := func(key string) string { return env[key] }
+	check := func(ready bool, inputs string) {
+		t.Helper()
+		var out bytes.Buffer
+		if err := emquantCommand(ctx, []string{"quote-status"}, &out, get); err != nil {
+			t.Fatal(err)
+		}
+		var status quoteStatus
+		if err := json.Unmarshal(out.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status.Latest != ready || status.Realtime != ready || status.Inputs != inputs || strings.Contains(out.String(), env["EMQUANT_QUOTE_LICENSE_EVIDENCE"]) {
+			t.Fatalf("unexpected or unsafe status")
+		}
+		if inputs == "incomplete" && (len(status.Missing) != 1 || status.Missing[0] != "EMQUANT_QUOTE_TIME_EVIDENCE") {
+			t.Fatal("missing input was not identified")
+		}
+	}
+	check(false, "valid")
+	if err := emquantInitQuote(ctx, &bytes.Buffer{}, get); err != nil {
+		t.Fatal(err)
+	}
+	delete(env, "EMQUANT_QUOTE_TIME_EVIDENCE")
+	check(true, "incomplete")
+}
+
+func TestQuoteDatabaseSelection(t *testing.T) {
+	env := map[string]string{"VERA_ENV": "test", "VERA_DEMO_PG_PORT": "55445"}
+	get := func(k string) string { return env[k] }
+	if _, err := quoteDatabaseEnv(nil, get); err == nil {
+		t.Fatal("implicit fallback")
+	}
+	selected, err := quoteDatabaseEnv([]string{"--demo-db"}, get)
+	if err != nil || selected("DATABASE_URL") != demoDatabaseURL(55445) {
+		t.Fatal("wrong embedded DB")
+	}
+	env["DATABASE_URL"] = "configured-database"
+	selected, err = quoteDatabaseEnv([]string{"--demo-db"}, get)
+	if err != nil || selected("DATABASE_URL") != env["DATABASE_URL"] {
+		t.Fatal("explicit database lost")
+	}
+	env["VERA_ENV"] = "production"
+	if _, err := quoteDatabaseEnv([]string{"--demo-db"}, get); err == nil {
+		t.Fatal("demo flag in production")
 	}
 }

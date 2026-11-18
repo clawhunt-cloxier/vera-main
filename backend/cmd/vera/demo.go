@@ -29,9 +29,9 @@ func demo(ctx context.Context) error {
 		home, _ := os.UserCacheDir()
 		dir = filepath.Join(home, "vera-demo")
 	}
-	port := 55432
-	if p := os.Getenv("VERA_DEMO_PG_PORT"); p != "" {
-		_, _ = fmt.Sscanf(p, "%d", &port)
+	port, err := demoDatabasePort(os.Getenv)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -44,7 +44,7 @@ func demo(ctx context.Context) error {
 	}
 	defer func() { _ = pg.Stop() }()
 	setDefault("VERA_ENV", "development")
-	setDefault("DATABASE_URL", fmt.Sprintf("postgres://vera:vera-demo@127.0.0.1:%d/vera?sslmode=disable", port))
+	setDefault("DATABASE_URL", demoDatabaseURL(port))
 	setDefault("VERA_DEV_OIDC", "true")
 	setDefault("VERA_REGISTRATION_ENABLED", "true") // demo opens workspaces with invites
 	setDefault("VERA_COOKIE_SECURE", "false")

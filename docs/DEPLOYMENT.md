@@ -72,7 +72,9 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 部署前执行新增迁移 00019；API 与 worker 都必须支持 `1.1.0-demo.3`。先部署新版镜像并确认旧 observation 模式仍可启动；然后在正在运行的 `vera` 容器内使用一次性环境变量执行 `vera emquant init-quote`，让同一数据库登记或复用一个覆盖全部 A 股的 `source_licenses` 与 `quote_mapping_policies` 行。治理身份由数据库生成并留在治理层，应用和部署配置不保存逐标的实例。不要用 `docker compose run` 执行初始化，它会启动第二个内嵌 PostgreSQL 实例。未登记有效 all-scope Choice 行情治理行时继续提供 observation.v1；Choice SDK 登录成功不能替代授权、字段时区、单位、延迟、新鲜度阈值和状态映射核验。
 
-标准测试镜像中的可执行文件是 `/app/backend/vera`。通过 `docker compose exec -T vera` 启动的管理命令不会继承运行中 `vera demo` 进程启动时设置的默认 `DATABASE_URL`。须从受控部署环境向初始化命令提供同一数据库连接及登记材料；不要在仓库或验收日志中记录连接串。镜像更新成功和 `/readyz` 返回 200 都不代表已完成登记。登记后，用已登录会话检查 `/api/v1/me` 是否声明 `research_protocol=v0.4`。
+测试容器中执行 `docker compose exec -T vera /app/backend/vera emquant quote-status --demo-db` 可只读核对：`latest_available`、`realtime_trade` 表示数据库当前允许的选项；`registration_inputs` 和 `missing_inputs` 只说明本次进程是否具备执行初始化所需的输入。一次性登记材料移除后，数据库中的有效许可仍可使用；输入齐全也不代表材料已核实。手动发布时可选 `check_choice_quote` 执行同一检查。命令不登录厂商、不改数据库，不输出配置值。仅在 test/development 的演示服务使用 `--demo-db`，它与 `vera demo` 使用同一连接选择规则（优先已有 `DATABASE_URL`）。其他运行模式须显式提供数据库连接。
+
+核实登记材料后，在同一容器用 `emquant init-quote --demo-db` 登记，再检查已登录会话的 `/api/v1/me` 是否声明 `research_protocol=v0.4`。镜像更新成功和 `/readyz` 返回 200 都不代表已完成登记。
 
 0.4 前端默认选择 `latest_available`，仅当策略支持时可显式改为 `realtime_trade`。选择实时成交时要求连续交易状态、已确认实时性质和满足阈值的事件时间；选择最近可用时保留实际延迟和交易状态，仍受登记的新鲜度阈值限制。采集失败、权限缺失或过期不会回退为 observation 或 fixture。回滚可关闭新计划入口，但须保留迁移和已经冻结的清单，并让支持该版本的 worker 处理在途任务。
 
