@@ -7,7 +7,8 @@
 
 int csqsnapshot(const char *codes, const char *fields, const char *options, eqdata **out) {
  (void)options;
- if (strcmp(fields, "TIME,NOW,TESTSTATUS")) return 99;
+ int count = !strcmp(fields, "TIME,NOW") ? 2 : 3;
+ if (count == 3 && strcmp(fields, "TIME,NOW,TESTSTATUS")) return 99;
  time_t now = time(NULL) + 8 * 3600;
  if (!strcmp(codes,"600002.SH")) now -= 120;
  struct tm local;
@@ -22,6 +23,6 @@ int csqsnapshot(const char *codes, const char *fields, const char *options, eqda
  values[1]=(eqvariant){.type=11,.value.d=10.125};
  values[2]=(eqvariant){.type=13,.text={"OPEN",5}};
  if (!strcmp(codes,"600001.SH")) values[2]=(eqvariant){.type=13,.text={"CLOSED",7}};
- data=(eqdata){{code,1},{indicators,3},{dates,1},{values,3}}; *out=&data;
+ data=(eqdata){{code,1},{indicators,count},{dates,1},{values,count}}; *out=&data;
  return 0;
 }

@@ -5,6 +5,24 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const media = 'application/vnd.vera.v0.4+json';
 const skillVersion = '1.1.0-demo.3';
 const dataset = 'mkt.intraday_quote';
+// Separate acceptance targets: latest checks the initial TIME,NOW-only policy;
+// strict realtime still requires a verified continuous-trading snapshot.
+const modes = {
+  realtime_trade: {
+    latency: 'real_time',
+    status: 'fresh',
+    state: '连续交易',
+    freshnessLabel: '符合新鲜度策略',
+    latencyLabel: '实时传输',
+  },
+  latest_available: {
+    latency: 'unknown',
+    status: 'unknown',
+    state: '未确认',
+    freshnessLabel: '新鲜度未知',
+    latencyLabel: '延迟性质未知',
+  },
+};
 const terminals = new Set([
   'COMPLETED',
   'ABSTAINED',
@@ -174,16 +192,17 @@ export function validateReport(report, task, plan, config, confirmedAt, observed
     'UNEXPECTED_SOURCE_COUNT'
   );
   const source = report.source_freshness[0];
+  const expected = modes[config.requirement];
   requireValue(
     source.dataset_id === dataset &&
       source.provider === config.provider &&
-      source.latency_mode === 'real_time' &&
-      source.status === 'fresh',
-    'SOURCE_NOT_REALTIME'
+      source.latency_mode === expected.latency &&
+      source.status === expected.status,
+    'SOURCE_MODE_MISMATCH'
   );
   requireValue(
-    typeof source.note === 'string' && source.note.includes('交易状态：连续交易'),
-    'CONTINUOUS_TRADING_NOT_CONFIRMED'
+    typeof source.note === 'string' && source.note.includes('交易状态：' + expected.state),
+    'SOURCE_TRADING_STATE_MISMATCH'
   );
   requireValue(
     source.published_at === null && source.period === null,
@@ -242,7 +261,8 @@ export function validateEvidence(evidence, source, evidenceID, config) {
     evidence.id === evidenceID &&
       evidence.dataset_id === dataset &&
       evidence.provider === config.provider &&
-      evidence.latency_mode === 'real_time',
+      evidence.latency_mode === modes[config.requirement].latency &&
+      evidence.latency_mode === source.latency_mode,
     'EVIDENCE_SOURCE_MISMATCH'
   );
   requireValue(
@@ -268,7 +288,8 @@ export function validateEvidence(evidence, source, evidenceID, config) {
     'ARCHIVE_LOCATOR_MISSING'
   );
   requireValue(
-    typeof evidence.excerpt === 'string' && evidence.excerpt.includes('交易状态 连续交易'),
+    typeof evidence.excerpt === 'string' &&
+      evidence.excerpt.includes('交易状态 ' + modes[config.requirement].state),
     'EVIDENCE_TRADING_STATE_MISSING'
   );
 }
@@ -350,10 +371,13 @@ async function run(config, progress) {
     await page.getByRole('combobox', { name: '搜索研究对象' }).fill(config.code);
     await page.getByRole('option').filter({ hasText: config.code }).click();
     requireValue(
-      await page.getByRole('button', { name: '发起研究', exact: true }).isDisabled(),
-      'QUOTE_SELECTION_NOT_REQUIRED'
+      await page.getByRole('radio', { name: '最近可用行情', exact: true }).isChecked(),
+      'DEFAULT_QUOTE_REQUIREMENT_MISMATCH'
     );
-    await page.getByRole('radio', { name: '交易中实时成交行情', exact: true }).check();
+    const strict = config.requirement === 'realtime_trade';
+    const radio = page.getByRole('radio', { name: '交易中实时成交行情', exact: true });
+    if (strict) await radio.check();
+    else requireValue(await radio.isDisabled(), 'UNVERIFIED_REALTIME_OPTION_ENABLED');
 
     progress.phase = 'plan';
     let start = responses.length;
@@ -361,7 +385,7 @@ async function run(config, progress) {
     const planResponse = await responseAfter('/api/v1/research-plans', 'POST', start);
     const input = planResponse.request().postDataJSON();
     requireValue(
-      input.skill_id === 'stock_analysis' && input.quote_requirement === 'realtime_trade',
+      input.skill_id === 'stock_analysis' && input.quote_requirement === config.requirement,
       'REQUEST_INTENT_MISMATCH'
     );
     const result = await read(planResponse);
@@ -376,7 +400,7 @@ async function run(config, progress) {
     requireValue(
       plan.skill_version === skillVersion &&
         plan.snapshot_mode === 'collect_latest' &&
-        plan.quote_requirement === 'realtime_trade' &&
+        plan.quote_requirement === config.requirement &&
         plan.executable === true,
       'REALTIME_PLAN_NOT_EXECUTABLE'
     );
@@ -394,7 +418,11 @@ async function run(config, progress) {
       .getByRole('heading', { name: '研究计划：' + plan.subject.name, exact: true })
       .waitFor();
     requireValue(
-      (await page.locator('main').innerText()).includes('若无法核实交易中实时成交条件，任务将弃权'),
+      (await page.locator('main').innerText()).includes(
+        strict
+          ? '若无法核实交易中实时成交条件，任务将弃权'
+          : '最近可用行情可能是延迟、盘后或休市数据'
+      ),
       'PLAN_REALTIME_NOTICE_MISSING'
     );
 
@@ -426,7 +454,7 @@ async function run(config, progress) {
     requireValue(
       task.id === taskID &&
         task.subject.id === plan.subject.id &&
-        task.quote_requirement === 'realtime_trade' &&
+        task.quote_requirement === config.requirement &&
         task.snapshot_mode === 'collect_latest' &&
         task.report_ref?.version === 1,
       'TASK_INTENT_MISMATCH'
@@ -457,9 +485,9 @@ async function run(config, progress) {
         limits.includes(displayTime(source[field]))
       ) &&
         limits.includes(config.provider) &&
-        limits.includes('符合新鲜度策略') &&
-        limits.includes('实时传输') &&
-        limits.includes('交易状态：连续交易'),
+        limits.includes(modes[config.requirement].freshnessLabel) &&
+        limits.includes(modes[config.requirement].latencyLabel) &&
+        limits.includes('交易状态：' + modes[config.requirement].state),
       'SOURCE_METADATA_NOT_DISPLAYED'
     );
 
@@ -478,8 +506,8 @@ async function run(config, progress) {
         panelText.includes(displayTime(source[field]))
       ) &&
         panelText.includes(config.provider) &&
-        panelText.includes('实时传输') &&
-        panelText.includes('交易状态 连续交易'),
+        panelText.includes(modes[config.requirement].latencyLabel) &&
+        panelText.includes('交易状态 ' + modes[config.requirement].state),
       'EVIDENCE_METADATA_NOT_DISPLAYED'
     );
     requireValue(
@@ -489,6 +517,7 @@ async function run(config, progress) {
     progress.phase = 'complete';
     return {
       result: 'passed',
+      quote_requirement: config.requirement,
       skill_version: skillVersion,
       dataset,
       synthetic: false,
@@ -517,10 +546,15 @@ async function main() {
   const progress = { phase: 'configuration' };
   try {
     requireValue(
-      process.argv.slice(2).every((arg) => arg === '--check-config') && process.argv.length <= 3,
+      process.argv
+        .slice(2)
+        .every((arg) => arg === '--check-config' || arg === '--latest-available'),
       'UNKNOWN_ARGUMENT'
     );
     const config = readConfig(process.env);
+    config.requirement = process.argv.includes('--latest-available')
+      ? 'latest_available'
+      : 'realtime_trade';
     const result = process.argv.includes('--check-config')
       ? { result: 'configuration_valid', live_run: false }
       : await run(config, progress);

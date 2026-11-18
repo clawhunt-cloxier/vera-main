@@ -48,7 +48,7 @@ func TestReadQuoteInitConfigAllowsUnknownLatestAvailable(t *testing.T) {
 	env["EMQUANT_QUOTE_STATUS_INDICATOR"] = ""
 	env["EMQUANT_QUOTE_STATUS_EVIDENCE"] = ""
 	env["EMQUANT_QUOTE_STATUS_MAPPING"] = ""
-	env["EMQUANT_QUOTE_LATENCY_MODE"] = "unknown"
+	delete(env, "EMQUANT_QUOTE_LATENCY_MODE")
 	env["EMQUANT_QUOTE_LATENCY_EVIDENCE"] = ""
 	config, err := readQuoteInitConfig(func(key string) string { return env[key] })
 	if err != nil {

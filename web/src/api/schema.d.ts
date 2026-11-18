@@ -502,6 +502,8 @@ export interface components {
              * @enum {string}
              */
             research_protocol?: "observation.v1" | "v0.4";
+            /** @description 仅当全市场行情策略支持实时成交要求时为 true；缺省不开放此入口，实际证券的行情仍须在采集时核验。 */
+            realtime_trade_available?: boolean;
         };
         Cancel: {
             expected_revision: number;

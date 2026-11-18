@@ -55,15 +55,6 @@ func requireBriefSource(ctx context.Context, tx pgx.Tx, source BriefQuoteSource,
 	if err != nil {
 		return fmt.Errorf("harness: Choice quote unavailable: %w", err)
 	}
-	if requirement == string(emquant.QuoteRealtimeTrade) {
-		hasContinuous := false
-		for _, value := range resolved.Policy.StatusMapping {
-			hasContinuous = hasContinuous || value == "continuous"
-		}
-		if resolved.Policy.LatencyMode != "real_time" || resolved.Policy.StatusIndicator == "" || !hasContinuous {
-			return errors.New("harness: realtime quote requires verified latency and continuous trading status")
-		}
-	}
 	for _, use := range []dataservice.SourceUse{dataservice.SourceStorage, dataservice.SourceDisplay, dataservice.SourceModel} {
 		if err := dataservice.RequireSourceUse(ctx, tx, resolved.Grant(use, code)); err != nil {
 			return fmt.Errorf("harness: Choice quote %s authorization unavailable: %w", use, err)

@@ -2362,6 +2362,10 @@
               "v0.4"
             ],
             "description": "当前部署支持的研究协议；v0.4 要求创建计划时明确 quote_requirement。"
+          },
+          "realtime_trade_available": {
+            "type": "boolean",
+            "description": "仅当全市场行情策略支持实时成交要求时为 true；缺省不开放此入口，实际证券的行情仍须在采集时核验。"
           }
         },
         "required": [

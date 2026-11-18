@@ -152,6 +152,14 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
     { width: 390, height: 844 },
   ]) {
     await t.test(`${viewport.width}px`, async () => {
+      const allowRealtime = viewport.width === 1280;
+      const selectedPlan = {
+        ...plan,
+        quote_requirement: allowRealtime ? 'realtime_trade' : 'latest_available',
+      };
+      const selectedSource = allowRealtime
+        ? freshness
+        : { ...freshness, latency_mode: 'unknown', status: 'unknown', note: '交易状态：未确认' };
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
       page.setDefaultTimeout(10000);
@@ -175,38 +183,55 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
             synthetic: true,
             display_name: '模拟验收',
             research_protocol: 'v0.4',
+            realtime_trade_available: allowRealtime,
           };
         else if (path === '/api/v1/skills') body = { items: [] };
         else if (path === '/api/v1/research-plans' && request.method() === 'POST') {
           assert.equal(request.headers()['content-type'], media);
           assert.equal(request.headers().accept, media);
-          assert.equal(request.postDataJSON().quote_requirement, 'realtime_trade');
-          body = { kind: 'plan', plan, candidates: [], unsupported_reason: null, suggestions: [] };
-        } else if (path === '/api/v1/research-plans/mock-plan') body = plan;
+          assert.equal(request.postDataJSON().quote_requirement, selectedPlan.quote_requirement);
+          body = {
+            kind: 'plan',
+            plan: selectedPlan,
+            candidates: [],
+            unsupported_reason: null,
+            suggestions: [],
+          };
+        } else if (path === '/api/v1/research-plans/mock-plan') body = selectedPlan;
         else if (path === '/api/v1/research-tasks' && request.method() === 'POST') {
           assert.equal(request.headers()['content-type'], media);
           assert.equal(request.postDataJSON().plan_hash, plan.plan_hash);
           body = task;
         } else if (path === '/api/v1/research-tasks') body = { items: [] };
         else if (path === '/api/v1/research-tasks/mock-task') body = task;
-        else if (path === '/api/v1/reports/mock-report/versions/1') body = report;
-        else if (path === '/api/v1/evidence/mock-evidence') body = evidence;
+        else if (path === '/api/v1/reports/mock-report/versions/1')
+          body = { ...report, source_freshness: [selectedSource] };
+        else if (path === '/api/v1/evidence/mock-evidence')
+          body = {
+            ...evidence,
+            latency_mode: selectedSource.latency_mode,
+            basis: selectedSource.note,
+          };
         else throw new Error(`Unexpected test request ${path}`);
         await route.fulfill({ contentType: media, body: JSON.stringify(body) });
       });
       await page.goto(`${origin}/app`);
       await page.getByLabel('描述你想要的研究').fill('分析模拟验收公司');
       assert.equal(
-        await page.getByRole('button', { name: '开始研究', exact: true }).isDisabled(),
+        await page.getByRole('radio', { name: '最近可用行情', exact: true }).isChecked(),
         true
       );
-      await page.getByRole('radio', { name: '交易中实时成交行情', exact: true }).check();
+      const strict = page.getByRole('radio', { name: '交易中实时成交行情', exact: true });
+      if (allowRealtime) await strict.check();
+      else assert.equal(await strict.isDisabled(), true);
       await page.getByRole('button', { name: '开始研究', exact: true }).click();
       await page.getByRole('heading', { name: '研究计划：模拟验收公司', exact: true }).waitFor();
       assert.match(await page.locator('main').innerText(), /计划预览时间/);
       assert.match(
         await page.locator('main').innerText(),
-        /若无法核实交易中实时成交条件，任务将弃权/
+        allowRealtime
+          ? /若无法核实交易中实时成交条件，任务将弃权/
+          : /最近可用行情可能是延迟、盘后或休市数据/
       );
       await page.getByRole('button', { name: '提交任务', exact: true }).click();
       await page.getByRole('link', { name: '查看报告', exact: true }).click();
@@ -220,6 +245,7 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
         /14:00:01[\s\S]*14:00:02[\s\S]*14:00:03/
       );
       await page.getByRole('button', { name: '查看证据 1', exact: true }).click();
+      if (!allowRealtime) assert.match(await page.locator('#limits').innerText(), /延迟性质未知/);
       await page.getByText('模拟行情证据', { exact: true }).waitFor();
       assert.match(
         await page.getByTestId('evidence-panel').innerText(),

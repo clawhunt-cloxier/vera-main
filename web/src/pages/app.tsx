@@ -39,7 +39,9 @@ export function App() {
     refetchInterval: 5000,
   });
   const [text, setText] = useState('');
-  const [quoteRequirement, setQuoteRequirement] = useState<QuoteRequirement | ''>('');
+  const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
+  const allowRealtime = me.data?.realtime_trade_available === true;
+  const quoteRequirement = allowRealtime ? selection : 'latest_available';
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
@@ -136,7 +138,11 @@ export function App() {
                   <span className="muted">{text.length}/500</span>
                 </div>
                 {realtime && (
-                  <QuoteRequirementField value={quoteRequirement} onChange={setQuoteRequirement} />
+                  <QuoteRequirementField
+                    value={quoteRequirement}
+                    onChange={setQuoteRequirement}
+                    allowRealtime={allowRealtime}
+                  />
                 )}
                 <div className="actions">
                   <button
@@ -271,7 +277,9 @@ export function Quick({ skill }: { skill: SkillId }) {
   });
   const [subject, setSubject] = useState<Entity | null>(null);
   const [mode, setMode] = useState('');
-  const [quoteRequirement, setQuoteRequirement] = useState<QuoteRequirement | ''>('');
+  const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
+  const allowRealtime = me.data?.realtime_trade_available === true;
+  const quoteRequirement = allowRealtime ? selection : 'latest_available';
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
@@ -320,7 +328,11 @@ export function Quick({ skill }: { skill: SkillId }) {
           </label>
         )}
         {realtime && (
-          <QuoteRequirementField value={quoteRequirement} onChange={setQuoteRequirement} />
+          <QuoteRequirementField
+            value={quoteRequirement}
+            onChange={setQuoteRequirement}
+            allowRealtime={allowRealtime}
+          />
         )}
         <button
           type="submit"

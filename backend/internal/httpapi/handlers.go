@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -32,8 +31,13 @@ func (s *Server) meBody(r *http.Request) (Me, error) {
 	_ = s.Pool.QueryRow(r.Context(), `SELECT display_name FROM users WHERE id=$1`, p.UserID).Scan(&name)
 	me := Me{UserID: p.UserID, WorkspaceID: p.WorkspaceID, CSRF: p.CSRF, Persona: p.Persona, Onboarded: p.WorkspaceID != nil,
 		Synthetic: s.Synthetic, DisplayName: name}
-	if s.Engine.RealtimeEnabled() {
+	quote, err := s.quoteCapabilities(r.Context())
+	if err != nil {
+		return me, err
+	}
+	if quote.Latest {
 		me.ResearchProtocol = "v0.4"
+		me.RealtimeTradeAvailable = quote.Realtime
 	} else if s.Engine.Brief != nil {
 		me.ResearchProtocol = "observation.v1"
 	}
@@ -104,14 +108,22 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	queryCode := strings.ToUpper(q)
 	for _, e := range ents {
+		if s.Engine.Brief != nil && (kind == "" || kind == "stock") {
+			// The local index is fuzzy. A near match must not mask a new
+			// qualified code; a bare code needs all vendor market candidates.
+			if isStockCode(q) || (emquantBriefCodeLike(queryCode) && (e.Kind != "stock" || e.Code != queryCode)) {
+				continue
+			}
+		}
 		items = append(items, toEntity(e, s.Engine.Skills))
 	}
 
 	// If local search found nothing and we have a real vendor, query Choice in real-time
 	if len(items) == 0 && s.Engine.Brief != nil {
 		if vendorEnts, err := s.searchVendorStocks(r, q, kind); err != nil {
-			slog.Warn("vendor stock search failed", "query", q, "err", err)
+			return errs.Unavailable("STOCK_SEARCH_UNAVAILABLE", "证券搜索暂时不可用，请稍后重试")
 		} else {
 			for _, e := range vendorEnts {
 				items = append(items, toEntity(e, s.Engine.Skills))
@@ -154,15 +166,18 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 	}
 	runtime := s.Engine.Brief.Runtime
 	if runtime == nil {
-		return nil, nil
+		return nil, errors.New("stock search runtime unavailable")
 	}
 
 	var table emquant.Table
 	colName, colCode := -1, -1
+	queryCode := strings.ToUpper(q)
+	qualified := emquantBriefCodeLike(queryCode)
+	codeLookup := qualified || isStockCode(q)
 
 	switch {
-	case isStockCode(q):
-		t, _, err := runtime.CollectStockCodeCandidates(r.Context(), q)
+	case codeLookup:
+		t, _, err := runtime.CollectStockCodeCandidates(r.Context(), queryCode[:6])
 		if err != nil {
 			return nil, err
 		}
@@ -171,9 +186,6 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 			if strings.EqualFold(col, "FULLCODES") {
 				colCode = i
 			}
-		}
-		if colCode == -1 && len(table.Columns) > 0 {
-			colCode = 0
 		}
 	case isStockName(q):
 		t, _, err := runtime.CollectStockNameCandidates(r.Context(), q)
@@ -193,8 +205,11 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 		return nil, nil
 	}
 
-	if table.Rows == 0 || len(table.Columns) == 0 {
+	if table.Rows == 0 {
 		return nil, nil
+	}
+	if len(table.Columns) == 0 || colCode < 0 || (!codeLookup && colName < 0) || table.Rows != len(table.Values)/len(table.Columns) || len(table.Values)%len(table.Columns) != 0 {
+		return nil, emquant.ErrShape
 	}
 
 	numCols := len(table.Columns)
@@ -203,32 +218,39 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 
 	for row := 0; row < table.Rows; row++ {
 		base := row * numCols
-		var name, code string
+		var name string
 		if colName >= 0 && base+colName < len(table.Values) {
 			name, _ = table.Values[base+colName].Value.(string)
 		}
-		if colCode >= 0 && base+colCode < len(table.Values) {
-			rawCode, _ := table.Values[base+colCode].Value.(string)
-			if idx := strings.Index(rawCode, ","); idx >= 0 {
-				rawCode = rawCode[:idx]
+		rawCode, _ := table.Values[base+colCode].Value.(string)
+		for _, code := range matchedSearchCodes(rawCode, queryCode, codeLookup) {
+			if seen[code] {
+				continue
 			}
-			code = strings.TrimSpace(rawCode)
+			seen[code] = true
+			label := name
+			if label == "" {
+				label = code
+			}
+			e, err := s.Store.UpsertSearchEntity(r.Context(), "stock", code, label, nil)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, e)
 		}
-		if name == "" && code != "" {
-			name = strings.Split(code, ".")[0]
-		}
-		if code == "" || seen[code] || !emquantBriefCodeLike(code) {
-			continue
-		}
-		seen[code] = true
-		e, err := s.Store.UpsertSearchEntity(r.Context(), "stock", code, name, nil)
-		if err != nil {
-			slog.Warn("failed to upsert vendor search entity", "code", code, "err", err)
-			continue
-		}
-		out = append(out, e)
 	}
 	return out, nil
+}
+
+func matchedSearchCodes(raw, query string, codeLookup bool) []string {
+	var codes []string
+	for _, part := range strings.Split(raw, ",") {
+		code := strings.ToUpper(strings.TrimSpace(part))
+		if emquantBriefCodeLike(code) && (!codeLookup || query == code || query == code[:6]) {
+			codes = append(codes, code)
+		}
+	}
+	return codes
 }
 
 // emquantBriefCodeLike checks that a code looks like a qualified A-share code (NNNNNN.XX).

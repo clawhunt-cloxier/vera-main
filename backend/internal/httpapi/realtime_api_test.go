@@ -32,7 +32,7 @@ func realtimeAPIEnv(t *testing.T) (*env, uuid.UUID) {
 		source := harness.BriefQuoteSource{ProviderID: "api-test", Product: "synthetic-product"}
 		var licenseID, policyID uuid.UUID
 		if err := e.Pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing)
-		VALUES('api-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TRADESTATUS'],'listed',ARRAY['600000.SH'],'synthetic-evidence','synthetic-test',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&licenseID); err != nil {
+		VALUES('api-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TRADESTATUS'],'all','{}','synthetic-evidence','synthetic-test',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&licenseID); err != nil {
 			t.Fatal(err)
 		}
 		if err := e.Pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,latency_evidence_ref,max_age_ms,verified_by,verified_at,valid_from,status_indicator,status_evidence_ref,status_mapping)
@@ -83,7 +83,10 @@ func TestRealtimeAPIPlanConfirmationAndHistoricalReads(t *testing.T) {
 		}
 		return data
 	}
-	request("GET", "/api/v1/me", nil, realtimeMedia, "Me", 200)
+	var me Me
+	if err := json.Unmarshal(request("GET", "/api/v1/me", nil, realtimeMedia, "Me", 200), &me); err != nil || !me.RealtimeTradeAvailable {
+		t.Fatalf("verified continuous-trading policy missing from /me: %v", err)
+	}
 	request("GET", "/api/v1/entities?q="+url.QueryEscape("API synthetic stock"), nil, realtimeMedia, "", 200)
 	var skills struct {
 		Items []Skill `json:"items"`

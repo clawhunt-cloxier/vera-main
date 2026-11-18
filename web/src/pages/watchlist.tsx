@@ -33,7 +33,9 @@ export function Watchlist() {
   });
   const [adding, setAdding] = useState(false);
   const [researchItem, setResearchItem] = useState<WatchItem | null>(null);
-  const [quoteRequirement, setQuoteRequirement] = useState<QuoteRequirement | ''>('');
+  const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
+  const allowRealtime = me.data?.realtime_trade_available === true;
+  const quoteRequirement = allowRealtime ? selection : 'latest_available';
   const qc = useQueryClient();
   const nav = useNavigate();
   const add = useMutation({
@@ -130,7 +132,7 @@ export function Watchlist() {
                       disabled={!me.data || analyze.isPending}
                       onClick={() => {
                         if (realtime) {
-                          setQuoteRequirement('');
+                          setQuoteRequirement('latest_available');
                           setResearchItem(it);
                           analyze.reset();
                         } else {
@@ -158,7 +160,11 @@ export function Watchlist() {
               analyze.mutate(researchItem.entity.id);
             }}
           >
-            <QuoteRequirementField value={quoteRequirement} onChange={setQuoteRequirement} />
+            <QuoteRequirementField
+              value={quoteRequirement}
+              onChange={setQuoteRequirement}
+              allowRealtime={allowRealtime}
+            />
             <button type="submit" disabled={!quoteRequirement || analyze.isPending}>
               {analyze.isPending ? '准备中…' : '生成研究计划'}
             </button>

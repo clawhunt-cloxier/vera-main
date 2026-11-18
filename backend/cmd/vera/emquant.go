@@ -150,7 +150,7 @@ func emquantCommand(ctx context.Context, args []string, out io.Writer, get func(
 		ObjectClient: emquantObjectClient(c), Bucket: c.bucket, Prefix: c.prefix, AccountScope: c.scope, MinInterval: c.interval, RateLimitCooldown: c.cooldown})
 	var result emquant.QuoteIngestResult
 	if err == nil {
-		result, err = runtime.CollectAndPublishQuoteForCode(ctx, cat, c.provider, c.product, string(emquant.QuoteLatestAvailable), entity, *code)
+		result, err = runtime.CollectAndPublishQuoteForCode(ctx, cat, c.provider, c.product, "", entity, *code)
 		err = errors.Join(err, runtime.Close())
 	}
 	status := "success"

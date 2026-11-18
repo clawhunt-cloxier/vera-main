@@ -71,7 +71,7 @@ func TestRealtimeBriefPipelineAndRecovery(t *testing.T) {
 	source := BriefQuoteSource{ProviderID: brief.ProviderID, Product: brief.Product}
 	var licenseID uuid.UUID
 	if err := pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing)
- VALUES($1,$2,'mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TESTSTATUS'],'listed',ARRAY['600000.SH','600001.SH','600002.SH'],'synthetic-grant','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`, source.ProviderID, source.Product).Scan(&licenseID); err != nil {
+ VALUES($1,$2,'mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TESTSTATUS'],'all','{}','synthetic-grant','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`, source.ProviderID, source.Product).Scan(&licenseID); err != nil {
 		t.Fatal(err)
 	}
 	policy := func(latency string) uuid.UUID {
@@ -226,6 +226,21 @@ func TestRealtimeBriefPipelineAndRecovery(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "延迟行情") {
 		t.Fatal("delayed quote limitation missing")
+	}
+	// The initial MVP has no verified status indicator or latency declaration.
+	if _, err := pool.Exec(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,max_age_ms,verified_by,verified_at,valid_from)
+		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','unknown',60000,'synthetic-operator',clock_timestamp(),clock_timestamp())`, licenseID); err != nil {
+		t.Fatal(err)
+	}
+	_, latestID := create("600001.SH", "latest_available")
+	if state := run(latestID); state != "COMPLETED" {
+		t.Fatalf("two-field snapshot failed: %s", state)
+	}
+	if err := pool.QueryRow(ctx, `SELECT document FROM report_versions WHERE task_id=$1`, latestID).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "行情延迟性质未确认") || !strings.Contains(string(body), "交易状态未确认") {
+		t.Fatal("report omitted unknown latency or market status")
 	}
 	_, cancelled := create("600000.SH", "latest_available")
 	if _, _, err := e.CancelTask(ctx, ws, cancelled, 1); err != nil {

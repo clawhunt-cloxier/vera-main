@@ -182,7 +182,7 @@ func (a *App) HTTP() (http.Handler, error) {
 	if c.WebDir != "" {
 		mounts["/"] = spa(c.WebDir)
 	}
-	s := &httpapi.Server{Pool: a.Pool, ID: identity.New(a.Pool, opt), Store: a.Store, Engine: a.Engine, Watch: a.Watch, Synthetic: a.Engine.Synthetic,
+	s := &httpapi.Server{Pool: a.Pool, ID: identity.New(a.Pool, opt), Store: a.Store, Engine: a.Engine, Watch: a.Watch, Synthetic: a.Engine.Synthetic, RequireChoiceQuote: c.RequireChoiceQuote,
 		Mounts: mounts}
 	return s.Handler(), nil
 }

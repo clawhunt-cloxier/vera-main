@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
@@ -31,12 +32,13 @@ import (
 )
 
 type Server struct {
-	Pool      *pgxpool.Pool
-	ID        *identity.Service
-	Store     *dataservice.Store
-	Engine    *harness.Engine
-	Watch     *watchlist.Service
-	Synthetic bool
+	Pool               *pgxpool.Pool
+	ID                 *identity.Service
+	Store              *dataservice.Store
+	Engine             *harness.Engine
+	Watch              *watchlist.Service
+	Synthetic          bool
+	RequireChoiceQuote bool
 	// Extra mounts (dev OIDC issuer, static web) added by the binary.
 	Mounts map[string]http.Handler
 }
@@ -161,17 +163,30 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		fail("schema_not_migrated")
 		return
 	}
-	if providers == 0 || entities == 0 {
+	// Choice search populates the catalog on demand, after the first login.
+	if providers == 0 || (entities == 0 && (s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil)) {
 		fail("data_not_synced")
 		return
 	}
-	if source := s.Engine.RealtimeSource; source != nil {
-		if s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil || source.ProviderID == "" || source.Product == "" {
+	// Deployments can register the grant after the new image is healthy.
+	if s.RequireChoiceQuote {
+		if quote, err := s.quoteCapabilities(ctx); err != nil || !quote.Latest {
 			fail("realtime_source_unavailable")
 			return
 		}
 	}
 	httpx.JSON(w, r, 200, map[string]string{"status": "ready"})
+}
+
+func (s *Server) quoteCapabilities(ctx context.Context) (emquant.QuoteCapabilities, error) {
+	source := s.Engine.RealtimeSource
+	if source == nil {
+		return emquant.QuoteCapabilities{}, nil
+	}
+	if !s.Engine.RealtimeEnabled() {
+		return emquant.QuoteCapabilities{}, errors.New("choice quote runtime unavailable")
+	}
+	return emquant.AllStockQuoteCapabilities(ctx, s.Pool, source.ProviderID, source.Product)
 }
 
 func principal(r *http.Request) (*identity.Principal, uuid.UUID) {

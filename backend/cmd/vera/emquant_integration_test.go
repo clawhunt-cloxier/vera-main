@@ -27,11 +27,11 @@ func TestEmquantCommandPublishesLicensedQuote(t *testing.T) {
 		t.Fatal(err)
 	}
 	var entity, license, policy uuid.UUID
-	if err := pool.QueryRow(ctx, `INSERT INTO entities(kind,code,name,synthetic) VALUES('stock','A','synthetic',false) RETURNING id`).Scan(&entity); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO entities(kind,code,name,synthetic) VALUES('stock','000000.BJ','synthetic',false) RETURNING id`).Scan(&entity); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage)
-		VALUES('cli-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW'],'listed',ARRAY['A'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true) RETURNING id`).Scan(&license); err != nil {
+		VALUES('cli-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW'],'listed',ARRAY['000000.BJ'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true) RETURNING id`).Scan(&license); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,max_age_ms,verified_by,verified_at,valid_from)
@@ -71,10 +71,10 @@ func TestEmquantCommandPublishesLicensedQuote(t *testing.T) {
 }`
 	const quote = `int csqsnapshot(const char *codes, const char *indicators, const char *options, eqdata **out) {
  (void)options;
- if (strcmp(codes,"A") || strcmp(indicators,"TIME,NOW")) return 88;
+ if (strcmp(codes,"000000.BJ") || strcmp(indicators,"TIME,NOW")) return 88;
  time_t now=time(NULL)+28800; struct tm utc; gmtime_r(&now,&utc);
  static char day[11]; strftime(day,sizeof(day),"%Y-%m-%d",&utc);
- static eqchar code[]={{"A",2}}, fields[]={{"TIME",5},{"NOW",4}}, dates[1];
+ static eqchar code[]={{"000000.BJ",10}}, fields[]={{"TIME",5},{"NOW",4}}, dates[1];
  static eqvariant values[2]; static eqdata data;
  dates[0]=(eqchar){day,11}; values[0]=(eqvariant){.type=6,.value.i=utc.tm_hour*10000+utc.tm_min*100+utc.tm_sec};
  values[1]=(eqvariant){.type=11,.value.d=10.25}; data=(eqdata){{code,1},{fields,2},{dates,1},{values,2}}; *out=&data; return 0;
@@ -95,7 +95,7 @@ func TestEmquantCommandPublishesLicensedQuote(t *testing.T) {
 	env["DATABASE_URL"], env["EMQUANT_LIBRARY"], env["EMQUANT_USER"], env["EMQUANT_PASSWORD"] = pool.Config().ConnString(), lib, "user", "pass"
 	env["EMQUANT_S3_ENDPOINT"], env["EMQUANT_PROVIDER_ID"] = server.URL, "cli-test"
 	var out bytes.Buffer
-	err = emquantCommand(ctx, []string{"quote", "--entity", entity.String(), "--code", "A", "--license", license.String(), "--policy", policy.String()}, &out, func(k string) string { return env[k] })
+	err = emquantCommand(ctx, []string{"quote", "--entity", entity.String(), "--code", "000000.BJ"}, &out, func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatalf("synthetic end-to-end ingestion: %v", err)
 	}

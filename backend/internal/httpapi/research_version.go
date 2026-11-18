@@ -239,5 +239,18 @@ func stripJSONFields(body []byte, fields []string) []byte {
 }
 
 func (s *Server) versionGate(next http.Handler) http.Handler {
-	return versionGate(next, s.Engine.RealtimeEnabled(), s.Engine.Brief != nil)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		realtime := s.Engine.RealtimeEnabled()
+		// New plans need a live source. Tasks, reports and cancellation keep
+		// their original representation and their own authorization checks.
+		if realtime && r.Method == http.MethodPost && r.URL.Path == "/api/v1/research-plans" && mediaQuality(r.Header.Values("Accept"), realtimeMedia, false) > 0 {
+			quote, err := s.quoteCapabilities(r.Context())
+			if err != nil {
+				httpx.Error(w, r, errs.New(http.StatusServiceUnavailable, "REALTIME_SOURCE_UNAVAILABLE", "实时行情来源不可用"))
+				return
+			}
+			realtime = quote.Latest
+		}
+		versionGate(next, realtime, s.Engine.Brief != nil).ServeHTTP(w, r)
+	})
 }

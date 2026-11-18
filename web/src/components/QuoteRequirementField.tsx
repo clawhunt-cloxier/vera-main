@@ -3,9 +3,11 @@ import { quoteRequirementLabel, type QuoteRequirement } from '../api/client';
 export function QuoteRequirementField({
   value,
   onChange,
+  allowRealtime,
 }: {
   value: QuoteRequirement | '';
   onChange: (value: QuoteRequirement) => void;
+  allowRealtime: boolean;
 }) {
   return (
     <fieldset className="sections">
@@ -15,6 +17,7 @@ export function QuoteRequirementField({
           type="radio"
           name="quote_requirement"
           value="realtime_trade"
+          disabled={!allowRealtime}
           checked={value === 'realtime_trade'}
           onChange={() => onChange('realtime_trade')}
           required
@@ -22,7 +25,9 @@ export function QuoteRequirementField({
         {quoteRequirementLabel.realtime_trade}
       </label>
       <p className="muted">
-        仅接受经过核实的交易中实时成交行情。休市、停牌、延迟或无法核实时，任务将弃权。
+        {allowRealtime
+          ? '仅接受经过核实的交易中实时成交行情。休市、停牌、延迟或无法核实时，任务将弃权。'
+          : '当前数据源尚未核实实时成交条件。'}
       </p>
       <label>
         <input

@@ -74,7 +74,8 @@ func (r *Runtime) CollectAndPublishQuote(ctx context.Context, catalog *dataservi
 // CollectAndPublishQuoteForCode resolves the current Choice grant and mapping
 // for code at request time, then performs the same archive, staging and
 // publication checks as the UUID-based recovery path. A missing or failed
-// source is returned explicitly and never treated as an empty quote.
+// source is returned explicitly and never treated as an empty quote. An empty
+// requirement is for storage-only administrative ingestion.
 func (r *Runtime) CollectAndPublishQuoteForCode(ctx context.Context, catalog *dataservice.Catalog, provider, product, requirement string, entity uuid.UUID, code string) (QuoteIngestResult, error) {
 	source, err := r.resolveQuoteSource(ctx, provider, product, code, requirement)
 	if err != nil {

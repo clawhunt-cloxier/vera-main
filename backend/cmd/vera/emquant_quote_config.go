@@ -181,6 +181,9 @@ func readQuoteInitConfig(get func(string) string) (quoteInitConfig, error) {
 	}
 	c.Fields, c.StatusIndicator, c.StatusEvidence, c.StatusMapping = policyFields, statusIndicator, statusEvidence, statusMapping
 	c.LatencyMode = strings.TrimSpace(get("EMQUANT_QUOTE_LATENCY_MODE"))
+	if c.LatencyMode == "" {
+		c.LatencyMode = "unknown"
+	}
 	if c.LatencyMode != "real_time" && c.LatencyMode != "delayed" && c.LatencyMode != "unknown" {
 		return quoteInitConfig{}, errors.New("EMQUANT_QUOTE_LATENCY_MODE must be real_time, delayed or unknown")
 	}

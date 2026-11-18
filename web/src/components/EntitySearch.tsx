@@ -13,26 +13,36 @@ export function EntitySearch({
   const [q, setQ] = useState('');
   const [items, setItems] = useState<Entity[]>([]);
   const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [active, setActive] = useState(0);
   const id = useId();
   useEffect(() => {
+    setFailed(false);
     if (q.trim().length === 0) {
       setItems([]);
       return;
     }
+    let current = true;
     const t = setTimeout(async () => {
       try {
         const r = await get<{ items: Entity[] }>(
           '/api/v1/entities?q=' + encodeURIComponent(q.trim())
         );
+        if (!current) return;
         setItems(r.items.filter((e) => !kinds || kinds.includes(e.kind)));
         setActive(0);
         setOpen(true);
       } catch {
+        if (!current) return;
         setItems([]);
+        setFailed(true);
+        setOpen(true);
       }
     }, 200);
-    return () => clearTimeout(t);
+    return () => {
+      current = false;
+      clearTimeout(t);
+    };
   }, [q, kinds]);
   const pick = (e: Entity) => {
     onPick(e);
@@ -81,7 +91,11 @@ export function EntitySearch({
           ))}
         </ul>
       )}
-      {open && q && items.length === 0 && <p className="muted small">未找到匹配的对象</p>}
+      {open && q && items.length === 0 && (
+        <p className="muted small">
+          {failed ? '证券搜索暂时不可用，请稍后重试' : '未找到匹配的对象'}
+        </p>
+      )}
     </div>
   );
 }
