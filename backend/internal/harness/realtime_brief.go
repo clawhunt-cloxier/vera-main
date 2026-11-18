@@ -115,7 +115,7 @@ func (e *Engine) realtimePipeline(ctx, parent context.Context, t *taskRow, sk *S
 			revision = *frozenRevision
 		} else {
 			source := e.RealtimeSource
-			if _, err := e.Brief.Runtime.CollectTaskQuotes(ctx, e.Brief.Catalog, source.ProviderID, source.Product, source.LicenseID, source.PolicyID, t.Workspace, t.ID, t.Epoch, revision); err != nil {
+			if _, err := e.Brief.Runtime.CollectTaskQuotesDirect(ctx, e.Brief.Catalog, source.ProviderID, source.Product, t.Workspace, t.ID, t.Epoch, revision); err != nil {
 				if current := e.stillCurrent(ctx, t); current != nil {
 					return realtimeCollect{}, current
 				}

@@ -21,8 +21,7 @@ import (
 // for a subject and requirement is checked against current database grants.
 func (e *Engine) RealtimeEnabled() bool {
 	return e.Brief != nil && e.Brief.Runtime != nil && e.RealtimeSource != nil &&
-		e.RealtimeSource.ProviderID != "" && e.RealtimeSource.Product != "" &&
-		e.RealtimeSource.LicenseID != uuid.Nil && e.RealtimeSource.PolicyID != uuid.Nil
+		e.RealtimeSource.ProviderID != "" && e.RealtimeSource.Product != ""
 }
 
 // SkillVersion resolves persisted versions without changing the legacy
@@ -48,48 +47,37 @@ func (e *Engine) supportsSnapshotMode(mode, version string) bool {
 }
 
 func requireBriefSource(ctx context.Context, tx pgx.Tx, source BriefQuoteSource, code, requirement string) error {
-	if source.ProviderID == "" || source.Product == "" || source.LicenseID == uuid.Nil || source.PolicyID == uuid.Nil || !mainlandStockCode.MatchString(code) ||
+	if source.ProviderID == "" || source.Product == "" || !mainlandStockCode.MatchString(code) ||
 		(requirement != string(emquant.QuoteRealtimeTrade) && requirement != string(emquant.QuoteLatestAvailable)) {
-		return errors.New("harness: invalid quote source or requirement")
+		return errors.New("harness: invalid Choice quote source or requirement")
 	}
-	var current uuid.UUID
-	var latency, statusIndicator, statusEvidence string
-	var statusMapping []byte
-	if err := tx.QueryRow(ctx, `SELECT id,latency_mode,coalesce(status_indicator,''),coalesce(status_evidence_ref,''),coalesce(status_mapping,'{}'::jsonb)
-		FROM quote_mapping_policies WHERE id=$1 AND source_license_id=$2 AND dataset_id='mkt.intraday_quote'
-		AND revoked_at IS NULL AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp()
-		AND (valid_until IS NULL OR valid_until>clock_timestamp()) FOR SHARE`, source.PolicyID, source.LicenseID).
-		Scan(&current, &latency, &statusIndicator, &statusEvidence, &statusMapping); err != nil {
-		return fmt.Errorf("harness: quote policy unavailable: %w", err)
-	}
-	var mapping map[string]string
-	if json.Unmarshal(statusMapping, &mapping) != nil {
-		return errors.New("harness: invalid status mapping")
-	}
-	fields, err := emquant.QuotePolicyFields(emquant.QuoteMappingPolicy{StatusIndicator: statusIndicator, StatusEvidence: statusEvidence, StatusMapping: mapping})
+	resolved, err := emquant.ResolveQuoteSourceTx(ctx, tx, source.ProviderID, source.Product, code, requirement)
 	if err != nil {
-		return err
+		return fmt.Errorf("harness: Choice quote unavailable: %w", err)
 	}
 	if requirement == string(emquant.QuoteRealtimeTrade) {
 		hasContinuous := false
-		for _, value := range mapping {
+		for _, value := range resolved.Policy.StatusMapping {
 			hasContinuous = hasContinuous || value == "continuous"
 		}
-		if latency != "real_time" || statusIndicator == "" || !hasContinuous {
+		if resolved.Policy.LatencyMode != "real_time" || resolved.Policy.StatusIndicator == "" || !hasContinuous {
 			return errors.New("harness: realtime quote requires verified latency and continuous trading status")
 		}
 	}
-	grant := dataservice.SourceUseRequest{LicenseID: source.LicenseID, ProviderID: source.ProviderID, Product: source.Product,
-		DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: fields, Codes: []string{code}}
 	for _, use := range []dataservice.SourceUse{dataservice.SourceStorage, dataservice.SourceDisplay, dataservice.SourceModel} {
-		grant.Use = use
-		if err := dataservice.RequireSourceUse(ctx, tx, grant); err != nil {
-			return err
+		if err := dataservice.RequireSourceUse(ctx, tx, resolved.Grant(use, code)); err != nil {
+			return fmt.Errorf("harness: Choice quote %s authorization unavailable: %w", use, err)
 		}
 	}
-	// Locks may have consumed a grant's validity window.
-	return tx.QueryRow(ctx, `SELECT id FROM quote_mapping_policies WHERE id=$1 AND revoked_at IS NULL AND verified_at<=clock_timestamp()
-		AND valid_from<=clock_timestamp() AND (valid_until IS NULL OR valid_until>clock_timestamp())`, source.PolicyID).Scan(&current)
+	// The authorization locks can wait. Recheck the selected mapping policy
+	// under the same transaction before confirming the plan.
+	var current uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM quote_mapping_policies WHERE id=$1 AND source_license_id=$2 AND dataset_id='mkt.intraday_quote'
+		AND revoked_at IS NULL AND verified_at<=clock_timestamp() AND valid_from<=clock_timestamp()
+		AND (valid_until IS NULL OR valid_until>clock_timestamp()) FOR SHARE`, resolved.PolicyID, resolved.LicenseID).Scan(&current); err != nil {
+		return fmt.Errorf("harness: Choice quote mapping expired during confirmation: %w", err)
+	}
+	return nil
 }
 
 func (e *Engine) BuildRealtimePlan(ctx context.Context, ws uuid.UUID, skillID string, subject dataservice.EntityRow, raw map[string]any, requirement string) (*Plan, error) {

@@ -83,17 +83,23 @@ func TestRegisterBriefIntentBindsConfirmedPlanAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := BriefQuoteSource{ProviderID: "brief-test", Product: "synthetic-product"}
+	var licenseID, policyID uuid.UUID
 	if err := pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing)
-		VALUES('brief-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TRADESTATUS'],'listed',ARRAY['600000.SH'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&source.LicenseID); err != nil {
+		VALUES('brief-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TRADESTATUS'],'listed',ARRAY['600000.SH'],'synthetic-evidence','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&licenseID); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,latency_evidence_ref,max_age_ms,verified_by,verified_at,valid_from,status_indicator,status_evidence_ref,status_mapping)
-		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','real_time','synthetic-latency',60000,'synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute','TRADESTATUS','synthetic-status','{"s:OPEN":"continuous","s:HALT":"suspended"}') RETURNING id`, source.LicenseID).Scan(&source.PolicyID); err != nil {
+		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','real_time','synthetic-latency',60000,'synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute','TRADESTATUS','synthetic-status','{"s:OPEN":"continuous","s:HALT":"suspended"}') RETURNING id`, licenseID).Scan(&policyID); err != nil {
 		t.Fatal(err)
 	}
-	var unknownPolicy uuid.UUID
-	if err := pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,max_age_ms,verified_by,verified_at,valid_from)
-		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','unknown',60000,'synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute') RETURNING id`, source.LicenseID).Scan(&unknownPolicy); err != nil {
+	unknownSource := BriefQuoteSource{ProviderID: "brief-test", Product: "unknown-product"}
+	var unknownLicense uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing)
+		VALUES('brief-test','unknown-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW'],'listed',ARRAY['600000.SH'],'synthetic-unknown','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&unknownLicense); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,max_age_ms,verified_by,verified_at,valid_from)
+		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','unknown',60000,'synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute')`, unknownLicense); err != nil {
 		t.Fatal(err)
 	}
 	preview := time.Now().UTC().Truncate(time.Microsecond)
@@ -144,9 +150,7 @@ func TestRegisterBriefIntentBindsConfirmedPlanAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrongPolicyTask := create(tx)
-	wrongSource := source
-	wrongSource.PolicyID = unknownPolicy
-	if err := RegisterBriefIntent(ctx, tx, ws, wrongPolicyTask, 1, hash, wrongSource); err == nil {
+	if err := RegisterBriefIntent(ctx, tx, ws, wrongPolicyTask, 1, hash, unknownSource); err == nil {
 		t.Fatal("unknown latency quote policy was accepted as realtime")
 	}
 	_ = tx.Rollback(ctx)

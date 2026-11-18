@@ -69,20 +69,21 @@ func TestRealtimeBriefPipelineAndRecovery(t *testing.T) {
 	defer brief.Runtime.Close()
 	e.Brief, e.Skills["stock_analysis"] = brief, ObservationBriefSkill()
 	source := BriefQuoteSource{ProviderID: brief.ProviderID, Product: brief.Product}
+	var licenseID uuid.UUID
 	if err := pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing)
- VALUES($1,$2,'mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TESTSTATUS'],'listed',ARRAY['600000.SH','600001.SH','600002.SH'],'synthetic-grant','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`, source.ProviderID, source.Product).Scan(&source.LicenseID); err != nil {
+ VALUES($1,$2,'mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TESTSTATUS'],'listed',ARRAY['600000.SH','600001.SH','600002.SH'],'synthetic-grant','synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`, source.ProviderID, source.Product).Scan(&licenseID); err != nil {
 		t.Fatal(err)
 	}
 	policy := func(latency string) uuid.UUID {
 		t.Helper()
 		var id uuid.UUID
 		if err := pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,latency_evidence_ref,max_age_ms,verified_by,verified_at,valid_from,status_indicator,status_evidence_ref,status_mapping)
-  VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price',$2,'synthetic-latency',60000,'synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute','TESTSTATUS','synthetic-status','{"s:OPEN":"continuous","s:CLOSED":"closed"}') RETURNING id`, source.LicenseID, latency).Scan(&id); err != nil {
+  VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price',$2,'synthetic-latency',60000,'synthetic-operator',clock_timestamp(),clock_timestamp()-interval '1 minute','TESTSTATUS','synthetic-status','{"s:OPEN":"continuous","s:CLOSED":"closed"}') RETURNING id`, licenseID, latency).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id
 	}
-	source.PolicyID = policy("real_time")
+	_ = policy("real_time")
 	e.RealtimeSource = &source
 	ws := workspace(t, pool)
 	e.Store = dataservice.NewVendorStore(pool, e.Store.Catalog())
@@ -168,7 +169,7 @@ func TestRealtimeBriefPipelineAndRecovery(t *testing.T) {
 	if err := e.transition(ctx, tr, []string{"QUEUED"}, "COLLECTING", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := brief.Runtime.CollectTaskQuotes(ctx, brief.Catalog, source.ProviderID, source.Product, source.LicenseID, source.PolicyID, ws, recoveryID, 1, tr.Revision); err != nil {
+	if _, err := brief.Runtime.CollectTaskQuotesDirect(ctx, brief.Catalog, source.ProviderID, source.Product, ws, recoveryID, 1, tr.Revision); err != nil {
 		t.Fatal(err)
 	}
 	frozen, err := brief.Runtime.FreezeLatestSnapshot(ctx, brief.Catalog, ws, recoveryID, 1, tr.Revision)
@@ -211,7 +212,7 @@ func TestRealtimeBriefPipelineAndRecovery(t *testing.T) {
 	if state := run(staleID); state != "ABSTAINED" {
 		t.Fatalf("expired quote passed: %s", state)
 	}
-	source.PolicyID = policy("delayed")
+	_ = policy("delayed")
 	denied, err := e.BuildRealtimePlan(ctx, ws, "stock_analysis", subjects["600000.SH"], nil, "realtime_trade")
 	if err != nil || denied.Executable {
 		t.Fatalf("delayed policy offered realtime: %+v %v", denied, err)
@@ -240,7 +241,7 @@ func TestRealtimeBriefPipelineAndRecovery(t *testing.T) {
 	if err != nil || !unconfirmed.Executable {
 		t.Fatalf("pending plan: %+v %v", unconfirmed, err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, source.LicenseID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE source_licenses SET revoked_at=clock_timestamp() WHERE id=$1`, licenseID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.CreateTask(ctx, ws, unconfirmed.ID, unconfirmed.Hash, nil); err == nil {

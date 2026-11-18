@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/google/uuid"
-
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 )
 
@@ -15,8 +13,6 @@ func TestReadyRejectsUnregisteredRealtimeSource(t *testing.T) {
 		engine.RealtimeSource = &harness.BriefQuoteSource{
 			ProviderID: "choice",
 			Product:    "choice-realtime",
-			LicenseID:  uuid.New(),
-			PolicyID:   uuid.New(),
 		}
 	})
 	resp, err := http.Get(e.srv.URL + "/readyz")

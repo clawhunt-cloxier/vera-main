@@ -30,12 +30,13 @@ func realtimeAPIEnv(t *testing.T) (*env, uuid.UUID) {
 			t.Fatal(err)
 		}
 		source := harness.BriefQuoteSource{ProviderID: "api-test", Product: "synthetic-product"}
+		var licenseID, policyID uuid.UUID
 		if err := e.Pool.QueryRow(ctx, `INSERT INTO source_licenses(provider_id,product_code,dataset_id,vendor_method,field_names,instrument_scope,instrument_codes,evidence_ref,verified_by,verified_at,valid_from,allow_storage,allow_display,allow_model_processing)
-		VALUES('api-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TRADESTATUS'],'listed',ARRAY['600000.SH'],'synthetic-evidence','synthetic-test',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&source.LicenseID); err != nil {
+		VALUES('api-test','synthetic-product','mkt.intraday_quote','CSQSNAPSHOT',ARRAY['TIME','NOW','TRADESTATUS'],'listed',ARRAY['600000.SH'],'synthetic-evidence','synthetic-test',clock_timestamp(),clock_timestamp()-interval '1 minute',true,true,true) RETURNING id`).Scan(&licenseID); err != nil {
 			t.Fatal(err)
 		}
 		if err := e.Pool.QueryRow(ctx, `INSERT INTO quote_mapping_policies(source_license_id,dataset_id,mapping_name,mapping_version,time_convention,time_evidence_ref,price_unit,price_evidence_ref,latency_mode,latency_evidence_ref,max_age_ms,verified_by,verified_at,valid_from,status_indicator,status_evidence_ref,status_mapping)
-		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','real_time','synthetic-latency',60000,'synthetic-test',clock_timestamp(),clock_timestamp()-interval '1 minute','TRADESTATUS','synthetic-status','{"s:OPEN":"continuous"}') RETURNING id`, source.LicenseID).Scan(&source.PolicyID); err != nil {
+		VALUES($1,'mkt.intraday_quote','emquant-quote',1,'hhmmss-asia-shanghai','synthetic-time','CNY','synthetic-price','real_time','synthetic-latency',60000,'synthetic-test',clock_timestamp(),clock_timestamp()-interval '1 minute','TRADESTATUS','synthetic-status','{"s:OPEN":"continuous"}') RETURNING id`, licenseID).Scan(&policyID); err != nil {
 			t.Fatal(err)
 		}
 		// These protocol tests never collect data or call a vendor. Runtime

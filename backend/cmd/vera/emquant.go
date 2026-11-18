@@ -22,7 +22,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 )
 
-const emquantHelp = `vera emquant quote --entity UUID --code CODE --license UUID --policy UUID
+const emquantHelp = `vera emquant quote --entity UUID --code CODE
 vera emquant publish --candidate UUID
 vera emquant init-brief （仅依据已核实范围显式登记真实成交简报许可）
 vera emquant init-quote （登记已核实的实时行情许可与字段映射）
@@ -122,16 +122,16 @@ func emquantCommand(ctx context.Context, args []string, out io.Writer, get func(
 	fs.SetOutput(io.Discard)
 	entityText := fs.String("entity", "", "")
 	code := fs.String("code", "", "")
-	licenseText := fs.String("license", "", "")
-	policyText := fs.String("policy", "", "")
+	// Deprecated compatibility flags are accepted but ignored; source grants
+	// and mapping policies are resolved for the requested code at runtime.
+	_ = fs.String("license", "", "deprecated")
+	_ = fs.String("policy", "", "deprecated")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return errors.New("invalid emquant quote arguments")
 	}
 	entity, e1 := uuid.Parse(*entityText)
-	license, e2 := uuid.Parse(*licenseText)
-	policy, e3 := uuid.Parse(*policyText)
-	if e1 != nil || e2 != nil || e3 != nil || entity == uuid.Nil || license == uuid.Nil || policy == uuid.Nil || *code == "" || strings.TrimSpace(*code) != *code || strings.ToUpper(*code) != *code || strings.ContainsAny(*code, ",\x00") {
-		return errors.New("invalid quote entity, code, license or policy")
+	if e1 != nil || entity == uuid.Nil || *code == "" || strings.TrimSpace(*code) != *code || strings.ToUpper(*code) != *code || strings.ContainsAny(*code, ",\x00") {
+		return errors.New("invalid quote entity or code")
 	}
 	c, err := readEmquantEnv(get)
 	if err != nil {
@@ -150,7 +150,7 @@ func emquantCommand(ctx context.Context, args []string, out io.Writer, get func(
 		ObjectClient: emquantObjectClient(c), Bucket: c.bucket, Prefix: c.prefix, AccountScope: c.scope, MinInterval: c.interval, RateLimitCooldown: c.cooldown})
 	var result emquant.QuoteIngestResult
 	if err == nil {
-		result, err = runtime.CollectAndPublishQuote(ctx, cat, c.provider, c.product, license, policy, entity, *code)
+		result, err = runtime.CollectAndPublishQuoteForCode(ctx, cat, c.provider, c.product, string(emquant.QuoteLatestAvailable), entity, *code)
 		err = errors.Join(err, runtime.Close())
 	}
 	status := "success"
@@ -160,7 +160,7 @@ func emquantCommand(ctx context.Context, args []string, out io.Writer, get func(
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	auditErr := pgx.BeginFunc(auditCtx, pool, func(tx pgx.Tx) error {
-		return audit.Record(auditCtx, tx, nil, "vera-emquant", "emquant.quote.collect", "entity:"+entity.String(), status, map[string]any{"provider": c.provider, "license_id": license.String(), "policy_id": policy.String()})
+		return audit.Record(auditCtx, tx, nil, "vera-emquant", "emquant.quote.collect", "entity:"+entity.String(), status, map[string]any{"provider": c.provider, "code": *code, "requirement": string(emquant.QuoteLatestAvailable)})
 	})
 	if result.StageID != uuid.Nil {
 		fmt.Fprintf(out, "candidate_id=%s\n", result.StageID)

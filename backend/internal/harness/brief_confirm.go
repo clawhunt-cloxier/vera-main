@@ -20,8 +20,6 @@ import (
 type BriefQuoteSource struct {
 	ProviderID string
 	Product    string
-	LicenseID  uuid.UUID
-	PolicyID   uuid.UUID
 }
 
 // RegisterBriefIntent is called by a trusted 0.4 confirmation transaction
@@ -31,7 +29,7 @@ type BriefQuoteSource struct {
 // must commit or roll back task creation, this registration and enqueue together.
 // The 0.4 confirmation path calls this before inserting its River jobs.
 func RegisterBriefIntent(ctx context.Context, tx pgx.Tx, workspace, task uuid.UUID, epoch int64, confirmedHash string, source BriefQuoteSource) error {
-	if tx == nil || workspace == uuid.Nil || task == uuid.Nil || epoch < 1 || len(confirmedHash) != 64 || source.ProviderID == "" || source.Product == "" || source.LicenseID == uuid.Nil || source.PolicyID == uuid.Nil {
+	if tx == nil || workspace == uuid.Nil || task == uuid.Nil || epoch < 1 || len(confirmedHash) != 64 || source.ProviderID == "" || source.Product == "" {
 		return errors.New("harness: invalid brief confirmation")
 	}
 	var planHash, skill, version, taskSkill, taskVersion, status, mode, planMode string

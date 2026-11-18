@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
@@ -142,10 +141,9 @@ func (a *App) build(ctx context.Context) error {
 		Synthetic: c.Synthetic(), Basis: a.Provider.Basis(), Prompts: harness.PromptVersion, RealResearch: c.RealResearch, Brief: a.Brief}
 	if a.Brief != nil {
 		a.Engine.Skills["stock_analysis"] = harness.ObservationBriefSkill()
-		if c.QuoteLicenseID != uuid.Nil && c.QuotePolicyID != uuid.Nil {
-			a.Engine.RealtimeSource = &harness.BriefQuoteSource{ProviderID: a.Brief.ProviderID, Product: a.Brief.Product,
-				LicenseID: c.QuoteLicenseID, PolicyID: c.QuotePolicyID}
-		}
+		// Choice grant and mapping identities are resolved per requested security
+		// at collection time; deployment config names only the runtime product.
+		a.Engine.RealtimeSource = &harness.BriefQuoteSource{ProviderID: a.Brief.ProviderID, Product: a.Brief.Product}
 	}
 	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Provider.Now}
 	return nil
