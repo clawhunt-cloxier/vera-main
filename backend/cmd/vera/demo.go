@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,15 +15,20 @@ import (
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/app"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/config"
 )
 
 // demo runs everything in one process for local evaluation and browser tests. It refuses non-development
 // environments: the development OIDC issuer accepts any username.
-func demo(ctx context.Context) error {
+func demo(ctx context.Context, args []string) error {
 	if v := os.Getenv("VERA_ENV"); v != "" && v != "development" && v != "test" {
 		return errors.New("vera demo 只能在 development/test 环境运行")
+	}
+	probe := len(args) == 2 && args[0] == "--probe-choice" && emquant.ValidQuoteProbeCode(args[1])
+	if len(args) != 0 && !probe {
+		return errors.New("usage: vera demo [--probe-choice CODE]")
 	}
 	dir := os.Getenv("VERA_DEMO_DIR")
 	if dir == "" {
@@ -59,6 +65,16 @@ func demo(ctx context.Context) error {
 		return err
 	}
 	defer a.Close()
+	if probe {
+		if a.Brief == nil || a.Brief.Runtime == nil {
+			return errors.New("Choice probe requires the real provider")
+		}
+		result, probeErr := a.Brief.Runtime.ProbeQuote(ctx, args[1])
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			return err
+		}
+		return probeErr
+	}
 	if err := a.Sync(ctx); err != nil {
 		return err
 	}
