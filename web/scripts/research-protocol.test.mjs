@@ -47,7 +47,7 @@ test('0.4 research keeps explicit intent and rejects a downgraded response', asy
 
   for (const [plan, media, contentType] of [
     [{ snapshot_mode: 'collect_latest', quote_requirement: 'latest_available' }, v04, v04],
-    [{ snapshot_mode: 'collect_latest', quote_requirement: null }, observation, 'application/json'],
+    [{ snapshot_mode: 'collect_latest', quote_requirement: null }, observation, observation],
     [
       { snapshot_mode: 'fixed_legacy', quote_requirement: null },
       'application/json',
@@ -109,7 +109,7 @@ test('first request negotiates observation or legacy without changing old plan i
     };
     globalThis.fetch = async (_path, request) => {
       assert.equal(request.headers.Accept, selected);
-      assert.equal(request.headers['Content-Type'], 'application/json');
+      assert.equal(request.headers['Content-Type'], selected);
       assert.equal('quote_requirement' in JSON.parse(request.body), false);
       return new Response(JSON.stringify(plan), { headers: { 'Content-Type': selected } });
     };

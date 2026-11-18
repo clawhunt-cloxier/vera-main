@@ -317,10 +317,21 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
               display_name: '模拟验收',
               research_protocol: advertisedProtocol,
             };
+          else if (path === '/api/v1/skills') body = { items: [] };
+          else if (path === '/api/v1/entities') {
+            assert.equal(accept, observationMedia);
+            body = { items: [oldPlan.subject] };
+          } else if (path === '/api/v1/research-plans') {
+            assert.equal(accept, observationMedia);
+            assert.equal(request.headers()['content-type'], observationMedia);
+            assert.equal(request.postDataJSON().quote_requirement, undefined);
+            body = { kind: 'plan', plan: oldPlan };
+          } else if (path === '/api/v1/research-tasks' && request.method() === 'GET')
+            body = { items: [] };
           else if (path === '/api/v1/research-plans/mock-old-plan') body = oldPlan;
           else if (path === '/api/v1/research-tasks' && request.method() === 'POST') {
             assert.equal(accept, observationMedia);
-            assert.equal(request.headers()['content-type'], 'application/json');
+            assert.equal(request.headers()['content-type'], observationMedia);
             assert.equal(request.postDataJSON().plan_hash, oldPlan.plan_hash);
             body = oldTask;
           } else if (path === '/api/v1/research-tasks/mock-old-task')
@@ -337,7 +348,15 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           else throw new Error(`Unexpected compatibility request ${path}`);
           await route.fulfill({ contentType: selected, body: JSON.stringify(body) });
         });
-        await page.goto(`${origin}/app/plan/mock-old-plan`);
+        if (advertisedProtocol === 'v0.4') {
+          await page.goto(`${origin}/app`);
+          await page.getByRole('link', { name: 'Choice 日成交简报' }).click();
+          await page.getByRole('combobox').fill(oldPlan.subject.symbol);
+          await page.getByRole('option').first().click();
+          await page.getByRole('button', { name: '发起研究' }).click();
+          await page.waitForURL('**/app/plan/mock-old-plan');
+          await page.reload();
+        } else await page.goto(`${origin}/app/plan/mock-old-plan`);
         await page.getByRole('heading', { name: '研究计划：模拟验收公司', exact: true }).waitFor();
         assert.match(await page.locator('main').innerText(), /这是非实时简报/);
         assert.equal(await page.getByRole('radio').count(), 0);

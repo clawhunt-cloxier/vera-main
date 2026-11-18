@@ -78,9 +78,9 @@ export async function api<T>(
   };
   if (body !== undefined) {
     headers['Content-Type'] =
-      protocol === 'v0.4' &&
+      protocol &&
       (path === '/api/v1/research-plans' || path === '/api/v1/research-tasks')
-        ? mediaTypes['v0.4']
+        ? mediaTypes[protocol]
         : 'application/json';
   }
   if (method !== 'GET') headers['X-CSRF-Token'] = csrf;

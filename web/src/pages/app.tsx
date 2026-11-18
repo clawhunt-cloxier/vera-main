@@ -171,6 +171,15 @@ export function App() {
           <section className="skills">
             <h2>快速启动</h2>
             <div className="grid">
+              {realtime && (
+                <Link
+                  to="/app/quick/$skill"
+                  params={{ skill: 'daily-observation' }}
+                  className="card interactive"
+                >
+                  <h3>Choice 日成交简报</h3>
+                </Link>
+              )}
               {skills.isLoading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="card small">
@@ -266,12 +275,13 @@ export function App() {
   );
 }
 
-export function Quick({ skill }: { skill: SkillId }) {
+export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolean }) {
   const me = useMe();
-  const realtime = me.data?.research_protocol === 'v0.4';
+  const realtime = !daily && me.data?.research_protocol === 'v0.4';
+  const protocol = daily ? 'observation.v1' : realtime ? 'v0.4' : undefined;
   const s = useQuery({
-    queryKey: ['skills'],
-    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills'),
+    queryKey: ['skills', protocol],
+    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol }),
     staleTime: 3600_000,
     select: (d) => d.items.find((x) => x.id === skill),
   });
@@ -293,7 +303,7 @@ export function Quick({ skill }: { skill: SkillId }) {
           params: mode && subject.kind === 'stock' ? { mode } : {},
           ...(realtime ? { quote_requirement: quoteRequirement } : {}),
         },
-        { idem: newKey(), protocol: realtime ? 'v0.4' : undefined }
+        { idem: newKey(), protocol }
       );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
       return r;
@@ -305,7 +315,8 @@ export function Quick({ skill }: { skill: SkillId }) {
       <p>
         <Link to="/app">← 返回工作台</Link>
       </p>
-      <h1>{s.data?.title}</h1>
+      <h1>{daily ? 'Choice 日成交简报' : s.data?.title}</h1>
+      {s.error && <ErrorBox error={s.error} />}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -314,7 +325,7 @@ export function Quick({ skill }: { skill: SkillId }) {
       >
         <label>
           研究对象
-          <EntitySearch kinds={s.data?.subject_kinds} onPick={setSubject} />
+          <EntitySearch kinds={s.data?.subject_kinds} onPick={setSubject} protocol={protocol} />
         </label>
         {skill === 'deep_research' && (
           <label>

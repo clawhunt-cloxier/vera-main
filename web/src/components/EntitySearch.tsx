@@ -1,14 +1,16 @@
 import { useEffect, useId, useState } from 'react';
-import { get, type Entity } from '../api/client';
+import { get, type Entity, type ResearchProtocol } from '../api/client';
 
 export function EntitySearch({
   kinds,
   onPick,
   placeholder,
+  protocol,
 }: {
   kinds?: string[];
   onPick: (e: Entity) => void;
   placeholder?: string;
+  protocol?: ResearchProtocol;
 }) {
   const [q, setQ] = useState('');
   const [items, setItems] = useState<Entity[]>([]);
@@ -26,7 +28,8 @@ export function EntitySearch({
     const t = setTimeout(async () => {
       try {
         const r = await get<{ items: Entity[] }>(
-          '/api/v1/entities?q=' + encodeURIComponent(q.trim())
+          '/api/v1/entities?q=' + encodeURIComponent(q.trim()),
+          { protocol }
         );
         if (!current) return;
         setItems(r.items.filter((e) => !kinds || kinds.includes(e.kind)));
@@ -43,7 +46,7 @@ export function EntitySearch({
       current = false;
       clearTimeout(t);
     };
-  }, [q, kinds]);
+  }, [q, kinds, protocol]);
   const pick = (e: Entity) => {
     onPick(e);
     setQ(e.name);
