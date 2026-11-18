@@ -75,3 +75,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 0.4 前端必须显式选择 `realtime_trade` 或 `latest_available`。选择实时成交时要求连续交易状态、已确认实时性质和满足阈值的事件时间；选择最近可用时保留实际延迟和交易状态，仍受登记的新鲜度阈值限制。采集失败、权限缺失或过期不会回退为 observation 或 fixture。回滚可关闭新计划入口，但须保留迁移和已经冻结的清单，并让支持该版本的 worker 处理在途任务。
 
 实际发布与真实盘中验收状态以 [T027 交接](handoffs/2026-11-17-T027-codex.md) 为准。开发测试通过不能替代真实账号、映射依据和交易时段端到端验收。
+
+实时行情的许可和映射使用 `vera emquant init-quote` 登记。该命令要求单独提供许可、字段、时间/价格口径、延迟性质、新鲜度阈值和证据引用；相同 UUID 重复执行必须得到同一配置，任何冲突都拒绝覆盖。`EMQUANT_QUOTE_LATENCY_MODE=real_time` 还必须有经核实的状态字段，并至少映射一个 `continuous` 状态；无法证明时使用 `unknown`，前端只能选择 `latest_available`。命令只登记配置，不向 Choice 发起请求，也不授予不存在的厂商权限。
+
+当前 MVP 先登记 `unknown` 延迟策略并运行 `latest_available`。交易时段核对 Choice 终端的最新价、`TIME`、接收时间和连续交易状态后，若证据充分，再用新的 reviewed UUID 登记 `real_time`；旧策略不原地修改。
