@@ -27,6 +27,7 @@ type QuoteSource struct {
 	Policy     QuoteMappingPolicy
 }
 
+// Grant builds the exact-use authorization request for the selected source.
 func (s QuoteSource) Grant(use dataservice.SourceUse, code string) dataservice.SourceUseRequest {
 	return dataservice.SourceUseRequest{LicenseID: s.LicenseID, ProviderID: s.ProviderID, Product: s.Product,
 		DatasetID: "mkt.intraday_quote", Method: "CSQSNAPSHOT", Fields: s.Fields, Codes: []string{code}, Use: use}
