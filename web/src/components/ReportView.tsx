@@ -40,6 +40,13 @@ const freshnessLabel: Record<string, string> = {
 
 const sourceTime = (value: string | null | undefined) => (value ? fmtDataTime(value) : '未提供');
 
+function evidenceText(text: string) {
+  // The archive exposes JSONPath coordinates alongside the quoted values.
+  return text
+    .split(/(\$\.data\.Values(?:\[\d+\])?)/g)
+    .map((part, i) => (i % 2 === 1 ? <code key={i}>{part}</code> : part));
+}
+
 function EvidencePanel({
   claim,
   loaders,
@@ -175,8 +182,15 @@ function EvidencePanel({
             </dl>
             <p className="muted">以上时间按北京时间显示。</p>
             {e.basis && <div className="muted">口径：{e.basis}</div>}
-            {e.locator && <div className="muted">位置：{e.locator}</div>}
-            {e.excerpt && <blockquote>{e.excerpt}</blockquote>}
+            {e.locator && (
+              <div className="evidence-location">
+                <span className="muted">证据位置</span>
+                <span>{evidenceText(e.locator)}</span>
+              </div>
+            )}
+            {e.excerpt && (
+              <blockquote className="evidence-excerpt">{evidenceText(e.excerpt)}</blockquote>
+            )}
           </div>
         );
       })}
@@ -295,7 +309,10 @@ export function ReportView({
             })}
             {s.tables.map((t, i) => (
               <div key={i} className="table-wrap">
-                <table>
+                <table
+                  className="report-table"
+                  data-choice-daily={t.title === 'Choice 日成交观察（非实时）' || undefined}
+                >
                   <caption>{t.title}</caption>
                   <thead>
                     <tr>

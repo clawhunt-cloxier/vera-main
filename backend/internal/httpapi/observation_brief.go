@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,10 +16,35 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/httpx"
 )
+
+// Convert the frozen table only for display. HTML and PDF share this path
+// for both historical and newly delivered reports.
+func formatObservationTable(t *facts.Table) error {
+	if t.Title != "Choice 日成交观察（非实时）" || !slices.Equal(t.Columns, []string{"厂商返回日期", "成交量（股）", "成交额（元）", "换手率（%）"}) {
+		return nil
+	}
+	for _, row := range t.Rows {
+		if len(row) != len(t.Columns) {
+			return errors.New("unexpected observation table row width")
+		}
+		for i, shift := range []int32{-2, -4} {
+			if raw := row[i+1]; raw != nil {
+				v, err := decimal.NewFromString(*raw)
+				if err != nil {
+					return fmt.Errorf("invalid observation value in %s: %w", t.Columns[i+1], err)
+				}
+				row[i+1] = facts.Ptr(v.Shift(shift).StringFixed(2))
+			}
+		}
+	}
+	t.Columns[1], t.Columns[2] = "成交量（手）", "成交额（万元）"
+	return nil
+}
 
 // This wraps all report representations, including PDF and series, for both
 // protocol versions. RLS lookup precedes system-side archive authorization.
@@ -114,7 +140,7 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 			}
 		}
 		loc := "原始归档 SHA-256 " + raw.Source.BodySHA256 + "；$.data.Values（与 Codes/Indicators/Dates 轴对应）"
-		excerpt := strings.Join(lines, "；")
+		excerpt := strings.Join(lines, "\n")
 		basis := "当前采集的 Choice 原始返回；不证明首次发布时间、历史版本或实时性"
 		httpx.JSON(w, r, 200, Evidence{ID: id, DatasetID: raw.DatasetID, Provider: "Choice / 东方财富", Origin: "vendor_derived", SourceTier: "L2", Title: o.Name + " · " + label, Label: label, Basis: &basis, ReceivedAt: &raw.Source.ReceivedAt, AvailableAt: o.Cutoff, LatencyMode: "unknown", Locator: &loc, Excerpt: &excerpt, ContentHash: raw.Source.BodySHA256})
 		return nil

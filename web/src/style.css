@@ -485,6 +485,39 @@ tr:hover {
   overflow-x: auto;
   margin: 20px 0;
   border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-0);
+}
+
+.report-table {
+  margin: 0;
+  border: 0;
+}
+
+.report-table caption {
+  padding: 16px 16px 10px;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.report-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-table[data-choice-daily] :is(th, td):not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.report-table tbody tr:nth-child(even) {
+  background: rgba(0, 113, 227, 0.025);
 }
 
 /* ========================================================================
@@ -787,6 +820,43 @@ tr:hover {
   margin: 16px 0;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.evidence-location {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.evidence-location > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.evidence-location code,
+.evidence-excerpt code {
+  padding: 1px 4px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text);
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.evidence-excerpt {
+  margin: 12px 0 0;
+  padding: 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 /* Chart containers */

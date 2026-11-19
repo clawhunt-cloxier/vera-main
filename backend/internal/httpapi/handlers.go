@@ -765,6 +765,15 @@ func (s *Server) loadDoc(r *http.Request) (uuid.UUID, harness.Document, []byte, 
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return uuid.Nil, doc, nil, err
 	}
+	if doc.SkillVersion == emquant.ObservationBriefVersion {
+		for _, section := range doc.Sections {
+			for i := range section.Tables {
+				if err := formatObservationTable(&section.Tables[i]); err != nil {
+					return uuid.Nil, doc, nil, err
+				}
+			}
+		}
+	}
 	if doc.SnapshotMode == "" {
 		doc.SnapshotMode = "fixed_legacy"
 		if doc.SkillVersion == emquant.ObservationBriefVersion {
