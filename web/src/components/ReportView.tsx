@@ -40,19 +40,22 @@ const freshnessLabel: Record<string, string> = {
 
 const sourceTime = (value: string | null | undefined) => (value ? fmtDataTime(value) : '未提供');
 
-function evidenceText(text: string) {
-  // The archive exposes JSONPath coordinates alongside the quoted values.
-  return text
-    .split(/(\$\.data\.Values(?:\[\d+\])?)/g)
-    .map((part, i) => (i % 2 === 1 ? <code key={i}>{part}</code> : part));
-}
+// These sources identify a publication, page or news outlet in their locator.
+const publishedSources = new Set([
+  'fin.statement',
+  'doc.periodic_text',
+  'doc.announcement',
+  'news.item',
+]);
 
 function EvidencePanel({
   claim,
+  showClaimText,
   loaders,
   onClose,
 }: {
   claim: Claim;
+  showClaimText: boolean;
   loaders: Loaders;
   onClose: () => void;
 }) {
@@ -80,7 +83,7 @@ function EvidencePanel({
           ×
         </button>
       </div>
-      <p className="claim-text">{claim.text}</p>
+      {showClaimText && <p className="claim-text">{claim.text}</p>}
       {claim.calculation_refs.length > 0 && <h3>计算过程</h3>}
       {claim.calculation_refs.map((id) => {
         const c = calc[id];
@@ -182,15 +185,13 @@ function EvidencePanel({
             </dl>
             <p className="muted">以上时间按北京时间显示。</p>
             {e.basis && <div className="muted">口径：{e.basis}</div>}
-            {e.locator && (
+            {e.locator && publishedSources.has(e.dataset_id) && (
               <div className="evidence-location">
                 <span className="muted">证据位置</span>
-                <span>{evidenceText(e.locator)}</span>
+                <span>{e.locator}</span>
               </div>
             )}
-            {e.excerpt && (
-              <blockquote className="evidence-excerpt">{evidenceText(e.excerpt)}</blockquote>
-            )}
+            {e.excerpt && <blockquote className="evidence-excerpt">{e.excerpt}</blockquote>}
           </div>
         );
       })}
@@ -401,7 +402,16 @@ export function ReportView({
           <p className="disclaimer">{report.disclaimer}</p>
         </section>
       </article>
-      {open && <EvidencePanel claim={open} loaders={loaders} onClose={() => setOpen(null)} />}
+      {open && (
+        <EvidencePanel
+          claim={open}
+          showClaimText={
+            report.skill_version !== '1.1.0-demo.2' || report.skill_id !== 'stock_analysis'
+          }
+          loaders={loaders}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </div>
   );
 }

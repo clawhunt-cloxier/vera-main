@@ -835,18 +835,6 @@ tr:hover {
   overflow-wrap: anywhere;
 }
 
-.evidence-location code,
-.evidence-excerpt code {
-  padding: 1px 4px;
-  overflow-wrap: anywhere;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-1);
-  color: var(--text);
-  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-}
-
 .evidence-excerpt {
   margin: 12px 0 0;
   padding: 12px;
