@@ -25,6 +25,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/httpapi"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/config"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
@@ -251,7 +252,19 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if !found {
 		t.Fatal("missing daily observation table")
 	}
-	checkResponse("Evidence", request("GET", evidencePath, "", media, "").Body.Bytes())
+	evidenceBody := request("GET", evidencePath, "", media, "").Body.Bytes()
+	checkResponse("Evidence", evidenceBody)
+	var evidence httpapi.Evidence
+	if err := json.Unmarshal(evidenceBody, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	wantExcerpt := observation.Rows[0].TradeDate + " 成交量 1200.00 手，成交额 180.00 万元，换手率 1.25%"
+	if evidence.Excerpt == nil || *evidence.Excerpt != wantExcerpt {
+		t.Fatalf("unexpected displayed evidence: %s", evidenceBody)
+	}
+	if evidence.ContentHash != observation.Manifest.Liquidity.Source.BodySHA256 || evidence.Locator == nil || !strings.Contains(*evidence.Locator, "$.data.Values") {
+		t.Fatal("missing archive provenance")
+	}
 	// Concurrent readers must not retain a connection while waiting for
 	// another database operation; the API's final authorization only flushes.
 	var readers sync.WaitGroup
@@ -263,9 +276,6 @@ func TestObservationBriefDelivery(t *testing.T) {
 		})
 	}
 	readers.Wait()
-	if rec := request("GET", evidencePath, "", media, ""); !strings.Contains(rec.Body.String(), "换手率") || !strings.Contains(rec.Body.String(), "Values") {
-		t.Fatal("missing turnover provenance")
-	}
 	if rec := request("GET", reportPath+"/pdf", "", "application/pdf", ""); rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), "%PDF") {
 		t.Fatalf("pdf: %d %s", rec.Code, rec.Body)
 	}

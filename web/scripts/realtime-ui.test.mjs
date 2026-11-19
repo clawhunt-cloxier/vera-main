@@ -128,7 +128,7 @@ const evidence = {
   received_at: freshness.received_at,
   event_at: freshness.event_at,
   latency_mode: freshness.latency_mode,
-  locator: null,
+  locator: '原始归档 SHA-256 mock-only；价格 $.data.Values[0]；时间 $.data.Values[1]',
   excerpt: null,
   content_hash: 'mock-only',
 };
@@ -251,6 +251,10 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
         await page.getByTestId('evidence-panel').innerText(),
         /14:00:01[\s\S]*14:00:02[\s\S]*14:00:03/
       );
+      assert.doesNotMatch(
+        await page.getByTestId('evidence-panel').innerText(),
+        /证据位置|SHA-256|\$\.data/
+      );
       assert.deepEqual(errors, []);
       await context.close();
     });
@@ -287,6 +291,7 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           ...report,
           id: 'mock-old-report',
           title: '模拟旧版观察简报',
+          claims: [{ ...report.claims[0], text: '模拟成交额为 11.07 亿元。' }],
           sections: [
             {
               ...report.sections[0],
@@ -366,8 +371,13 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           else if (path === '/api/v1/evidence/mock-evidence')
             body = {
               ...evidence,
-              excerpt:
-                '2026-10-08 成交量 115026850 股（$.data.Values[0]），成交额 1106982193.15 元（$.data.Values[1]），换手率 0.3454%（$.data.Values[2]；厂商百分数÷100得到内部比例 0.003454）',
+              dataset_id: 'mkt.daily_bar',
+              label: '日成交观察（非完整日线）',
+              value: null,
+              unit: null,
+              locator:
+                '原始归档 SHA-256 mock-only；$.data.Values（与 Codes/Indicators/Dates 轴对应）',
+              excerpt: '2026-10-08 成交量 1150268.50 手，成交额 110698.22 万元，换手率 0.3454%',
             };
           else throw new Error(`Unexpected compatibility request ${path}`);
           await route.fulfill({ contentType: selected, body: JSON.stringify(body) });
@@ -406,11 +416,15 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
         await page.getByRole('button', { name: '查看证据 1', exact: true }).click();
         const excerpt = page.getByTestId('evidence-panel').locator('blockquote');
         await excerpt.waitFor();
-        assert.deepEqual(await excerpt.locator('code').allTextContents(), [
-          '$.data.Values[0]',
-          '$.data.Values[1]',
-          '$.data.Values[2]',
-        ]);
+        const [volume, amount, turnover] = await daily.locator('tbody td').allTextContents();
+        assert.equal(
+          await excerpt.innerText(),
+          `2026-10-08 成交量 ${volume} 手，成交额 ${amount} 万元，换手率 ${turnover}%`
+        );
+        assert.doesNotMatch(
+          await page.getByTestId('evidence-panel').innerText(),
+          /证据位置|SHA-256|\$\.data|Codes\/Indicators\/Dates|厂商百分数|内部比例|亿元/
+        );
         await page.getByRole('button', { name: '关闭证据' }).click();
         await page.getByRole('link', { name: '← 返回报告列表' }).click();
         await page.locator('a[href="/app/reports/mock-fixed-report"]').click();

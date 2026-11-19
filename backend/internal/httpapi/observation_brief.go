@@ -22,6 +22,19 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/httpx"
 )
 
+const (
+	sharesToLotsShift = -2
+	yuanToWanShift    = -4
+)
+
+func observationDisplayValue(raw string, shift int32) (string, error) {
+	v, err := decimal.NewFromString(raw)
+	if err != nil {
+		return "", err
+	}
+	return v.Shift(shift).StringFixed(2), nil
+}
+
 // Convert the frozen table only for display. HTML and PDF share this path
 // for both historical and newly delivered reports.
 func formatObservationTable(t *facts.Table) error {
@@ -32,13 +45,13 @@ func formatObservationTable(t *facts.Table) error {
 		if len(row) != len(t.Columns) {
 			return errors.New("unexpected observation table row width")
 		}
-		for i, shift := range []int32{-2, -4} {
+		for i, shift := range []int32{sharesToLotsShift, yuanToWanShift} {
 			if raw := row[i+1]; raw != nil {
-				v, err := decimal.NewFromString(*raw)
+				v, err := observationDisplayValue(*raw, shift)
 				if err != nil {
 					return fmt.Errorf("invalid observation value in %s: %w", t.Columns[i+1], err)
 				}
-				row[i+1] = facts.Ptr(v.Shift(shift).StringFixed(2))
+				row[i+1] = facts.Ptr(v)
 			}
 		}
 	}
@@ -132,16 +145,24 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 			lines = []string{o.Manifest.Code + " · " + o.Name}
 		} else {
 			for _, row := range o.Rows {
-				line := fmt.Sprintf("%s 成交量 %s 股（%s），成交额 %s 元（%s）", row.TradeDate, row.VolumeShares, row.Locators["VOLUME"], row.AmountCNY, row.Locators["AMOUNT"])
+				volume, err := observationDisplayValue(row.VolumeShares, sharesToLotsShift)
+				if err != nil {
+					return err
+				}
+				amount, err := observationDisplayValue(row.AmountCNY, yuanToWanShift)
+				if err != nil {
+					return err
+				}
+				line := fmt.Sprintf("%s 成交量 %s 手，成交额 %s 万元", row.TradeDate, volume, amount)
 				if row.TurnoverRatio != nil {
-					line += fmt.Sprintf("，换手率 %s%%（%s；厂商百分数÷100得到内部比例 %s）", decimal.RequireFromString(*row.TurnoverRatio).Shift(2).String(), row.Locators["TURN"], *row.TurnoverRatio)
+					line += fmt.Sprintf("，换手率 %s%%", decimal.RequireFromString(*row.TurnoverRatio).Shift(2).String())
 				}
 				lines = append(lines, line)
 			}
 		}
 		loc := "原始归档 SHA-256 " + raw.Source.BodySHA256 + "；$.data.Values（与 Codes/Indicators/Dates 轴对应）"
 		excerpt := strings.Join(lines, "\n")
-		basis := "当前采集的 Choice 原始返回；不证明首次发布时间、历史版本或实时性"
+		basis := "来自 Choice，仅反映采集时取得的版本。采集时间不代表首次发布时间，数据为非实时观察。"
 		httpx.JSON(w, r, 200, Evidence{ID: id, DatasetID: raw.DatasetID, Provider: "Choice / 东方财富", Origin: "vendor_derived", SourceTier: "L2", Title: o.Name + " · " + label, Label: label, Basis: &basis, ReceivedAt: &raw.Source.ReceivedAt, AvailableAt: o.Cutoff, LatencyMode: "unknown", Locator: &loc, Excerpt: &excerpt, ContentHash: raw.Source.BodySHA256})
 		return nil
 	})
