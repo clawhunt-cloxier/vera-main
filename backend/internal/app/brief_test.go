@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -225,7 +226,31 @@ func TestObservationBriefDelivery(t *testing.T) {
 			t.Fatalf("read %s: %d %s", path, rec.Code, rec.Body)
 		}
 	}
-	checkResponse("Report", request("GET", reportPath, "", media, "").Body.Bytes())
+	reportBody := request("GET", reportPath, "", media, "").Body.Bytes()
+	checkResponse("Report", reportBody)
+	var displayed harness.Document
+	if err := json.Unmarshal(reportBody, &displayed); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sec := range displayed.Sections {
+		for _, table := range sec.Tables {
+			if table.Title != "Choice 日成交观察（非实时）" {
+				continue
+			}
+			found = true
+			if !slices.Equal(table.Columns, []string{"厂商返回日期", "成交量（手）", "成交额（万元）", "换手率（%）"}) || len(table.Rows) != 1 {
+				t.Fatalf("unexpected daily table: %+v", table)
+			}
+			row := table.Rows[0]
+			if len(row) != 4 || row[1] == nil || *row[1] != "1200.00" || row[2] == nil || *row[2] != "180.00" || row[3] == nil || *row[3] != "1.25" {
+				t.Fatalf("unexpected displayed row: %s", reportBody)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing daily observation table")
+	}
 	checkResponse("Evidence", request("GET", evidencePath, "", media, "").Body.Bytes())
 	// Concurrent readers must not retain a connection while waiting for
 	// another database operation; the API's final authorization only flushes.

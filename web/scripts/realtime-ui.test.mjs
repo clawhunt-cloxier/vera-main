@@ -260,7 +260,12 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
     await t.test(
       `${advertisedProtocol}: old observation plan, cancellation and history`,
       async () => {
-        const context = await browser.newContext();
+        const context = await browser.newContext({
+          viewport:
+            advertisedProtocol === 'v0.4'
+              ? { width: 1280, height: 900 }
+              : { width: 390, height: 844 },
+        });
         const page = await context.newPage();
         page.setDefaultTimeout(10000);
         const errors = [];
@@ -282,6 +287,19 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           ...report,
           id: 'mock-old-report',
           title: '模拟旧版观察简报',
+          sections: [
+            {
+              ...report.sections[0],
+              tables: [
+                {
+                  title: 'Choice 日成交观察（非实时）',
+                  columns: ['厂商返回日期', '成交量（手）', '成交额（万元）', '换手率（%）'],
+                  rows: [['2026-10-08', '1150268.50', '110698.22', '0.3454']],
+                  evidence_refs: ['mock-evidence'],
+                },
+              ],
+            },
+          ],
           skill_version: oldPlan.skill_version,
           source_freshness: undefined,
         };
@@ -345,6 +363,12 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           } else if (path === '/api/v1/reports') body = { items: oldReports };
           else if (path === '/api/v1/reports/mock-old-report/versions/1') body = oldReport;
           else if (path === '/api/v1/reports/mock-fixed-report/versions/1') body = fixedReport;
+          else if (path === '/api/v1/evidence/mock-evidence')
+            body = {
+              ...evidence,
+              excerpt:
+                '2026-10-08 成交量 115026850 股（$.data.Values[0]），成交额 1106982193.15 元（$.data.Values[1]），换手率 0.3454%（$.data.Values[2]；厂商百分数÷100得到内部比例 0.003454）',
+            };
           else throw new Error(`Unexpected compatibility request ${path}`);
           await route.fulfill({ contentType: selected, body: JSON.stringify(body) });
         });
@@ -373,6 +397,21 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
         await page.getByRole('heading', { name: oldReport.title, exact: true }).waitFor();
         assert.match(await page.locator('.report-head').innerText(), /快照截止/);
         assert.match(await page.locator('#limits').innerText(), /模拟厂商/);
+        const daily = page.getByRole('table', { name: 'Choice 日成交观察（非实时）' });
+        assert.deepEqual(await daily.locator('tbody td').allTextContents(), [
+          '1150268.50',
+          '110698.22',
+          '0.3454',
+        ]);
+        await page.getByRole('button', { name: '查看证据 1', exact: true }).click();
+        const excerpt = page.getByTestId('evidence-panel').locator('blockquote');
+        await excerpt.waitFor();
+        assert.deepEqual(await excerpt.locator('code').allTextContents(), [
+          '$.data.Values[0]',
+          '$.data.Values[1]',
+          '$.data.Values[2]',
+        ]);
+        await page.getByRole('button', { name: '关闭证据' }).click();
         await page.getByRole('link', { name: '← 返回报告列表' }).click();
         await page.locator('a[href="/app/reports/mock-fixed-report"]').click();
         await page.getByRole('heading', { name: fixedReport.title, exact: true }).waitFor();
