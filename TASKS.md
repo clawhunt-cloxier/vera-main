@@ -28,6 +28,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T026 | 盘中行情与最新可用数据规格 | T001 | IN_PROGRESS | Codex / agent/codex/T026-intraday-contract | 领取于 2026-11-12T05:39:22Z（PR #16 已合入）；2026-11-13T03:08:01Z 在新分支继续；范围：根规格、DATA_SERVICE、相关技能规格及评测样例、数据与 API 契约；依据用户要求记录行情实时性、各数据实际时点、过期降级与权限，不代表实现完成。 |
 | T027 | 数据治理实时研报主链路 | T014b、T018、T022、T026 | REVIEW | Codex / agent/codex/T027-data-governance | 领取于 2026-11-17T05:00:24Z；已接通单股 `stock_analysis/1.1.0-demo.3` 的 0.4 计划、Choice 动态采集、快照冻结与前端证据；保留 0.3/observation 兼容。全 A 股登记 `unknown` + `latest_available`，不保存逐股票配置。测试站实测 `600000.SH` 快照被 Choice 拒绝（10000017 海外 IP 受限），严格实时未开放。浦发银行的非实时日成交简报已从工作台生成，证据与 PDF 下载通过。见[交接与验收](docs/handoffs/2026-11-17-T027-codex.md)。PR #37 保留，完整低频数据集与盘中验收待完成。 |
 | T028 | Choice 日成交表与证据阅读 | T014 | REVIEW | Codex / agent/codex/T028-choice-report-display | 领取于 2026-11-19T12:56Z。范围为网页与 PDF 共用的展示单位、证据字段定位及报告表格排版。见[验收与交接](docs/handoffs/2026-11-19-T028-codex.md)。 |
+| T029 | 研报证据侧栏的读者展示 | T014 | IN_PROGRESS | Codex / agent/codex/T029-reader-evidence | 领取于 2026-11-19T15:57Z，范围为证据栏成交单位、来源定位与换手率说明，以及兼容旧报告的验收。 |
 | T023 | test 环境部署、性能与恢复 | T019a、T022、T024 | TODO | 未领取 | 镜像、Compose 生产配置、Caddy/TLS、备份恢复演练、压测、告警、费用总上限开关；EXT-03；V08 |
 
 ## 里程碑
