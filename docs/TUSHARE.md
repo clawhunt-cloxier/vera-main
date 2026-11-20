@@ -34,6 +34,12 @@ vera admin provider model-use tushare on
 
 ## 用真实账号验收
 
+测试站的 Compose 默认运行 `vera demo`。启动后它会在后台同步，首次同步期间 `/readyz` 返回 `tushare_initial_sync`。每个登记标的已有归档日线后服务可就绪。若首次同步失败，可在运行中的测试容器重试。以下命令使用内嵌测试数据库的默认端口与开发登录配置。
+
+```sh
+docker compose exec -T vera sh -c 'export DATABASE_URL="${DATABASE_URL:-postgres://vera:vera-demo@127.0.0.1:${VERA_DEMO_PG_PORT:-55432}/vera?sslmode=disable}" VERA_DEV_OIDC=true; exec /app/backend/vera sync'
+```
+
 选择一家有五年日线、至少两个连续可比年报、有效两融披露以及足够申万二级同行的非金融 A 股公司。先查同步日志和厂商限制，再从工作台搜索标的，分别提交三份报告。记录报告版本与截止时间，核对复权曲线、最新两融日、年报页码、同比计算输入和分部口径，打开证据并导出 PDF。无权或无覆盖时，记录受限章节或无法执行的原因。由模拟模型生成的报告带模拟标识，真实数据交付验收使用配置好的真实模型。
 
 本轮范围是可追溯的公司收盘研究。盘中报价、行业或全市场汇总、跨厂商自动择源和热备仍是后续工作。公募及互联互通持仓、机构观点、业绩说明会纪要等还需单独的数据接入。目标报告的对照基线见 [早期 MVP](../README-MVP.md)。
