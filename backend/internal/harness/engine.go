@@ -47,6 +47,7 @@ type Engine struct {
 	// WithCloseResearchUse holds current TuShare usage rights for the callback.
 	WithCloseResearchUse func(context.Context, func() error) error
 	CloseResearchCutoff  func(context.Context) (time.Time, error)
+	ResearchSupplements  []dataservice.ResearchSupplementSource
 }
 
 const PromptVersion = "1.1.0"
@@ -172,15 +173,19 @@ func (e *Engine) buildSkillPlan(ctx context.Context, ws uuid.UUID, sk *Skill, su
 	plan.QuotaCost = 1
 	plan.Hash = planHash(sk.ID, sk.Version, subject.ID, p, asOf, plan.Sections)
 	plan.SnapshotMode = "fixed_legacy"
+	if sk.Version == CloseUnifiedVersion {
+		requirement := string(emquant.QuoteLatestAvailable)
+		plan.QuoteRequirement = &requirement
+	}
 	if sk.Version == emquant.ObservationBriefVersion || sk.Version == MixedObservationVersion {
 		plan.SnapshotMode = "collect_latest"
 	}
 	params, _ := json.Marshal(p)
 	secs, _ := json.Marshal(plan.Sections)
 	err = db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO research_plans(id,workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,reason_code,expires_at,snapshot_mode)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, plan.ID, ws, sk.ID, sk.Version, subject.ID, params, secs, asOf, plan.Hash,
-			plan.Executable, plan.ReasonCode, plan.ExpiresAt, plan.SnapshotMode)
+		_, err := tx.Exec(ctx, `INSERT INTO research_plans(id,workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,reason_code,expires_at,snapshot_mode,quote_requirement)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, plan.ID, ws, sk.ID, sk.Version, subject.ID, params, secs, asOf, plan.Hash,
+			plan.Executable, plan.ReasonCode, plan.ExpiresAt, plan.SnapshotMode, plan.QuoteRequirement)
 		return err
 	})
 	return plan, err
@@ -700,7 +705,7 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
 	case emquant.ObservationBriefVersion, MixedObservationVersion:
 		err = e.observationPipeline(runCtx, ctx, t, sk)
-	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion:
+	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion, CloseUnifiedVersion:
 		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
 			err = e.pipeline(runCtx, ctx, t, sk)
 		}
@@ -774,6 +779,9 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 				out.Extra = append(out.Extra, id)
 			}
 		}
+		if t.Version == CloseUnifiedVersion {
+			return out, e.bindResearchSupplements(ctx, t, subject, h)
+		}
 		return out, db.InWorkspace(ctx, e.Pool, t.Workspace, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, `UPDATE research_tasks SET snapshot_hash=$2 WHERE id=$1 AND epoch=$3`, t.ID, h, t.Epoch)
 			return err
@@ -793,6 +801,14 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 		s := facts.NewSheet(t.ID, t.Epoch)
 		bl := &builder{S: s, B: b, basis: e.Basis}
 		sk.Compute(bl, t.Params)
+		if t.Version == CloseUnifiedVersion {
+			err := e.WithUnifiedSources(ctx, t.Workspace, t.ID, dataservice.SourceModel, func(_ pgx.Tx, sources []BoundResearchSupplement) error {
+				return addResearchSupplements(s, subject.Name, t.Skill, sources, len(e.ResearchSupplements))
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
 		s.Finalize()
 		if s.Suspicious > 0 {
 			s.Limit(fmt.Sprintf("有 %d 段原文或新闻含疑似指令或评级内容，已标记为可疑并排除在写作材料之外。", s.Suspicious))

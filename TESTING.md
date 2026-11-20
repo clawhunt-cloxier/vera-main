@@ -17,9 +17,13 @@ ADR-0004 的 [盘中时点与来源样例](tests/fixtures/intraday-cases.json) �
 
 Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch policy 只检查 PR 来源分支，不证明业务正确。
 
-前端页面验收可运行 `cd web && npm ci && npx playwright install --with-deps chromium && npm run test:realtime-ui`。该命令需要下载 Playwright Chromium 及系统依赖；使用标注为模拟的 API 响应，在桌面和手机视口检查 0.4 默认最近可用、确认、冻结时间和证据展示，并回归双来源报告、旧 observation 计划、历史报告与取消流程，不调用真实数据厂商或模型。浏览器用例不替代真实行情时点与授权的端到端验收。
+前端页面验收可运行 `cd web && npm ci && npx playwright install --with-deps chromium && npm run test:realtime-ui`。该命令需要下载 Playwright Chromium 及系统依赖；使用标注为模拟的 API 响应，在桌面和手机视口检查普通双厂商研究统一入口、工作台和快捷启动及自选股不显示行情要求、0.4 默认最近可用、确认、冻结时间和证据展示，并回归双来源报告、旧 observation 计划、历史报告与取消流程，不调用真实数据厂商或模型。浏览器用例不替代真实行情时点与授权的端到端验收。
 
-### 真实部署的盘中浏览器验收（显式运行）
+### 双厂商普通研究验收
+
+按 [TuShare 真实账号验收](docs/TUSHARE.md#account-acceptance) 从统一工作台发起普通 JSON 研究。计划不出现行情/厂商选择；确认后至少有一份非模拟 `1.0.4` 研报可在同一报告中打开 TuShare 与 Choice 证据，并核对 PDF。TuShare 正式数据要满足计划截止，Choice 为确认后的独立归档；核对日期标签和接收时间，不要求两家的时间相等，不把日成交观察当作实时成交。只有一个来源时可以验收降级路径，不能据此认定双厂商部署通过。此项与历史 observation 简报和独立 0.4 路径分别记录。
+
+### 单 Choice 部署的浏览器验收（显式运行）
 
 `npm run accept:live-realtime` 通过部署网站选择证券，确认页面不再提供“行情要求”控件，然后用同源 v0.4 API 显式创建 `realtime_trade` 计划，再回到网页检查计划、提交一次任务、等待交付、打开报告和证据侧栏。严格模式的 API 请求只用于保留兼容的盘中验收路径，网页默认流程始终省略 `quote_requirement`。脚本只使用当前登录会话，不拦截或改写网页请求；会消耗真实厂商和模型额度，并保留一项真实研究任务。它不在默认测试、`make verify` 或 CI 中运行，CI 环境显式拒绝。脚本没有实现真实厂商语义证明，成功仍依赖已核实的 TIME、交易状态、延迟及用途许可登记；非交易时段、停牌、弃权、权限不足或协议降级均为验收失败。
 
@@ -53,6 +57,8 @@ Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch 
 | T023 | 部署冒烟、备份恢复演练、压测 |
 
 `tests/fixtures/annual-review.json` 是财务公式的模拟回归样本（F01–F08），`check-docs` 会核对其算术。
+
+[`unified-close-cases.json`](tests/fixtures/unified-close-cases.json) 是 `1.0.4` 的模拟评测规格，覆盖必需数据缺失、仅可选数据缺失和双来源证据时点。该文件不直接运行；章节与行情门禁的可执行回归可用 `cd backend && go test ./internal/harness -run '^TestUnifiedClose'`。
 
 ## 3. 质量评测
 

@@ -10,10 +10,10 @@
 - 业务 JSON 响应带 `request_id`（健康检查和登录重定向除外）。日志不记录报告正文、密钥和 cookie。
 - 时间用 RFC3339；十进制数值用字符串；ID 为服务端生成的 UUID。
 - 现行 [OpenAPI 0.4 契约](contracts/openapi.json)已增加计划 `snapshot_mode`、任务/报告 `snapshot_as_of`、证据事件/接收时间与报告 `source_freshness`，并保留 0.3 与 observation.v1 的各自表示。[早期目标草案](contracts/drafts/openapi-0.4.json)保留设计背景，当前实现以主契约为准。`collect_latest` 的计划 `as_of` 是预览时点，任务冻结前 `snapshot_as_of=null`，冻结后与快照不可变绑定；既有请求及任务继续使用 `fixed_legacy` 原语义。
-- 版本协商协议：业务 JSON 接口请求 `Accept: application/vnd.vera.v0.4+json` 时使用 0.4 语义，成功 JSON 响应带相同 `Content-Type` 和 `Vary: Accept`；缺省或请求 `application/json` 沿用 0.3。尚未部署 0.4 的服务应返回 406，客户端还必须核对响应 `Content-Type`，防止旧服务忽略 `Accept` 并返回旧格式。健康检查、认证跳转和 PDF 按原媒体类型处理，错误可用原错误 JSON。新建 0.4 计划使用 `collect_latest`；读取历史任务时可返回 `fixed_legacy`。创建 0.4 计划和确认任务均须协商 0.4，不能跨版本确认；各版本的计划哈希按该版本规则计算并固定。T027 已为 `stock_analysis/1.1.0-demo.3` 实现该协议，创建和确认还须使用 0.4 `Content-Type`。创建计划必须显式提供 `quote_requirement=realtime_trade|latest_available`，其值参与哈希。`/me.research_protocol=v0.4` 表示已配置该路径；不证明真实字段与时延已验收。
+- 版本协商协议：业务 JSON 接口请求 `Accept: application/vnd.vera.v0.4+json` 时使用 0.4 语义，成功 JSON 响应带相同 `Content-Type` 和 `Vary: Accept`；缺省或请求 `application/json` 沿用普通 JSON。尚未部署 0.4 的服务应返回 406，客户端还必须核对响应 `Content-Type`，防止旧服务忽略 `Accept` 并返回旧格式。健康检查、认证跳转和 PDF 按原媒体类型处理，错误可用原错误 JSON。新建 0.4 计划使用 `collect_latest`；读取历史任务时可返回 `fixed_legacy`。创建与确认须协商同一版本并使用相应 `Content-Type`。0.4 的 `quote_requirement` 可省略，服务端默认 `latest_available` 并将解析后的值纳入计划哈希。`/me.research_protocol=v0.4` 表示已配置该路径，不证明真实字段与时延已验收。
 - 需要幂等的写请求带 `Idempotency-Key`（1–128 字符）。同一 workspace、方法、规范化路由和键：请求哈希相同则返回原响应，不同则返回 409。幂等记录保存 30 天。
 - 列表：`page_size` 默认 20、上限 100；不透明游标，按 `created_at` + `id` 稳定排序。
-- 新建行情计划默认使用最近可用行情。`/me.realtime_trade_available=true` 表示全市场策略允许选择严格实时；省略或 false 时客户端禁用该选项。确认计划及核验实际成交时仍重新检查。
+- 双厂商部署的新网页任务使用普通 JSON 创建固定截止计划；仅 Choice 部署继续按 `/me` 协商既有默认协议。网页不传 `quote_requirement`。`/me.realtime_trade_available=true` 表示现有 0.4 API 客户端可显式请求 `realtime_trade`；确认和核验实际成交时仍重新检查。已创建的计划按其原协议确认，历史报告也按其原协议读取。
 
 ## 2. 路由
 

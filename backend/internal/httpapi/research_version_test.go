@@ -94,6 +94,10 @@ func TestPlanConfirmationCannotSwitchProtocol(t *testing.T) {
 	if !planConfirmationVersion("collect_latest", nil, observationMedia) || !planConfirmationVersion("fixed_legacy", nil, legacyMedia) {
 		t.Fatal("historical confirmations lost their protocol")
 	}
+	latest := "latest_available"
+	if !planConfirmationVersion("fixed_legacy", &latest, legacyMedia) || planConfirmationVersion("fixed_legacy", &latest, realtimeMedia) {
+		t.Fatal("unified fixed-cutoff research must confirm through the ordinary JSON protocol")
+	}
 }
 
 func TestLegacyRepresentationStripsOnlyVersionedFields(t *testing.T) {

@@ -167,9 +167,12 @@ func (a *App) build(ctx context.Context) error {
 		a.Engine.RealtimeSource = &harness.BriefQuoteSource{ProviderID: a.Brief.ProviderID, Product: a.Brief.Product}
 	}
 	if a.TuShare != nil {
-		a.Engine.Skills = harness.TuShareSkills()
+		a.Engine.Skills = harness.UnifiedCloseSkills()
 		a.Engine.WithCloseResearchUse = a.Store.WithResearchUse
 		a.Engine.CloseResearchCutoff = a.Store.PublicationCutoff
+		if a.Brief != nil {
+			a.Engine.ResearchSupplements = []dataservice.ResearchSupplementSource{a.Brief}
+		}
 	}
 	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Primary.Now, ProviderID: a.Primary.ID()}
 	return nil

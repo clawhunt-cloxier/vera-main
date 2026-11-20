@@ -154,7 +154,8 @@ func (s *Server) responseGrant(r *http.Request) (responseGrant, error) {
 		if err != nil {
 			return nil, err
 		}
-		if strings.HasPrefix(path, "/api/v1/reports/") && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		if (strings.HasPrefix(path, "/api/v1/reports/") || version == harness.CloseUnifiedVersion && strings.HasPrefix(path, "/api/v1/calculations/")) &&
+			(r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			return s.snapshotGrant(r, task, version, grant), nil
 		}
 		return grant, nil
@@ -174,6 +175,10 @@ func (s *Server) snapshotGrant(r *http.Request, task uuid.UUID, version string, 
 	ctx := r.Context()
 	return func(fn func() error) error {
 		switch version {
+		case harness.CloseUnifiedVersion:
+			return checkSource(func(use func() error) error {
+				return s.Engine.WithUnifiedSources(ctx, ws, task, dataservice.SourceDisplay, func(pgx.Tx, []harness.BoundResearchSupplement) error { return use() })
+			}, "研报的冻结数据当前不可读取")(fn)
 		case harness.MixedObservationVersion:
 			return checkSource(func(use func() error) error {
 				return s.Engine.WithMixedDisplay(ctx, ws, task, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return use() })
@@ -255,7 +260,7 @@ func (s *Server) listGrant(r *http.Request) ([]string, responseGrant, error) {
 		}
 	}
 	if te == nil {
-		vs = append(vs, harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion)
+		vs = append(vs, closeHistoryVersions()...)
 	}
 	switch {
 	case ce == nil && te == nil:
@@ -285,7 +290,7 @@ func (s *Server) protectResponse(w http.ResponseWriter, r *http.Request, handle 
 	} else {
 		grant, err = s.responseGrant(r)
 		if s.combined() && strings.HasPrefix(r.URL.Path, "/api/v1/watchlist") {
-			r = withListVersions(r, []string{harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion})
+			r = withListVersions(r, closeHistoryVersions())
 		}
 	}
 	if err != nil {

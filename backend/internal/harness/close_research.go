@@ -19,9 +19,10 @@ import (
 const CloseResearchVersion = "1.0.1"
 const CloseCompanyVersion = "1.0.2"
 const CloseDisclosureVersion = "1.0.3" // stock_analysis and capital_flow
+const CloseUnifiedVersion = "1.0.4"
 
 func IsCloseResearchVersion(version string) bool {
-	return version == CloseResearchVersion || version == CloseCompanyVersion || version == CloseDisclosureVersion
+	return version == CloseResearchVersion || version == CloseCompanyVersion || version == CloseDisclosureVersion || version == CloseUnifiedVersion
 }
 
 func (e *Engine) realResearchDisabled() bool {
@@ -43,6 +44,126 @@ func (e *Engine) withCloseRights(ctx context.Context, fn func() error) error {
 
 func TuShareSkills() map[string]*Skill {
 	return tuShareSkills(true)
+}
+
+// UnifiedCloseSkills starts new company research without changing the
+// requirements of an already confirmed close research version.
+func UnifiedCloseSkills() map[string]*Skill {
+	registry := TuShareSkills()
+	for id, sk := range registry {
+		sk.Version = CloseUnifiedVersion
+		sections := sk.Sections
+		sk.Sections = func(p Params) []Section {
+			return unifiedCloseSections(id, sections(p))
+		}
+		if id == "deep_research" {
+			compute := sk.Compute
+			sk.Compute = func(b *builder, p Params) {
+				compute(b, p)
+				// The archived skill computed market facts for the observation
+				// section but did not give the charts a dedicated section.
+				for i := range b.S.Charts {
+					if b.S.Charts[i].ID == "price_adj" || b.S.Charts[i].ID == "relative_perf" {
+						b.S.Charts[i].Section = "S11"
+					}
+				}
+			}
+		}
+	}
+	return registry
+}
+
+func unifiedCloseSections(id string, base []Section) []Section {
+	sections := slices.Clone(base)
+	for i := range sections {
+		s := &sections[i]
+		switch id {
+		case "stock_analysis":
+			switch s.ID {
+			case "S2":
+				s.Guide = "说明证券上市及行业分类事实；只有存在可引用的当期年报原文或经核实的分部事实时，才讨论主营业务或收入构成。"
+			case "S3", "S4":
+				s.Required = false
+			case "S10":
+				s.Required = false
+				s.Title = "观察要点"
+				s.Groups = append(slices.Clone(s.Groups), "profile")
+				s.Kinds = []string{KFact, KComp, KInf, KScen}
+				s.Guide = "优先从已披露的财务事实或实际交易指标整理观察要点。缺少财报时仅写有依据的行情观察，不判断财务风险或预测价格。"
+			}
+		case "deep_research":
+			switch s.ID {
+			case "S2":
+				s.Title = "公司与行业概况"
+				s.Guide = "说明证券上市及行业分类事实；只有存在可引用的当期年报原文或经核实的分部事实时，才讨论商业模式或收入组成。"
+			case "S4", "S5", "S8":
+				s.Required = false
+			case "S10":
+				s.Required = false
+				s.Groups = append(slices.Clone(s.Groups), "profile", "position")
+				s.Kinds = []string{KFact, KComp, KInf, KScen}
+				s.Guide = "仅由可引用的公司、市场或财务事实整理观察要点。缺少财报时不得写成对财务风险或商业模式的判断，不预测价格或概率。"
+			}
+		}
+	}
+	if id == "deep_research" {
+		// Display observed market facts before any synthesis. Preserve the
+		// archived section identifiers for other company research sections.
+		sections = slices.Insert(sections, len(sections)-1,
+			sec("S11", "行情与交易", true, []string{"mkt"}, factKinds, 6, 120,
+				"说明有日期的最近收盘价及可计算的区间表现。它们是已收盘数据，不表述为盘中实时行情、不预测价格。"))
+	}
+	return sections
+}
+
+func applyUnifiedCloseCoverage(b *Bundle, id string, av map[string]Availability) {
+	marketSection := "S6"
+	switch id {
+	case "capital_flow":
+		marketSection = "S2"
+	case "deep_research":
+		marketSection = "S11"
+	}
+	validSince := previousCloseSession(b, b.Global("ref.trading_calendar"))
+	lastTrade := ""
+	completed := b.AsOf.In(cst)
+	if completed.Hour() < 15 {
+		completed = completed.AddDate(0, 0, -1)
+	}
+	lastCompletedDay := completed.Format(time.DateOnly)
+	for _, r := range b.Rows("mkt.daily_bar", b.Subject.ID) {
+		day := str(r, "trade_date")
+		close, hasClose := dec(r, "close")
+		_, tradingSession := slices.BinarySearch(b.Days, day)
+		if hasClose && close.IsPositive() && !boolean(r, "suspended") && day <= lastCompletedDay && tradingSession {
+			lastTrade = max(lastTrade, day)
+		}
+	}
+	if validSince == "" || lastTrade < validSince {
+		reason := "缺少近期已收盘交易日的有效价格或交易日历"
+		if lastTrade != "" {
+			reason += "，已取得的收盘价截至 " + lastTrade
+		}
+		av[marketSection] = unavailable(reason)
+	} else if av[marketSection].State == "" {
+		av[marketSection] = avail()
+	}
+	if id == "capital_flow" {
+		return
+	}
+	rs := b.Rows("ref.security", b.Subject.ID)
+	industry, ok := activeIndustry(b.Rows("ref.industry", b.Subject.ID), b.AsOf)
+	if len(rs) == 0 || str(rs[len(rs)-1], "list_date") == "" {
+		av["S2"] = unavailable("缺少可引用的证券上市档案")
+		return
+	}
+	if !ok || str(industry, "level1_name") == "" || str(industry, "level2_name") == "" {
+		av["S2"] = unavailable("缺少截至研究时点有效的申万行业分类")
+		return
+	}
+	if av["S2"].State == "unavailable" {
+		av["S2"] = limited("缺少可核对的最新年报主营业务原文；公司概况以已登记的证券档案和行业分类为基础")
+	}
 }
 
 func tuShareSkills(disclosures bool) map[string]*Skill {
@@ -104,7 +225,7 @@ func tuShareSkills(disclosures bool) map[string]*Skill {
 			if err != nil {
 				return nil, nil, err
 			}
-			err = checkCloseCoverage(ctx, e, id, s, *p, asOf, av, useDisclosures)
+			err = checkCloseCoverage(ctx, e, id, s, *p, asOf, av, useDisclosures, sk.Version == CloseUnifiedVersion)
 			return av, append(notes, "行情使用截至研究时点已入库的收盘数据，财报及公告使用同一时点已披露且已入库的版本。"), err
 		}
 	}
@@ -113,13 +234,16 @@ func tuShareSkills(disclosures bool) map[string]*Skill {
 	return registry
 }
 
-func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject dataservice.EntityRow, p Params, at time.Time, av map[string]Availability, disclosures bool) error {
+func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject dataservice.EntityRow, p Params, at time.Time, av map[string]Availability, disclosures, unified bool) error {
 	ds := []string{"ref.industry", "fin.statement", "doc.periodic_text", "news.item", "doc.announcement", "flow.margin", "mkt.daily_bar", "mkt.valuation_daily"}
 	if disclosures {
 		ds = append(ds, seatDayDataset, "flow.dragon_tiger", "flow.block_trade", "fund.disclosed_position")
 	}
 	if id == "deep_research" {
 		ds = append(ds, "fin.segment")
+	}
+	if unified && id != "capital_flow" {
+		ds = append(ds, "ref.security")
 	}
 	recs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: ds, EntityIDs: []uuid.UUID{subject.ID}, AsOf: at})
 	if err != nil {
@@ -130,6 +254,11 @@ func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject datas
 		return err
 	}
 	b := newBundle(at, subject, nil, append(recs, calendar...))
+	// Evaluate the real-evidence core after the historical availability
+	// rules, including for the early-return capital flow branch.
+	if unified {
+		defer applyUnifiedCloseCoverage(b, id, av)
+	}
 	validSince := previousCloseSession(b, calendar)
 	lastBar := lastMarketDay(b.Rows("mkt.daily_bar", subject.ID), "close", true)
 	lastVal := lastMarketDay(b.Rows("mkt.valuation_daily", subject.ID), "total_mv", false)

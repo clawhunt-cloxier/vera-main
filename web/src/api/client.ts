@@ -20,13 +20,10 @@ export type SkillId = S<'SkillId'>;
 export type QuoteRequirement = NonNullable<ResearchPlan['quote_requirement']>;
 export type ResearchProtocol = 'v0.4' | 'observation.v1' | 'legacy';
 
-export function combinedResearch(me: Me | undefined): boolean {
-  return (
-    !!me?.research_protocol &&
-    'closing_research_available' in me &&
-    me.closing_research_available === true
-  );
-}
+// The ordinary endpoint chooses the research implementation on deployments
+// with closing research. Choice-only deployments keep their negotiated default.
+export const newResearchProtocol = (me: Me | undefined): ResearchProtocol =>
+  me?.closing_research_available ? 'legacy' : (me?.research_protocol ?? 'legacy');
 
 const mediaTypes: Record<ResearchProtocol, string> = {
   'v0.4': 'application/vnd.vera.v0.4+json',

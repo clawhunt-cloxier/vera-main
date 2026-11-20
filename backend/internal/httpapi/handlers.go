@@ -399,7 +399,7 @@ func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) error {
 	if !slices.Contains(s.historyVersions(), p.SkillVersion) {
 		return errs.NotFound()
 	}
-	if p.QuoteRequirement != nil && !realtimeVersion(r) {
+	if p.SnapshotMode == "collect_latest" && p.QuoteRequirement != nil && !realtimeVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要 0.4 客户端")
 	}
 	if p.SnapshotMode == "collect_latest" && p.QuoteRequirement == nil && !observationVersion(r) && !realtimeVersion(r) {
@@ -476,7 +476,7 @@ func (s *Server) fillTasks(r *http.Request, ws uuid.UUID, rows []taskRow, withSt
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		for _, tr := range rows {
 			t := tr.t
-			if t.QuoteRequirement != nil && !realtimeVersion(r) {
+			if t.SnapshotMode == "collect_latest" && t.QuoteRequirement != nil && !realtimeVersion(r) {
 				return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该任务需要 0.4 客户端")
 			}
 			if t.SnapshotMode == "collect_latest" && t.QuoteRequirement == nil && !observationVersion(r) && !realtimeVersion(r) {
@@ -920,12 +920,18 @@ func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
 	// A published TuShare record may also be present in a standalone close
 	// task. That task grants its own path, independently of Choice.
 	var version string
+	var task uuid.UUID
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
-			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]) AND t.skill_version=ANY($3::text[]) LIMIT 1`, id, s.historyVersions(),
-			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion}).Scan(&version)
+		return tx.QueryRow(r.Context(), `SELECT t.id,t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
+			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]) AND t.skill_version=ANY($3::text[])
+			AND (t.skill_version<>$4 OR t.status='COMPLETED')
+			ORDER BY (t.skill_version=$4),t.id LIMIT 1`, id, s.historyVersions(),
+			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion, harness.CloseUnifiedVersion}, harness.CloseUnifiedVersion).Scan(&task, &version)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
+		if handled, err := s.supplementEvidence(w, r, ws, id); handled || err != nil {
+			return err
+		}
 		if s.Engine.Brief != nil {
 			if handled, err := s.briefEvidence(w, r); handled || err != nil {
 				return err
@@ -939,6 +945,9 @@ func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
 	grant, err := s.versionGrant(r, version)
 	if err != nil {
 		return err
+	}
+	if version == harness.CloseUnifiedVersion {
+		grant = s.snapshotGrant(r, task, version, grant)
 	}
 	// Query before taking the write-time grant to keep the transaction short.
 	recs, err := s.Store.Get(r.Context(), []uuid.UUID{id})
