@@ -14,6 +14,8 @@
 
 接口定义可公开查阅。用户登录后可查看自己的 Token、积分和独立订阅。请按部署账号实际返回验收，特别核对公告和新闻。参见 [官方 HTTP 说明](https://tushare.pro/document/1?doc_id=130)、[积分与接口](https://tushare.pro/document/1?doc_id=108)、[独立权限](https://tushare.pro/document/1?doc_id=290)、[日线](https://tushare.pro/document/2?doc_id=27)、[合并利润表](https://tushare.pro/document/2?doc_id=33)、[公告](https://tushare.pro/document/2?doc_id=176)。
 
+资金报告的季度持仓章节仍有缺口。陆股通持股需同时记录季末持股数和实际披露日。港交所自 2024-08-19 起在每季第五个北向交易日公布上季末持股。公募持仓还需识别同一组合的不同份额、区分前十大持仓和全部持仓，并核对当季股本分母。TuShare 的 `fund_portfolio` 按基金披露持有股份及公告日，仅将这些行相加不能得到已验证的全市场合计。[港交所查询说明](https://www3.hkexnews.hk/sdw/mutualmarket/SH.htm) · [TuShare 公募持仓字段](https://tushare.pro/document/2?doc_id=121)
+
 ## 配置与运行
 
 1. 在部署的密钥管理或权限为 0600 的环境文件中配置 `TUSHARE_TOKEN`。API、worker、同步和管理进程使用同一数据库和同一配置。生产环境还需已有的 OIDC 与真实模型配置。变量名见 [部署模板](../deploy/.env.example)。
@@ -33,6 +35,8 @@ vera admin provider model-use tushare on
 第一条只查配置中第一家公司的股票名录。同步会按标的采集及发布，并输出新增行数和缺数说明。一次同步覆盖标的、同行与对应披露。建议按账号配额安排收盘后的同步，`TUSHARE_MIN_INTERVAL` 的默认值为 500ms。同一数据库内的进程共享限频和冷却状态。部署或运维关闭用途后，后续同步不能自行恢复授权。使用 `vera admin provider model-use tushare off` 可在数据库即时撤销模型研究与相关展示。生产勿运行开发登录命令 `vera demo`。
 
 后台同步与手动同步共用厂商级采集锁。两个任务研究不同股票时也可能读取同一指数或同行。每批从第一次取数到发布完成均由同一数据库会话持锁。等待中的任务可取消，持锁会话断开后该批发布失败，已有记录保留。
+
+同步进程需要直连 PostgreSQL 或使用保留物理会话的连接池，以便在同一会话内发布。有效的空响应及其脱敏请求同样归档，供核对查询的股票和时段。
 
 ## 用真实账号验收
 
