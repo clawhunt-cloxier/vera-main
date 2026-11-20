@@ -68,18 +68,20 @@ type Mapper interface {
 | `corp.holder` | 前十大股东、前十大流通股东、股东户数 | 证券×报告期 | S D | 可选 |
 | `corp.pledge` | 股权质押比例 | 证券×日期 | S | 可选 |
 | `corp.insider_trade` | 董监高及大股东增减持 | 证券×公告 | S F | 可选 |
-| `corp.dividend` | 分红送转、回购 | 证券×公告 | S D | 可选 |
+| `corp.dividend`、`corp.dividend_implementation` | 实施公告状态及可核对的单次现金分红 | 证券×报告期×股权登记日 | S D | 可选 |
 | `corp.unlock` | 限售股解禁计划 | 证券×日期 | S F | 可选 |
 | `doc.announcement` | 公告元数据与正文（定期报告、临时公告）| 证券×公告 | S D | D 必需 |
 | `doc.periodic_text` | 定期报告正文分段（经营讨论、风险因素、主营业务）| 证券×报告期×段落 | S D | D 必需 |
 | `doc.call_transcript` | 业绩说明会、投资者关系活动记录 | 证券×活动 | D | 可选 |
 | `flow.margin` | 融资融券：融资余额、融资买入额、融券余量（交易所披露）| 证券×交易日 | S F | F 必需 |
 | `flow.dragon_tiger` | 龙虎榜：上榜原因、营业部/机构专用席位买卖额（交易所披露）| 证券×交易日 | F | 可选 |
+| `flow.dragon_tiger_day` | 逐日榜单覆盖、是否上榜、明细完整性及对应披露版本 | 证券×交易日 | S F | 可选 |
 | `flow.block_trade` | 大宗交易：价格、成交额、买卖营业部 | 证券×交易日 | F | 可选 |
 | `flow.connect_holding` | 陆股通持股（交易所按季披露）| 证券×季度 | S F | 可选 |
 | `flow.connect_turnover` | 陆股通成交总额与十大成交活跃股（交易所每日披露）| 市场/证券×交易日 | F | 可选 |
 | `flow.order_size` | 按单笔成交额分档的资金流（超大/大/中/小单），厂商加工口径 | 证券/行业×交易日 | S F | 可选 |
 | `fund.holding` | 公募基金持仓（季报前十大、半年报/年报全部）| 证券×报告期 | S F D | 可选 |
+| `fund.disclosed_position` | 单基金代码披露的持股量、报告期与实际公告日，不代表组合去重后的公募汇总 | 证券×基金代码×报告期×公告日 | F | 可选 |
 | `research.consensus` | 一致预期（EPS、营收、覆盖机构数）| 证券×年度 | S D | 可选 |
 | `research.report_meta` | 券商研报元数据与摘要（标题、机构、日期、评级原文）| 证券×报告 | D | 可选 |
 | `news.item` | 授权新闻（标题、来源、时间、正文或摘要）| 证券×条 | S D | 可选 |
