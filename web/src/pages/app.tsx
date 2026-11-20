@@ -49,10 +49,12 @@ export function App() {
   const [text, setText] = useState('');
   const nav = useNavigate();
   const plan = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (candidate?: PlanResult['candidates'][number]) => {
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
-        { text },
+        candidate
+          ? { skill_id: candidate.skill_id, subject_id: candidate.subject.id, params: {} }
+          : { text },
         { idem: newKey(), protocol }
       );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
@@ -139,9 +141,26 @@ export function App() {
               </form>
               {plan.error && <ErrorBox error={plan.error} />}
               {plan.data?.kind === 'choose' && (
-                <p className="notice">
-                  您的需求对应多个可能的研究对象，请在下方快速启动中选择具体对象。
-                </p>
+                <div className="notice">
+                  <p>请选择研究对象和研究类型。</p>
+                  {plan.data.candidates.length > 0 && (
+                    <div className="actions" role="list" aria-label="研究候选项">
+                      {plan.data.candidates.map((candidate) => (
+                        <button
+                          key={`${candidate.skill_id}-${candidate.subject.id}`}
+                          type="button"
+                          className="secondary"
+                          disabled={plan.isPending}
+                          onClick={() => plan.mutate(candidate)}
+                        >
+                          {skillTitle[candidate.skill_id] ?? candidate.skill_id} ·{' '}
+                          {candidate.subject.name}
+                          {candidate.subject.symbol ? `（${candidate.subject.symbol}）` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
               {plan.data?.kind === 'unsupported' && (
                 <p className="error">
