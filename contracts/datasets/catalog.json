@@ -856,6 +856,80 @@
           "unit": "CNY",
           "required": true,
           "description": "卖出金额"
+        },
+        {
+          "name": "period_scope",
+          "type": "enum",
+          "values": [
+            "single_day",
+            "multi_day",
+            "unknown"
+          ],
+          "unit": "none",
+          "required": false,
+          "description": "披露覆盖单日、累计多日或无法确定"
+        },
+        {
+          "name": "edition_id",
+          "type": "string",
+          "unit": "none",
+          "required": false,
+          "description": "对应的逐日披露版本"
+        }
+      ]
+    },
+    {
+      "id": "flow.dragon_tiger_day",
+      "title": "龙虎榜逐交易日覆盖",
+      "origin": "exchange",
+      "default_tier": "L2",
+      "grain": [
+        "entity_id",
+        "trade_date"
+      ],
+      "mvp": true,
+      "fields": [
+        {
+          "name": "trade_date",
+          "type": "date",
+          "unit": "none",
+          "required": true,
+          "description": "榜单交易日"
+        },
+        {
+          "name": "listed",
+          "type": "boolean",
+          "unit": "none",
+          "required": true,
+          "description": "经全市场当日披露核对的上榜状态"
+        },
+        {
+          "name": "seats_complete",
+          "type": "boolean",
+          "unit": "none",
+          "required": true,
+          "description": "当日上榜原因对应的买卖方向明细均完整"
+        },
+        {
+          "name": "reason_count",
+          "type": "integer",
+          "unit": "count",
+          "required": true,
+          "description": "当日不同上榜原因数"
+        },
+        {
+          "name": "reason_text",
+          "type": "text",
+          "unit": "none",
+          "required": false,
+          "description": "披露原因原文，每行一个原因"
+        },
+        {
+          "name": "edition_id",
+          "type": "string",
+          "unit": "none",
+          "required": true,
+          "description": "同一日覆盖与席位明细共用的内容版本"
         }
       ]
     },
@@ -1202,6 +1276,57 @@
       ]
     },
     {
+      "id": "fund.disclosed_position",
+      "title": "基金定期披露的个股持仓",
+      "origin": "company_filing",
+      "default_tier": "L2",
+      "grain": [
+        "entity_id",
+        "fund_code",
+        "period_end",
+        "announcement_date"
+      ],
+      "mvp": true,
+      "fields": [
+        {
+          "name": "fund_code",
+          "type": "string",
+          "unit": "none",
+          "required": true,
+          "description": "厂商披露的基金代码，可能对应单一份额类别"
+        },
+        {
+          "name": "period_end",
+          "type": "date",
+          "unit": "none",
+          "required": true,
+          "description": "持仓报告期末"
+        },
+        {
+          "name": "announcement_date",
+          "type": "date",
+          "unit": "none",
+          "required": true,
+          "description": "本次基金披露的公告日"
+        },
+        {
+          "name": "holding_shares",
+          "type": "decimal",
+          "unit": "shares",
+          "required": false,
+          "description": "该基金代码报告的持股数。同次公告有相互冲突的数量时留空"
+        },
+        {
+          "name": "observation_state",
+          "type": "enum",
+          "values": ["disclosed", "conflicting"],
+          "unit": "none",
+          "required": true,
+          "description": "单次披露的数量是否一致"
+        }
+      ]
+    },
+    {
       "id": "fund.holding",
       "title": "公募基金持仓汇总",
       "origin": "vendor_derived",
@@ -1359,6 +1484,34 @@
           "unit": "CNY",
           "required": true,
           "description": "现金分红总额"
+        },
+        {
+          "name": "report_period",
+          "type": "date",
+          "unit": "none",
+          "required": false,
+          "description": "分配所属报告期末"
+        },
+        {
+          "name": "implementation_date",
+          "type": "date",
+          "unit": "none",
+          "required": false,
+          "description": "实施公告披露日期"
+        },
+        {
+          "name": "payment_date",
+          "type": "date",
+          "unit": "none",
+          "required": false,
+          "description": "现金红利发放日期"
+        },
+        {
+          "name": "base_shares",
+          "type": "decimal",
+          "unit": "shares",
+          "required": false,
+          "description": "本次实施分配的股本基数（股）"
         }
       ]
     },

@@ -23,7 +23,7 @@ const apiURL = "https://api.tushare.pro"
 const maxPageBytes = 32 << 20
 
 // No endpoint or query name can be supplied by a research request or model.
-var registeredAPIs = strings.Fields("stock_basic trade_cal index_member_all daily adj_factor daily_basic index_daily sw_daily margin_secs margin_detail suspend_d stk_holdernumber moneyflow block_trade anns_d income balancesheet cashflow fina_mainbz major_news")
+var registeredAPIs = strings.Fields("stock_basic trade_cal index_member_all daily adj_factor daily_basic index_daily sw_daily margin_secs margin_detail suspend_d stk_holdernumber moneyflow block_trade top_list top_inst dividend fund_portfolio anns_d income balancesheet cashflow fina_mainbz major_news")
 
 type client struct {
 	token   string

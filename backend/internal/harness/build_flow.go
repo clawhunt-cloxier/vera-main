@@ -183,7 +183,7 @@ func idsOf(in []facts.Input) []uuid.UUID {
 func (b *builder) holdings(e uuid.UUID, group string) bool {
 	subj := b.name(e)
 	k := func(s string) string { return b.B.Entities[e].Code + "|hold|" + s }
-	found := false
+	found := b.disclosedFundPositions && b.fundPositionFacts(e, group)
 	if rs := b.B.Rows("flow.connect_holding", e); len(rs) >= 2 {
 		b.sources(rs)
 		found = true
