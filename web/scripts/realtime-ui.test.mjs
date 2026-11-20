@@ -554,6 +554,150 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
     }
   });
 
+  await t.test(
+    'combined workspace creates plans with each source and reads evidence from both',
+    async () => {
+      const context = await browser.newContext();
+      try {
+        const page = await context.newPage();
+        page.setDefaultTimeout(6000);
+        const json = 'application/json';
+        const closing = ['stock_analysis', 'capital_flow', 'deep_research'].map((id, index) => ({
+          ...stockSkill,
+          id,
+          title: ['个股分析', '资金动向', '深度研究'][index],
+        }));
+        const paths = [
+          ['个股分析 TuShare 收盘研究', json, 'stock_analysis'],
+          ['资金动向 TuShare 收盘研究', json, 'capital_flow'],
+          ['深度研究 TuShare 收盘研究', json, 'deep_research'],
+          ['日成交简报（Choice + TuShare）', observationMedia, 'stock_analysis'],
+          ['Choice 行情快照', media, 'stock_analysis'],
+        ];
+        let expected = paths[0];
+        let snapshotEnabled = true;
+        let freeText = false;
+        let requests = 0;
+        const sources = ['Choice', 'TuShare'].map((provider) => ({
+          dataset_id: 'mkt.daily_bar',
+          provider,
+          updated_at: plan.as_of,
+        }));
+        const currentPlan = () => ({
+          ...plan,
+          skill_id: expected[2],
+          skill_version: expected[1] === observationMedia ? '1.1.0-demo.4' : plan.skill_version,
+          quote_requirement: expected[1] === media ? 'realtime_trade' : null,
+          snapshot_mode: expected[1] === json ? 'fixed_legacy' : 'collect_latest',
+        });
+        await page.route(origin + '/app**', (route) =>
+          route.fulfill({ contentType: 'text/html', body: appHTML })
+        );
+        await page.route(origin + '/api/v1/**', async (route) => {
+          const req = route.request();
+          const path = new URL(req.url()).pathname.slice('/api/v1/'.length);
+          const accept = req.headers().accept;
+          const historyMedia = snapshotEnabled ? media : observationMedia;
+          const responseType = accept.includes(',') ? historyMedia : accept;
+          let body;
+          if (path === 'me')
+            body = {
+              onboarded: true,
+              csrf_token: 'test-csrf',
+              research_protocol: snapshotEnabled ? 'v0.4' : 'observation.v1',
+              realtime_trade_available: snapshotEnabled,
+              closing_research_available: true,
+            };
+          else if (path === 'skills') body = { items: accept === json ? closing : [stockSkill] };
+          else if (path === 'watchlist')
+            body = { items: [{ id: 'mock-watch', entity, snapshot: null }] };
+          else if (path === 'entities') {
+            assert.equal(accept, expected[1]);
+            body = { items: [entity] };
+          } else if (path === 'research-plans') {
+            assert.equal(accept, expected[1]);
+            assert.equal(req.headers()['content-type'], expected[1]);
+            assert.deepEqual(req.postDataJSON(), {
+              ...(freeText
+                ? { text: '研究这只股票' }
+                : { skill_id: expected[2], subject_id: entity.id, params: {} }),
+              ...(expected[1] === media ? { quote_requirement: 'realtime_trade' } : {}),
+            });
+            requests++;
+            body = { kind: 'plan', plan: currentPlan() };
+          } else if (path === 'research-plans/mock-plan') body = currentPlan();
+          else if (path === 'research-tasks' && req.method() === 'POST') {
+            assert.equal(accept, expected[1]);
+            assert.equal(req.headers()['content-type'], expected[1]);
+            body = task;
+          } else if (path === 'research-tasks') body = { items: [] };
+          else if (path === 'research-tasks/mock-task') body = task;
+          else if (path === 'reports/mock-report/versions/1')
+            body = {
+              ...report,
+              sources,
+              source_freshness: [{ ...freshness, dataset_id: 'mkt.daily_bar', provider: 'Choice' }],
+              claims: [{ ...report.claims[0], evidence_refs: ['choice', 'tushare'] }],
+            };
+          else if (path.startsWith('evidence/')) {
+            const provider = path.endsWith('choice') ? 'Choice' : 'TuShare';
+            body = { ...evidence, id: provider, provider, excerpt: provider + ' 模拟证据' };
+          } else throw new Error('Unexpected combined request ' + path);
+          await route.fulfill({ contentType: responseType, body: JSON.stringify(body) });
+        });
+        for (const entry of paths) {
+          expected = entry;
+          await page.goto(origin + '/app');
+          await page.getByRole('link', { name: expected[0], exact: true }).click();
+          await page.getByRole('combobox', { name: '搜索研究对象' }).fill(entity.symbol);
+          await page.getByRole('option', { name: new RegExp(entity.name) }).click();
+          if (expected[1] === media)
+            await page.getByRole('radio', { name: '交易中实时成交行情' }).check();
+          await page.getByRole('button', { name: '发起研究' }).click();
+          if (expected[1] === observationMedia)
+            await page.getByText(/按冻结时点取用已发布的 TuShare 数据/).waitFor();
+          await page.getByRole('button', { name: '提交任务' }).click();
+          await page.getByRole('link', { name: '查看报告' }).waitFor();
+          if (expected[1] === observationMedia) {
+            await page.getByRole('link', { name: '查看报告' }).click();
+            await page.getByRole('heading', { name: report.title }).waitFor();
+            assert.match(await page.locator('#limits').innerText(), /Choice · mkt.daily_bar/);
+            assert.match(await page.locator('#limits').innerText(), /TuShare · mkt.daily_bar/);
+            await page.getByRole('button', { name: '查看证据 1' }).click();
+            for (const provider of ['Choice', 'TuShare'])
+              await page.getByText(provider + ' 模拟证据', { exact: true }).waitFor();
+            assert.equal(
+              await page.getByRole('link', { name: '下载 PDF' }).getAttribute('href'),
+              '/api/v1/reports/mock-report/versions/1/pdf'
+            );
+          }
+        }
+        expected = paths[3];
+        freeText = true;
+        await page.goto(origin + '/app');
+        await page.getByLabel('研究数据').selectOption('observation.v1');
+        await page.getByLabel('描述你想要的研究').fill('研究这只股票');
+        await page.getByRole('button', { name: '开始研究' }).click();
+        await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
+        freeText = false;
+        expected = paths[0];
+        await page.goto(origin + '/app/watchlist');
+        await page.getByRole('button', { name: '分析' }).click();
+        await page.getByLabel('研究数据').selectOption('legacy');
+        await page.getByRole('button', { name: '生成研究计划' }).click();
+        await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
+        assert.equal(requests, 7);
+        snapshotEnabled = false;
+        await page.goto(origin + '/app');
+        await page.getByRole('link', { name: paths[0][0] }).waitFor();
+        assert.equal(await page.getByRole('link', { name: 'Choice 行情快照' }).count(), 0);
+        await page.getByRole('link', { name: paths[3][0] }).waitFor();
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
   for (const synthetic of [false, true]) {
     await t.test(synthetic ? 'fixture industry comparison' : 'TuShare close research', async () => {
       const context = await browser.newContext();

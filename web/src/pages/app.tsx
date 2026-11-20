@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
+  combinedResearch,
   fmtTime,
   get,
   newKey,
@@ -23,6 +24,7 @@ import {
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
 import { QuoteRequirementField } from '../components/QuoteRequirementField';
+import { ResearchSourceField } from '../components/ResearchSourceField';
 import { Empty, ErrorBox, Loading, Skeleton, SyntheticBanner, Tag } from '../components/ui';
 
 function supportsMode(schema: unknown, mode: string): boolean {
@@ -34,11 +36,14 @@ function supportsMode(schema: unknown, mode: string): boolean {
 
 export function App() {
   const me = useMe();
-  const protocol: ResearchProtocol = me.data?.research_protocol ?? 'legacy';
+  const combined = combinedResearch(me.data);
+  const [source, setSource] = useState<ResearchProtocol>('legacy');
+  const protocol: ResearchProtocol = combined ? source : (me.data?.research_protocol ?? 'legacy');
+  const registryProtocol = combined ? 'legacy' : protocol;
   const realtime = protocol === 'v0.4';
   const skills = useQuery({
-    queryKey: ['skills', protocol],
-    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol }),
+    queryKey: ['skills', registryProtocol],
+    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol: registryProtocol }),
     enabled: !!me.data,
     staleTime: 3600_000,
   });
@@ -67,7 +72,7 @@ export function App() {
     onSuccess: () => setText(''),
   });
   const synthetic = me.data?.synthetic ?? false;
-  const observation = me.data?.research_protocol === 'observation.v1';
+  const observation = protocol === 'observation.v1';
   const enabledSkills = skills.data?.items.filter((sk) => sk.available) ?? [];
   const stockOnly =
     enabledSkills.length > 0 &&
@@ -87,7 +92,7 @@ export function App() {
       {me.data && (
         <>
           {synthetic && <SyntheticBanner />}
-          {observation && (
+          {observation && !combined && (
             <p className="notice">
               当前可生成已接入股票的真实成交数据简报，包含成交量、成交额和换手率。使用已取得的日成交数据，非盘中实时行情；实时行情与财务分析尚未开放。
             </p>
@@ -97,7 +102,7 @@ export function App() {
               请选择行情要求。确认后采集并冻结一次数据快照，报告会分别显示行情实际时点与来源限制。
             </p>
           )}
-          {!synthetic && protocol === 'legacy' && stockOnly && (
+          {!combined && !synthetic && protocol === 'legacy' && stockOnly && (
             <p className="notice">
               可研究已登记的 A 股个股。行情采用收盘数据，财报与公告按计划截止时点取用。
             </p>
@@ -135,6 +140,16 @@ export function App() {
                   plan.mutate();
                 }}
               >
+                {combined && (
+                  <ResearchSourceField
+                    value={source}
+                    onChange={(value) => {
+                      setSource(value);
+                      plan.reset();
+                    }}
+                    snapshot={me.data.research_protocol === 'v0.4'}
+                  />
+                )}
                 <label htmlFor="queryInput" className="form-label">
                   描述你想要的研究
                 </label>
@@ -191,13 +206,22 @@ export function App() {
             <h2>快速启动</h2>
             {skills.error && <ErrorBox error={skills.error} />}
             <div className="grid">
-              {realtime && (
+              {(combined || realtime) && (
                 <Link
                   to="/app/quick/$skill"
                   params={{ skill: 'daily-observation' }}
                   className="card interactive"
                 >
-                  <h3>Choice 日成交简报</h3>
+                  <h3>{combined ? '日成交简报（Choice + TuShare）' : 'Choice 日成交简报'}</h3>
+                </Link>
+              )}
+              {combined && me.data.research_protocol === 'v0.4' && (
+                <Link
+                  to="/app/quick/$skill"
+                  params={{ skill: 'choice-quote' }}
+                  className="card interactive"
+                >
+                  <h3>Choice 行情快照</h3>
                 </Link>
               )}
               {skills.isLoading ? (
@@ -218,6 +242,7 @@ export function App() {
                     className="card interactive"
                   >
                     <h3>{sk.title}</h3>
+                    {combined && <span className="muted">TuShare 收盘研究</span>}
                     {!sk.available && <Tag tone="warn">暂不可用</Tag>}
                   </Link>
                 ))
@@ -295,18 +320,33 @@ export function App() {
   );
 }
 
-export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolean }) {
+export function Quick({
+  skill,
+  daily = false,
+  quote = false,
+}: {
+  skill: SkillId;
+  daily?: boolean;
+  quote?: boolean;
+}) {
   const me = useMe();
-  const realtime = !daily && me.data?.research_protocol === 'v0.4';
+  const combined = combinedResearch(me.data);
   const protocol: ResearchProtocol = daily
     ? 'observation.v1'
-    : (me.data?.research_protocol ?? 'legacy');
-  const dailyAvailable = !daily || !!me.data?.research_protocol;
+    : quote
+      ? 'v0.4'
+      : combined
+        ? 'legacy'
+        : (me.data?.research_protocol ?? 'legacy');
+  const realtime = protocol === 'v0.4';
+  const routeAvailable =
+    (!daily || !!me.data?.research_protocol) &&
+    (!quote || (combined && me.data?.research_protocol === 'v0.4'));
   const s = useQuery({
     queryKey: ['skills', protocol],
     queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol }),
     staleTime: 3600_000,
-    enabled: !!me.data && dailyAvailable,
+    enabled: !!me.data && routeAvailable,
     select: (d) => d.items.find((x) => x.id === skill),
   });
   const [subject, setSubject] = useState<Entity | null>(null);
@@ -317,7 +357,7 @@ export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolea
     subject?.kind === 'stock' &&
     supportsMode(s.data?.params_schema, 'company_industry');
   const selectedMode = allowComparison && mode === 'company_industry' ? mode : '';
-  const available = dailyAvailable && !!s.data?.available;
+  const available = routeAvailable && !!s.data?.available;
   const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
   const allowRealtime = me.data?.realtime_trade_available === true;
   const quoteRequirement = allowRealtime ? selection : 'latest_available';
@@ -346,7 +386,20 @@ export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolea
       <p>
         <Link to="/app">← 返回工作台</Link>
       </p>
-      <h1>{daily ? 'Choice 日成交简报' : s.data?.title}</h1>
+      <h1>
+        {daily
+          ? combined
+            ? '日成交简报（Choice + TuShare）'
+            : 'Choice 日成交简报'
+          : quote
+            ? 'Choice 行情快照'
+            : s.data?.title}
+      </h1>
+      {daily && combined && (
+        <p className="muted">
+          成交数据来自 Choice。已登记股票可补充 TuShare 数据，实际引用来源见报告。
+        </p>
+      )}
       {s.error && <ErrorBox error={s.error} />}
       {me.data && !s.isFetching && !s.error && !available && (
         <p className="notice">当前部署未开放这项研究。</p>
@@ -503,7 +556,9 @@ export function PlanReview({ id }: { id: string }) {
             )}
             {p.data.snapshot_mode === 'collect_latest' && !p.data.quote_requirement && (
               <p>
-                确认后采集真实成交数据并冻结快照。这是非实时简报；实时行情和未核实字段不纳入分析。
+                {p.data.skill_version === '1.1.0-demo.4'
+                  ? '确认后采集 Choice 日成交数据，并按冻结时点取用已发布的 TuShare 数据。报告会列明各项数据的实际来源和期间。'
+                  : '确认后采集真实成交数据并冻结快照。这是非实时简报；实时行情和未核实字段不纳入分析。'}
               </p>
             )}
           </div>
@@ -549,7 +604,7 @@ export function PlanReview({ id }: { id: string }) {
           </form>
           {submit.error && <ErrorBox error={submit.error} />}
           {me.data &&
-            (me.data.research_protocol ?? 'legacy') === 'legacy' &&
+            ((me.data.research_protocol ?? 'legacy') === 'legacy' || combinedResearch(me.data)) &&
             !p.data.executable &&
             p.data.reason_code === 'REQUIRED_SECTION_UNAVAILABLE' &&
             planProtocol(p.data) === 'legacy' &&

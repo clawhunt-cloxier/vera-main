@@ -6,6 +6,8 @@ export const Route = createFileRoute('/app/quick/$skill')({
     const { skill } = Route.useParams();
     return skill === 'daily-observation' ? (
       <Quick key={skill} skill="stock_analysis" daily />
+    ) : skill === 'choice-quote' ? (
+      <Quick key={skill} skill="stock_analysis" quote />
     ) : (
       <Quick key={skill} skill={skill as 'stock_analysis' | 'capital_flow' | 'deep_research'} />
     );

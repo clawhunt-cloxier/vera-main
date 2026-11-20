@@ -248,6 +248,12 @@ export function ReportView({
     [report]
   );
   const series = useCallback((id: string) => () => loaders.series(id), [loaders]);
+  const additionalSources = report.sources.filter(
+    (source) =>
+      !report.source_freshness?.some(
+        (item) => item.dataset_id === source.dataset_id && item.provider === source.provider
+      )
+  );
   return (
     <div className={'report' + (open ? ' with-panel' : '')}>
       <nav className="toc" aria-label="章节目录">
@@ -383,7 +389,7 @@ export function ReportView({
             ))}
           </ul>
           <h3>数据来源</h3>
-          {report.source_freshness && report.source_freshness.length > 0 ? (
+          {report.source_freshness && report.source_freshness.length > 0 && (
             <div className="sources">
               <p className="muted">
                 各来源时间按北京时间显示；实时传输不代表休市或停牌时发生新成交。
@@ -418,10 +424,11 @@ export function ReportView({
                 </div>
               ))}
             </div>
-          ) : (
+          )}
+          {additionalSources.length > 0 && (
             <ul className="sources">
-              {report.sources.map((s) => (
-                <li key={s.dataset_id}>
+              {additionalSources.map((s) => (
+                <li key={JSON.stringify([s.provider, s.dataset_id])}>
                   {s.provider} · {s.dataset_id} · 更新至 {fmtTime(s.updated_at)}
                 </li>
               ))}
