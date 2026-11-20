@@ -212,9 +212,59 @@ func filingNarrative(a disclosure, pages []string, ref, sha string, received tim
 	return records
 }
 
-var deductedLabel = regexp.MustCompile(`归属于(?:上市公司股东|母公司(?:股东|所有者))的?扣除非经常性损益(?:后)?的?净利润[（(]元[）)]`)
+const deductedName = `归属于(?:上市公司股东|母公司(?:股东|所有者))的?扣除非经常性损益(?:后)?的?净利润`
+
+var deductedLabel = regexp.MustCompile(deductedName + `[（(]元[）)]`)
+var wrappedDeductedLabel = regexp.MustCompile("^" + deductedName + "$")
 var firstYear = regexp.MustCompile(`(?:19|20)[0-9]{2}年`)
 var deductionAmount = regexp.MustCompile(`^\s*([-−]?[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)(?:\s|$)`)
+
+func compactFilingLine(line string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, norm.NFKC.String(line))
+}
+
+// Some annual tables put the currency and unit above the table. Poppler
+// centers the four numeric cells between two lines of the ownership label.
+func wrappedDeduction(lines []string, n int, year string) string {
+	if n < 2 || n+1 >= len(lines) || !wrappedDeductedLabel.MatchString(compactFilingLine(lines[n-1]+lines[n+1])) {
+		return ""
+	}
+	values := strings.Fields(lines[n])
+	if len(values) != 4 {
+		return ""
+	}
+	for _, v := range values {
+		if !deductionAmount.MatchString(v) {
+			return ""
+		}
+	}
+	// The header and unit must belong to this same table on this page.
+	for h := n - 2; h >= max(0, n-14); h-- {
+		header := compactFilingLine(lines[h])
+		years := firstYear.FindAllString(header, -1)
+		if len(years) == 0 && !strings.Contains(header, "单位") && !strings.Contains(header, "币种") {
+			continue
+		}
+		if len(years) != 3 || years[0] != year || years[1] >= years[0] || years[2] >= years[1] ||
+			header != "主要会计数据"+strings.Join(years, "") {
+			return ""
+		}
+		// Require the published percentage column in addition to the three
+		// named years. Without it four numbers are ambiguous.
+		before := compactFilingLine(strings.Join(lines[max(0, h-4):h], ""))
+		after := compactFilingLine(strings.Join(lines[h+1:min(n-1, h+4)], ""))
+		if strings.HasSuffix(before, "单位:元币种:人民币本期比上年同") && strings.HasPrefix(after, "期增减(%)") {
+			return values[0]
+		}
+		return ""
+	}
+	return ""
+}
 
 // The generic indicator field "扣非净利润" does not establish ownership.
 // Read only a labelled yuan row with a current-year first data column. Layouts
@@ -223,13 +273,9 @@ func filingDeducted(a disclosure, pages []string, ref, sha string, received time
 	var found dataservice.Record
 	for p, body := range pages {
 		var year string
-		for n, line := range strings.Split(body, "\n") {
-			compact := strings.Map(func(r rune) rune {
-				if unicode.IsSpace(r) {
-					return -1
-				}
-				return r
-			}, norm.NFKC.String(line))
+		lines := strings.Split(body, "\n")
+		for n, line := range lines {
+			compact := compactFilingLine(line)
 			if years := firstYear.FindAllString(compact, -1); len(years) >= 2 {
 				year = years[0]
 			}
@@ -238,19 +284,23 @@ func filingDeducted(a disclosure, pages []string, ref, sha string, received time
 			}
 			// Only strip split typography inside the label, preserving column
 			// separators in the values. Look up the actual end of the unit.
-			if !deductedLabel.MatchString(compact) {
+			var raw string
+			mappingVersion := 1
+			if deductedLabel.MatchString(compact) {
+				if unit := strings.IndexAny(line, "）)"); unit >= 0 {
+					_, width := utf8.DecodeRuneInString(line[unit:])
+					if m := deductionAmount.FindStringSubmatch(line[unit+width:]); m != nil {
+						raw = m[1]
+					}
+				}
+			} else if deductionAmount.MatchString(line) {
+				raw = wrappedDeduction(lines, n, year)
+				mappingVersion = 2
+			}
+			if raw == "" {
 				continue
 			}
-			unit := strings.IndexAny(line, "）)")
-			if unit < 0 {
-				continue
-			}
-			_, width := utf8.DecodeRuneInString(line[unit:])
-			m := deductionAmount.FindStringSubmatch(line[unit+width:])
-			if m == nil {
-				continue
-			}
-			val, err := filingDecimal(strings.NewReplacer(",", "", "−", "-").Replace(m[1]))
+			val, err := filingDecimal(strings.NewReplacer(",", "", "−", "-").Replace(raw))
 			if err != nil {
 				continue
 			}
@@ -260,6 +310,7 @@ func filingDeducted(a disclosure, pages []string, ref, sha string, received time
 			row := Row{RawRef: ref, RawSHA256: sha, RawLocator: fmt.Sprintf("PDF page=%d line=%d", p+1, n+1), ReceivedAt: received}
 			found = a.statement(row, "IS.net_profit_parent_deducted", val, "年度报告主要会计数据：扣除非经常性损益后归母净利润（元）", "")
 			found.SourceTier = "L1"
+			found.MappingVersion = mappingVersion
 		}
 	}
 	return found, found.RecordKey != ""

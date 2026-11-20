@@ -148,6 +148,37 @@ func TestFilingTextEvidenceAndOwnership(t *testing.T) {
 
 type filingRoundTrip func(*http.Request) (*http.Response, error)
 
+func TestDeductedAcrossThreeLines(t *testing.T) {
+	a := disclosure{code: "000000.SH", period: "20241231", id: "example"}
+	const page = `（一）主要会计数据
+                               单位：元 币种：人民币
+                                         本期比
+                                         上年同
+   主要会计数据      2024年      2023年                  2022年
+                                         期增减
+                                          (%)
+归属于上市公司股东的净
+                  12,300.00   15,200.00   -19.08   14,100.00
+利润
+归属于上市公司股东的扣
+                  -1,200.06    1,100.03   -209.09   9,100.65
+除非经常性损益的净利润`
+	r, ok := filingDeducted(a, []string{page}, "test/pdf", "digest", filingTestEnd)
+	if !ok || r.Payload["value"] != "-1200.06" || r.RawLocator != "PDF page=1 line=12" || r.MappingVersion != 2 {
+		t.Fatalf("wrapped table: record=%+v ok=%v", r, ok)
+	}
+	for _, replace := range [][2]string{
+		{"单位：元", "单位：万元"}, {"人民币", "美元"}, {"2024年", "2023年"},
+		{"上市公司股东的扣", "少数股东的扣"}, {"除非经常性损益的净利润", "除非经常性损益的每股收益"},
+		{"-1,200.06", "—"}, {"-209.09", ""}, {"主要会计数据      2024年", "季度数据      2024年"},
+		{"期增减", "期贡献比例"}, {"2022年", "2024年"},
+	} {
+		if _, ok := filingDeducted(a, []string{strings.ReplaceAll(page, replace[0], replace[1])}, "r", "s", filingTestEnd); ok {
+			t.Fatalf("accepted altered table with %q instead of %q", replace[1], replace[0])
+		}
+	}
+}
+
 func (f filingRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type filingSample struct {
