@@ -75,8 +75,10 @@ func demo(ctx context.Context, args []string) error {
 		}
 		return probeErr
 	}
-	if err := a.Sync(ctx); err != nil {
-		return err
+	if a.TuShare == nil {
+		if err := a.Sync(ctx); err != nil {
+			return err
+		}
 	}
 	if n := os.Getenv("VERA_DEMO_INVITES"); n != "0" {
 		codes, err := identity.CreateInvites(ctx, a.Pool, 3, 1, 14*24*time.Hour, "demo", "vera-demo")
@@ -104,9 +106,14 @@ func demo(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if a.TuShare != nil {
+		sync := startDemoTuShareSync(ctx, a.Pool, a.TuShare.SubjectCodes(), a.Sync)
+		defer sync.stop()
+		h = sync.readiness(h)
+	}
 	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
-	slog.Info("vera demo ready", "url", c.PublicURL, "web", c.WebDir != "")
+	slog.Info("vera demo listening", "url", c.PublicURL, "web", c.WebDir != "")
 	fmt.Printf("Vera 测试服务已启动：%s （开发登录；synthetic=%t）\n", c.PublicURL, a.Engine.Synthetic)
 	<-ctx.Done()
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

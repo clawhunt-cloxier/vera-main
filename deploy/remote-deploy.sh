@@ -14,8 +14,15 @@ prev="$(cat .current_image 2>/dev/null || true)"
 deploy() {
   VERA_IMAGE="$1" docker compose -f compose.yml pull || return 1
   VERA_IMAGE="$1" docker compose -f compose.yml up -d --remove-orphans || return 1
-  for i in $(seq 1 40); do
-    if curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1; then return 0; fi
+  local started=$SECONDS probe
+  while (( SECONDS - started < 1800 )); do
+    probe="$(curl -s --max-time 3 -w '%{http_code}' http://127.0.0.1:8080/readyz)" || probe=''
+    case "$probe" in
+      *200) return 0 ;;
+      '{"status":"not_ready","reason":"tushare_initial_sync"}'$'\n503') ;;
+      '{"status":"not_ready","reason":"tushare_sync_failed"}'$'\n503') return 1 ;;
+      *) (( SECONDS - started < 200 )) || return 1 ;;
+    esac
     sleep 5
   done
   return 1
