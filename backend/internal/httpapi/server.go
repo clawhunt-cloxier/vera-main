@@ -59,7 +59,8 @@ func (s *Server) Handler() http.Handler {
 			// through the final write. An outer buffer would release those
 			// grant locks before the protected bytes are actually sent.
 			boundRead := (r.Method == http.MethodGet || r.Method == http.MethodHead) && (strings.HasPrefix(r.URL.Path, "/api/v1/reports/") || strings.HasPrefix(r.URL.Path, "/api/v1/evidence/"))
-			if s.FullVendorResearch && !cancel && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
+			switch {
+			case s.FullVendorResearch && !cancel && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding":
 				allowed := func(fn func() error) error {
 					err := s.Store.WithResearchUse(r.Context(), fn)
 					var pe *dataservice.ProviderError
@@ -84,7 +85,7 @@ func (s *Server) Handler() http.Handler {
 						})
 					}
 				}
-			} else if s.Engine.Brief != nil && !cancel && !boundRead && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
+			case s.Engine.Brief != nil && !cancel && !boundRead && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding":
 				callErr = s.Engine.Brief.WithDisplayCatalog(r.Context(), func() error { return nil })
 				if callErr == nil {
 					// Render without retaining a permission transaction across
@@ -103,7 +104,7 @@ func (s *Server) Handler() http.Handler {
 						})
 					}
 				}
-			} else {
+			default:
 				callErr = s.protectBriefRead(w, r, f)
 			}
 			if err := callErr; err != nil {
@@ -301,15 +302,16 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 				return err
 			}
 			cancelAck := r.Pattern == "POST /api/v1/research-tasks/{id}/cancel" && stored.status == http.StatusNoContent
-			if s.Engine.Brief != nil && !cancelAck {
+			switch {
+			case s.Engine.Brief != nil && !cancelAck:
 				if err := s.Engine.Brief.WithDisplayCatalog(r.Context(), replay); err != nil {
 					httpx.Error(w, r, err)
 				}
-			} else if s.FullVendorResearch && !cancelAck {
+			case s.FullVendorResearch && !cancelAck:
 				if err := s.Store.WithResearchUse(r.Context(), replay); err != nil {
 					httpx.Error(w, r, errs.Unavailable("SOURCE_UNAVAILABLE", "TuShare 研究来源当前不可用"))
 				}
-			} else {
+			default:
 				_ = replay()
 			}
 			return

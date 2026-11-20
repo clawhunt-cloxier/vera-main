@@ -84,7 +84,7 @@ func retryable(err error) bool {
 
 func (c *client) probeSecurity(ctx context.Context, code string) error {
 	const api = "stock_basic"
-	body, err := json.Marshal(map[string]any{"api_name": api, "token": c.token, "params": map[string]any{"ts_code": code, "list_status": "L", "limit": 1}, "fields": "ts_code"})
+	body, err := json.Marshal(map[string]any{"api_name": api, "token": c.token, "params": map[string]any{"ts_code": code, "list_status": "L", "limit": 1, "offset": 0}, "fields": "ts_code"})
 	if err != nil {
 		return err
 	}
