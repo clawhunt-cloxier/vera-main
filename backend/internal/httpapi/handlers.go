@@ -342,8 +342,38 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
+		// Natural-language parsing normally resolves against the persisted
+		// catalog.  A combined deployment may have a much broader Choice
+		// security universe than the TuShare closing-research allowlist, so
+		// populate the search index on demand when the first parse found no
+		// object.  The parser is run again after the vendor identity has been
+		// persisted, and later plan construction still enforces source scope.
+		if res.Kind == "unsupported" && s.Engine.Brief != nil {
+			for _, term := range stockSearchTerms(t) {
+				found, searchErr := s.searchVendorStocks(r, term, "stock")
+				if searchErr != nil {
+					return errs.Unavailable("STOCK_SEARCH_UNAVAILABLE", "证券搜索暂时不可用，请稍后重试")
+				}
+				if len(found) == 0 {
+					continue
+				}
+				res, err = s.Engine.ParsePlan(r.Context(), ws, t)
+				if err != nil {
+					return err
+				}
+				break
+			}
+		}
 	case in.Text == nil && in.SubjectID != nil && in.SkillID != "" && len(in.Params) > 0 && string(in.Params) != "null":
-		ents, err := s.catalogFor(r).Entities(r.Context(), []uuid.UUID{*in.SubjectID})
+		catalog := s.catalogFor(r)
+		if s.Engine.Brief != nil && s.Engine.ChoiceCatalog != nil {
+			// A Choice-discovered security is intentionally absent from the
+			// TuShare research allowlist.  Resolve its identity from the broad
+			// catalog, then let plan construction enforce the selected skill's
+			// source permissions.
+			catalog = s.Engine.ChoiceCatalog
+		}
+		ents, err := catalog.Entities(r.Context(), []uuid.UUID{*in.SubjectID})
 		if err != nil {
 			return err
 		}
@@ -362,7 +392,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		case observationVersion(r):
 			p, err = s.Engine.BuildObservationPlan(r.Context(), ws, in.SkillID, sub, params)
 		default:
-			p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
+			if in.SkillID == "stock_analysis" && s.Engine.Brief != nil && s.FullVendorResearch &&
+				s.Engine.Store != nil && !s.Engine.Store.RegisteredResearchSubject(sub.Code) {
+				p, err = s.Engine.BuildObservationPlan(r.Context(), ws, in.SkillID, sub, params)
+			} else {
+				p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
+			}
 		}
 		if err != nil {
 			return err
@@ -384,6 +419,52 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 	}
 	httpx.JSON(w, r, 200, out)
 	return nil
+}
+
+// stockSearchTerms extracts likely security-name spans from a natural-language
+// request.  Choice's name lookup is deliberately strict, so sending the whole
+// sentence (for example, "分析中国移动最近行情") would miss the same security
+// that a direct "中国移动" lookup finds.
+func stockSearchTerms(text string) []string {
+	text = strings.TrimSpace(text)
+	terms := []string{}
+	seen := map[string]bool{}
+	add := func(v string) {
+		v = strings.Trim(v, " \t\r\n，。！？、；：:,.!?()（）[]【】")
+		if len([]rune(v)) < 2 || seen[v] {
+			return
+		}
+		if !isStockName(v) {
+			return
+		}
+		seen[v] = true
+		terms = append(terms, v)
+	}
+	add(text)
+	for _, word := range []string{
+		"最近可用行情", "最近行情", "近一个月", "近一周", "近三个月", "近半年", "近一年",
+		"研究报告", "深度研究", "资金动向", "资金面", "个股分析", "基本面", "财务面",
+		"行情", "分析", "研究", "看看", "查看", "了解", "个股", "财务", "估值",
+	} {
+		text = strings.ReplaceAll(text, word, " ")
+	}
+	add(text)
+	var run []rune
+	flush := func() {
+		if len(run) >= 2 {
+			add(string(run))
+		}
+		run = nil
+	}
+	for _, ch := range text {
+		if unicode.IsLetter(ch) || unicode.IsNumber(ch) {
+			run = append(run, ch)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return terms
 }
 
 func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) error {

@@ -91,7 +91,16 @@ func (e *Engine) ParsePlan(ctx context.Context, ws uuid.UUID, text string) (*Par
 			break
 		}
 	}
-	ents, err := e.Store.Mentioned(ctx, text)
+	// In a combined deployment the Choice catalog contains the complete
+	// real-security search index, while the research store is intentionally
+	// restricted to the TuShare subjects registered for closing research.
+	// Resolve user mentions against the broad catalog first.  The selected
+	// skill still decides which source path is allowed below.
+	catalog := e.Store
+	if e.ChoiceCatalog != nil {
+		catalog = e.ChoiceCatalog
+	}
+	ents, err := catalog.Mentioned(ctx, text)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +114,7 @@ func (e *Engine) ParsePlan(ctx context.Context, ws uuid.UUID, text string) (*Par
 			return unsupported(reason), nil
 		}
 		for _, m := range mentions {
-			found, err := e.Store.Search(ctx, m, "", 3)
+			found, err := catalog.Search(ctx, m, "", 3)
 			if err != nil {
 				return nil, err
 			}
@@ -140,6 +149,17 @@ func (e *Engine) ParsePlan(ctx context.Context, ws uuid.UUID, text string) (*Par
 		return res, nil
 	}
 	en := ents[0]
+	if en.Kind == "stock" && e.Brief != nil && e.hasCloseSkills() && e.Store != nil &&
+		!e.Store.RegisteredResearchSubject(en.Code) {
+		if skill != "" && skill != "stock_analysis" {
+			return unsupported("这只股票尚未登记收盘研究数据，目前只能生成 Choice 日成交观察简报。"), nil
+		}
+		p, err := e.BuildObservationPlan(ctx, ws, "stock_analysis", en, map[string]any{})
+		if err != nil {
+			return nil, err
+		}
+		return &ParseResult{Kind: "plan", Plan: p, Candidates: []Candidate{}, Suggestions: []string{}}, nil
+	}
 	if e.Brief != nil && !e.hasCloseSkills() {
 		p, err := e.BuildPlan(ctx, ws, "stock_analysis", en, map[string]any{})
 		if err != nil {

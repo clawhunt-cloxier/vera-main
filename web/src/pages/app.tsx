@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
+  ApiError,
   fmtTime,
   get,
   newKey,
@@ -390,7 +391,22 @@ export function PlanReview({ id }: { id: string }) {
   const me = useMe();
   const p = useQuery({
     queryKey: ['plan', id],
-    queryFn: () => get<ResearchPlan>(`/api/v1/research-plans/${id}`),
+    queryFn: async () => {
+      // A text request can be created through the historical JSON protocol
+      // before the server discovers that the selected security needs a
+      // Choice collect_latest plan.  Read plan metadata through the
+      // observation representation first so refreshes can recover the
+      // original confirmation protocol, then fall back for fixture and
+      // TuShare-only deployments that do not expose that representation.
+      try {
+        return await get<ResearchPlan>(`/api/v1/research-plans/${id}`, {
+          protocol: 'observation.v1',
+        });
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.status !== 406) throw err;
+        return get<ResearchPlan>(`/api/v1/research-plans/${id}`, { protocol: 'legacy' });
+      }
+    },
     staleTime: 60_000,
   });
   const [disabled, setDisabled] = useState<string[]>([]);
