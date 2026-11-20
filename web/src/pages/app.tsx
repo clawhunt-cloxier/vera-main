@@ -15,6 +15,7 @@ import {
   type Entity,
   type PlanResult,
   type ResearchPlan,
+  type ResearchProtocol,
   type Skill,
   type SkillId,
   type Task,
@@ -48,10 +49,12 @@ export function App() {
   const [text, setText] = useState('');
   const nav = useNavigate();
   const plan = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (candidate?: PlanResult['candidates'][number]) => {
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
-        { text },
+        candidate
+          ? { skill_id: candidate.skill_id, subject_id: candidate.subject.id, params: {} }
+          : { text },
         { idem: newKey(), protocol }
       );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
@@ -138,9 +141,26 @@ export function App() {
               </form>
               {plan.error && <ErrorBox error={plan.error} />}
               {plan.data?.kind === 'choose' && (
-                <p className="notice">
-                  您的需求对应多个可能的研究对象，请在下方快速启动中选择具体对象。
-                </p>
+                <div className="notice">
+                  <p>请选择研究对象和研究类型。</p>
+                  {plan.data.candidates.length > 0 && (
+                    <div className="actions" role="list" aria-label="研究候选项">
+                      {plan.data.candidates.map((candidate) => (
+                        <button
+                          key={`${candidate.skill_id}-${candidate.subject.id}`}
+                          type="button"
+                          className="secondary"
+                          disabled={plan.isPending}
+                          onClick={() => plan.mutate(candidate)}
+                        >
+                          {skillTitle[candidate.skill_id] ?? candidate.skill_id} ·{' '}
+                          {candidate.subject.name}
+                          {candidate.subject.symbol ? `（${candidate.subject.symbol}）` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
               {plan.data?.kind === 'unsupported' && (
                 <p className="error">
@@ -259,7 +279,14 @@ export function Quick({ skill }: { skill: SkillId }) {
     enabled: !!me.data,
     select: (d) => d.items.find((x) => x.id === skill),
   });
-  const [subject, setSubject] = useState<Entity | null>(null);
+  const [selection, setSelection] = useState<{ entity: Entity; protocol: ResearchProtocol } | null>(
+    null
+  );
+  const subject = selection?.entity;
+  const searchObservation =
+    skill === 'stock_analysis' &&
+    !!me.data?.closing_research_available &&
+    (me.data.research_protocol === 'observation.v1' || me.data.research_protocol === 'v0.4');
   const [mode, setMode] = useState('');
   const stockOnly = s.data?.subject_kinds.length === 1 && s.data.subject_kinds[0] === 'stock';
   const allowComparison =
@@ -279,7 +306,7 @@ export function Quick({ skill }: { skill: SkillId }) {
           subject_id: subject.id,
           params: selectedMode ? { mode: selectedMode } : {},
         },
-        { idem: newKey(), protocol }
+        { idem: newKey(), protocol: selection.protocol }
       );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
       return r;
@@ -309,9 +336,11 @@ export function Quick({ skill }: { skill: SkillId }) {
             研究对象
             <EntitySearch
               kinds={s.data?.subject_kinds}
-              onPick={setSubject}
+              onPick={(entity, source) => setSelection({ entity, protocol: source ?? protocol })}
+              onEdit={() => setSelection(null)}
               protocol={protocol}
-              placeholder={stockOnly ? '输入已登记的股票名称或代码' : undefined}
+              searchObservation={searchObservation}
+              placeholder={stockOnly ? '输入 A 股简称或代码' : undefined}
             />
           </label>
           {skill === 'deep_research' && available && (
