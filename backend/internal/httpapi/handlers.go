@@ -31,6 +31,9 @@ func (s *Server) meBody(r *http.Request) (Me, error) {
 	_ = s.Pool.QueryRow(r.Context(), `SELECT display_name FROM users WHERE id=$1`, p.UserID).Scan(&name)
 	me := Me{UserID: p.UserID, WorkspaceID: p.WorkspaceID, CSRF: p.CSRF, Persona: p.Persona, Onboarded: p.WorkspaceID != nil,
 		Synthetic: s.Synthetic, DisplayName: name}
+	if s.FullVendorResearch {
+		me.ClosingResearchAvailable = s.closeGrant(r)(noop) == nil
+	}
 	quote, err := s.quoteCapabilities(r.Context())
 	if err != nil {
 		return me, err
@@ -104,29 +107,30 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	// Try local store first (previously cached vendor results and demo data)
-	ents, err := s.Store.Search(r.Context(), q, kind, 20)
+	choice := s.choiceRequest(r)
+	ents, err := s.catalogFor(r).Search(r.Context(), q, kind, 20)
 	if err != nil {
 		return err
 	}
 	queryCode := strings.ToUpper(q)
 	for _, e := range ents {
-		if s.Engine.Brief != nil && (kind == "" || kind == "stock") {
+		if choice && (kind == "" || kind == "stock") {
 			// The local index is fuzzy. A near match must not mask a new
 			// qualified code; a bare code needs all vendor market candidates.
 			if isStockCode(q) || (emquantBriefCodeLike(queryCode) && (e.Kind != "stock" || e.Code != queryCode)) {
 				continue
 			}
 		}
-		items = append(items, toEntity(e, s.Engine.Skills))
+		items = append(items, toEntity(e, s.skillsFor(r)))
 	}
 
 	// If local search found nothing and we have a real vendor, query Choice in real-time
-	if len(items) == 0 && s.Engine.Brief != nil {
+	if len(items) == 0 && choice {
 		if vendorEnts, err := s.searchVendorStocks(r, q, kind); err != nil {
 			return errs.Unavailable("STOCK_SEARCH_UNAVAILABLE", "证券搜索暂时不可用，请稍后重试")
 		} else {
 			for _, e := range vendorEnts {
-				items = append(items, toEntity(e, s.Engine.Skills))
+				items = append(items, toEntity(e, s.skillsFor(r)))
 			}
 		}
 	}
@@ -232,7 +236,7 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 			if label == "" {
 				label = code
 			}
-			e, err := s.Store.UpsertSearchEntity(r.Context(), "stock", code, label, nil)
+			e, err := s.catalogFor(r).UpsertSearchEntity(r.Context(), "stock", code, label, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -274,12 +278,10 @@ func emquantBriefCodeLike(code string) bool {
 func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 	paused := harness.KillSwitch(r.Context(), s.Pool)
 	items := []Skill{}
+	registry := s.skillsFor(r)
 	for _, id := range skillOrder {
-		sk := s.Engine.Skills[id]
-		if id == "stock_analysis" && realtimeVersion(r) && s.Engine.RealtimeEnabled() {
-			sk = harness.RealtimeBriefSkill()
-		}
-		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (s.Engine.Brief == nil || id == "stock_analysis")})
+		sk := registry[id]
+		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (!s.choiceRequest(r) || id == "stock_analysis")})
 	}
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
 	return nil
@@ -288,7 +290,7 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 // ---- plans ----
 
 func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
-	if s.Engine.Brief != nil && !realtimeVersion(r) && !observationVersion(r) {
+	if s.Engine.Brief != nil && !s.FullVendorResearch && !realtimeVersion(r) && !observationVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "真实简报需要新版客户端")
 	}
 	var in struct {
@@ -322,14 +324,16 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		var err error
 		if realtimeVersion(r) {
 			res, err = s.Engine.ParseRealtimePlan(r.Context(), ws, t, requirement)
-			if err != nil {
-				return err
-			}
-		} else if res, err = s.Engine.ParsePlan(r.Context(), ws, t); err != nil {
+		} else if observationVersion(r) {
+			res, err = s.Engine.ParseObservationPlan(r.Context(), ws, t)
+		} else {
+			res, err = s.Engine.ParsePlan(r.Context(), ws, t)
+		}
+		if err != nil {
 			return err
 		}
 	case in.Text == nil && in.SubjectID != nil && in.SkillID != "" && len(in.Params) > 0 && string(in.Params) != "null":
-		ents, err := s.Store.Entities(r.Context(), []uuid.UUID{*in.SubjectID})
+		ents, err := s.catalogFor(r).Entities(r.Context(), []uuid.UUID{*in.SubjectID})
 		if err != nil {
 			return err
 		}
@@ -344,6 +348,8 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		var p *harness.Plan
 		if realtimeVersion(r) {
 			p, err = s.Engine.BuildRealtimePlan(r.Context(), ws, in.SkillID, sub, params, requirement)
+		} else if observationVersion(r) {
+			p, err = s.Engine.BuildObservationPlan(r.Context(), ws, in.SkillID, sub, params)
 		} else {
 			p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
 		}
@@ -363,7 +369,7 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		out.Plan = &pl
 	}
 	for _, c := range res.Candidates {
-		out.Candidates = append(out.Candidates, Candidate{SkillID: c.SkillID, Subject: toEntity(c.Subject, s.Engine.Skills), Label: c.Label})
+		out.Candidates = append(out.Candidates, Candidate{SkillID: c.SkillID, Subject: toEntity(c.Subject, s.skillsFor(r)), Label: c.Label})
 	}
 	httpx.JSON(w, r, 200, out)
 	return nil

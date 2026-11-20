@@ -63,6 +63,7 @@ func toEntity(e dataservice.EntityRow, skills map[string]*harness.Skill) Entity 
 type Quota = harness.Quota
 
 type Me struct {
+	ClosingResearchAvailable bool `json:"closing_research_available,omitempty"`
 	RealtimeTradeAvailable bool       `json:"realtime_trade_available,omitempty"`
 	ResearchProtocol       string     `json:"research_protocol,omitempty"`
 	UserID                 uuid.UUID  `json:"user_id"`

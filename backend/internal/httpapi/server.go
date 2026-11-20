@@ -12,9 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,63 +48,7 @@ func (s *Server) Handler() http.Handler {
 	authNoWS := s.ID.Require(false)
 	h := func(f func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			var callErr error
-			// Cancellation is a workspace business command. It must remain
-			// available after a vendor display grant is revoked so a queued job
-			// cannot be kept alive by the failed closed display gate.
-			cancel := strings.HasSuffix(r.URL.Path, "/cancel") && r.Method == http.MethodPost
-			// Reports and evidence perform their own snapshot authorization
-			// through the final write. An outer buffer would release those
-			// grant locks before the protected bytes are actually sent.
-			boundRead := (r.Method == http.MethodGet || r.Method == http.MethodHead) && (strings.HasPrefix(r.URL.Path, "/api/v1/reports/") || strings.HasPrefix(r.URL.Path, "/api/v1/evidence/"))
-			switch {
-			case s.FullVendorResearch && !cancel && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding":
-				allowed := func(fn func() error) error {
-					err := s.Store.WithResearchUse(r.Context(), fn)
-					var pe *dataservice.ProviderError
-					if errors.As(err, &pe) {
-						return errs.Unavailable("SOURCE_UNAVAILABLE", "TuShare 研究来源当前不可用")
-					}
-					return err
-				}
-				callErr = allowed(func() error { return nil })
-				if callErr == nil {
-					buf := httptest.NewRecorder()
-					buf.Header().Set("Content-Type", w.Header().Get("Content-Type"))
-					callErr = s.protectBriefRead(buf, r, f)
-					if callErr == nil {
-						callErr = allowed(func() error {
-							for k, v := range buf.Header() {
-								w.Header()[k] = v
-							}
-							w.WriteHeader(buf.Code)
-							_, err := w.Write(buf.Body.Bytes())
-							return err
-						})
-					}
-				}
-			case s.Engine.Brief != nil && !cancel && !boundRead && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding":
-				callErr = s.Engine.Brief.WithDisplayCatalog(r.Context(), func() error { return nil })
-				if callErr == nil {
-					// Render without retaining a permission transaction across
-					// nested database work. Reauthorize while flushing bytes.
-					buf := httptest.NewRecorder()
-					buf.Header().Set("Content-Type", w.Header().Get("Content-Type"))
-					callErr = s.protectBriefRead(buf, r, f)
-					if callErr == nil {
-						callErr = s.Engine.Brief.WithDisplayCatalog(r.Context(), func() error {
-							for k, values := range buf.Header() {
-								w.Header()[k] = values
-							}
-							w.WriteHeader(buf.Code)
-							_, err := w.Write(buf.Body.Bytes())
-							return err
-						})
-					}
-				}
-			default:
-				callErr = s.protectBriefRead(w, r, f)
-			}
+			callErr := s.protectResponse(w, r, f)
 			if err := callErr; err != nil {
 				httpx.Error(w, r, err)
 			}
@@ -295,18 +237,14 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 				_, err := w.Write(stored.resp)
 				return err
 			}
-			cancelAck := r.Pattern == "POST /api/v1/research-tasks/{id}/cancel" && stored.status == http.StatusNoContent
-			switch {
-			case s.Engine.Brief != nil && !cancelAck:
-				if err := s.Engine.Brief.WithDisplayCatalog(r.Context(), replay); err != nil {
-					httpx.Error(w, r, err)
-				}
-			case s.FullVendorResearch && !cancelAck:
-				if err := s.Store.WithResearchUse(r.Context(), replay); err != nil {
-					httpx.Error(w, r, errs.Unavailable("SOURCE_UNAVAILABLE", "TuShare 研究来源当前不可用"))
-				}
-			default:
-				_ = replay()
+			// Replays use the same grant as the original command, including
+			// the persisted plan version for task creation.
+			grant, err := s.responseGrant(r)
+			if err == nil {
+				err = grant(replay)
+			}
+			if err != nil {
+				httpx.Error(w, r, err)
 			}
 			return
 		}
@@ -336,6 +274,9 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 // scopes (a single environment variable). The empty fixture scope is stable.
 func (s *Server) replayScope() string {
 	if s.FullVendorResearch {
+		if source := s.Engine.Brief; source != nil {
+			return "v3\x00tushare+emquant\x00" + source.ProviderID + "\x00" + source.Product
+		}
 		return "v2\x00tushare"
 	}
 	if source := s.Engine.Brief; source != nil {
