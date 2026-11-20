@@ -105,9 +105,6 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 	if e.realResearchDisabled() {
 		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
-	if e.Brief != nil && !e.hasCloseSkills() && skillID != "stock_analysis" {
-		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "真实数据模式当前仅提供成交数据简报")
-	}
 	sk, ok := e.Skills[skillID]
 	if !ok {
 		return nil, errs.Unprocessable("UNKNOWN_SKILL", "不支持的研究技能")
