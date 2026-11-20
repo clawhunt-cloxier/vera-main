@@ -29,6 +29,7 @@ func TestStockSearchTermsExtractsNamesFromResearchText(t *testing.T) {
 		"分析中国移动最近可用行情":     {"中国移动"},
 		"看看 中国石油 最近行情":     {"中国石油"},
 		"深度研究贵州茅台近一个月的基本面": {"贵州茅台"},
+		"分析美的集团最近行情":       {"美的集团"},
 	} {
 		got := stockSearchTerms(input)
 		for _, term := range want {
