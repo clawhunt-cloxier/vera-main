@@ -23,7 +23,7 @@ func (s *Server) historyVersions() []string {
 	}
 	if sk := s.Engine.Skills["stock_analysis"]; sk != nil {
 		if harness.IsCloseResearchVersion(sk.Version) {
-			return append(versions, harness.CloseResearchVersion, harness.CloseCompanyVersion)
+			return append(versions, harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion)
 		}
 		if s.Engine.Synthetic && sk.Version == "1.0.0" {
 			return []string{sk.Version}

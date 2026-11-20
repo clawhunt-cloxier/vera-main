@@ -255,7 +255,7 @@ func (s *Server) listGrant(r *http.Request) ([]string, responseGrant, error) {
 		}
 	}
 	if te == nil {
-		vs = append(vs, harness.CloseResearchVersion, harness.CloseCompanyVersion)
+		vs = append(vs, harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion)
 	}
 	switch {
 	case ce == nil && te == nil:
@@ -285,7 +285,7 @@ func (s *Server) protectResponse(w http.ResponseWriter, r *http.Request, handle 
 	} else {
 		grant, err = s.responseGrant(r)
 		if s.combined() && strings.HasPrefix(r.URL.Path, "/api/v1/watchlist") {
-			r = withListVersions(r, []string{harness.CloseResearchVersion, harness.CloseCompanyVersion})
+			r = withListVersions(r, []string{harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion})
 		}
 	}
 	if err != nil {

@@ -93,6 +93,11 @@ func (b *builder) margin(e uuid.UUID, n int, group, section string) bool {
 
 // seats builds dragon-tiger and block-trade facts over the window.
 func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
+	if b.disclosedSeats {
+		disclosures := b.B.seatDisclosures(e, n)
+		b.addDisclosedSeats(disclosures, e, n, group, section)
+		return b.blockTrades(e, n, group) || len(disclosures.days) > 0
+	}
 	days := b.B.Window(n)
 	wl := windowLabel(n, days)
 	subj := b.name(e)
@@ -101,7 +106,14 @@ func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
 	var dtDays []string
 	var instBuy, instSell []facts.Input
 	t := facts.Table{Title: subj + " 龙虎榜上榜记录", Columns: []string{"交易日", "上榜原因", "席位", "席位类型", "买入额（万元）", "卖出额（万元）"}}
-	dr := b.B.Rows("flow.dragon_tiger", e)
+	// These versions predate TuShare's per-day seat editions. Only the new
+	// reader can reconcile top_inst against its corresponding top_list.
+	var dr []dataservice.StoredRecord
+	for _, r := range b.B.Rows("flow.dragon_tiger", e) {
+		if r.ProviderID != "tushare" {
+			dr = append(dr, r)
+		}
+	}
 	b.sources(dr)
 	for _, r := range dr {
 		if !inWindow(r, "trade_date", days) {
@@ -136,8 +148,19 @@ func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
 		}
 		b.S.Tables[section] = append(b.S.Tables[section], t)
 	}
+	return b.blockTrades(e, n, group) || found
+}
+
+func (b *builder) blockTrades(e uuid.UUID, n int, group string) bool {
+	days := b.B.Window(n)
+	wl := windowLabel(n, days)
+	subj := b.name(e)
+	k := func(s string) string { return b.B.Entities[e].Code + "|seats|" + s }
+	found := false
 	bt := b.B.Rows("flow.block_trade", e)
-	b.sources(bt)
+	if !b.disclosedSeats {
+		b.sources(bt)
+	}
 	bars := map[string]dataservice.StoredRecord{}
 	for _, r := range b.B.Rows("mkt.daily_bar", e) {
 		bars[str(r, "trade_date")] = r
@@ -145,6 +168,15 @@ func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
 	var amts []facts.Input
 	var lastBT *dataservice.StoredRecord
 	for i, r := range bt {
+		if b.disclosedSeats {
+			if _, ok := slices.BinarySearch(days, str(r, "trade_date")); !ok {
+				continue
+			}
+			if _, ok := dec(r, "amount"); !ok {
+				continue
+			}
+			b.source(r)
+		}
 		if !inWindow(r, "trade_date", days) {
 			continue
 		}

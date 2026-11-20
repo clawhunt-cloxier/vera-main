@@ -700,7 +700,7 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
 	case emquant.ObservationBriefVersion, MixedObservationVersion:
 		err = e.observationPipeline(runCtx, ctx, t, sk)
-	case CloseResearchVersion, CloseCompanyVersion:
+	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion:
 		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
 			err = e.pipeline(runCtx, ctx, t, sk)
 		}

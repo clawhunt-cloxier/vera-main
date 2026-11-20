@@ -916,7 +916,7 @@ func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		return tx.QueryRow(r.Context(), `SELECT t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
 			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]) AND t.skill_version=ANY($3::text[]) LIMIT 1`, id, s.historyVersions(),
-			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion}).Scan(&version)
+			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion}).Scan(&version)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		if s.Engine.Brief != nil {

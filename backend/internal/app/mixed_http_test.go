@@ -66,7 +66,7 @@ func checkMixedHTTP(t *testing.T, a *App, e *harness.Engine, store *dataservice.
 	// Both frontend protocols expose their registered skills and distinct
 	// versions; the bare JSON route can preview a closing-data research plan.
 	closeSkills := request("GET", "/api/v1/skills", "", jsonMedia, "", 200).Body.String()
-	if !strings.Contains(closeSkills, harness.CloseCompanyVersion) || !strings.Contains(closeSkills, harness.CloseResearchVersion) {
+	if !strings.Contains(closeSkills, harness.CloseCompanyVersion) || !strings.Contains(closeSkills, harness.CloseDisclosureVersion) {
 		t.Fatal("missing closing research skills")
 	}
 	if _, err := a.Pool.Exec(ctx, `UPDATE entities SET attrs=attrs || '{"tushare_research_subject":true}'::jsonb WHERE id=$1`, subject.ID); err != nil {
