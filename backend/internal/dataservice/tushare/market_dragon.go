@@ -56,12 +56,13 @@ func (c *marketCollector) dragonTiger() error {
 		var seats []Row
 		if len(roster.reasons) > 0 && seatsEnabled {
 			seats, err = c.rows("top_inst", map[string]string{"trade_date": day, "ts_code": c.code}, "trade_date ts_code reason side exalter buy sell", dragonPage, false)
-			if dragonEmpty(err) {
+			switch {
+			case dragonEmpty(err):
 				seats = nil
-			} else if dragonUnavailable(err) {
+			case dragonUnavailable(err):
 				seatsEnabled = false
 				c.Notes = append(c.Notes, "TuShare 龙虎榜席位接口不可用，已取得的上榜清单单独保留")
-			} else if err != nil {
+			case err != nil:
 				return err
 			}
 		}

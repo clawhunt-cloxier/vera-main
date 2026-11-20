@@ -45,16 +45,19 @@ func TestFundPositionsPreserveFilingIdentity(t *testing.T) {
 		if r.RawRef == "" || r.Period.Format(time.DateOnly) != "2026-09-30" || r.PublishedAt.In(marketZone).Format(time.DateOnly) != r.Payload["announcement_date"] {
 			t.Fatal(r)
 		}
-		if r.Payload["announcement_date"] == "2026-10-24" {
+		switch r.Payload["announcement_date"] {
+		case "2026-10-24":
 			if r.Payload["observation_state"] != "conflicting" || r.Payload["holding_shares"] != nil {
 				t.Fatal(r)
 			}
-		} else if r.Payload["announcement_date"] == "2026-10-28" {
+		case "2026-10-28":
 			if r.Payload["observation_state"] != "undisclosed" || r.Payload["holding_shares"] != nil {
 				t.Fatal(r)
 			}
-		} else if r.Payload["holding_shares"] != "150" {
-			t.Fatal(r)
+		default:
+			if r.Payload["holding_shares"] != "150" {
+				t.Fatal(r)
+			}
 		}
 	}
 }
