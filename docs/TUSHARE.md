@@ -14,6 +14,10 @@
 
 接口定义可公开查阅。用户登录后可查看自己的 Token、积分和独立订阅。请按部署账号实际返回验收，特别核对公告和新闻。参见 [官方 HTTP 说明](https://tushare.pro/document/1?doc_id=130)、[积分与接口](https://tushare.pro/document/1?doc_id=108)、[独立权限](https://tushare.pro/document/1?doc_id=290)、[日线](https://tushare.pro/document/2?doc_id=27)、[合并利润表](https://tushare.pro/document/2?doc_id=33)、[公告](https://tushare.pro/document/2?doc_id=176)。
 
+对照早期 MVP，资金报告「交易所席位与大宗交易」目前展示大宗成交。要补龙虎榜，需逐交易日登记覆盖情况，并区分单日榜、连续多日榜、同一席位的买卖双榜，才能计算窗口内上榜日数和席位金额。官网按单日提供两侧前五席位明细。[TuShare 龙虎榜明细](https://tushare.pro/document/2?doc_id=107)
+
+股东与公司事项目前有股东户数。年度实际现金分红还需要覆盖中期和期末各次实施公告，核实含税金额和参与分配的股本。贵州茅台 2024 年报中期分红已经实施，期末分红当时仍是预案。直接采用年报预案或仅取期末记录会影响财年合计。[TuShare 分红字段](https://tushare.pro/document/2?doc_id=103) · [贵州茅台 2024 年报](https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF)
+
 资金报告的季度持仓章节仍有缺口。陆股通持股需同时记录季末持股数和实际披露日。港交所自 2024-08-19 起在每季第五个北向交易日公布上季末持股。公募持仓还需识别同一组合的不同份额、区分前十大持仓和全部持仓，并核对当季股本分母。TuShare 的 `fund_portfolio` 按基金披露持有股份及公告日，仅将这些行相加不能得到已验证的全市场合计。[港交所查询说明](https://www3.hkexnews.hk/sdw/mutualmarket/SH.htm) · [TuShare 公募持仓字段](https://tushare.pro/document/2?doc_id=121)
 
 ## 配置与运行
