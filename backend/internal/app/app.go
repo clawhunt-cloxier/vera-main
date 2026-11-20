@@ -16,6 +16,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/fixture"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/tushare"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/httpapi"
@@ -35,6 +36,7 @@ type App struct {
 	Engine   *harness.Engine
 	Watch    *watchlist.Service
 	Brief    *emquant.BriefService
+	TuShare  *tushare.Provider
 	Policy   *policy.Policy
 }
 
@@ -90,6 +92,12 @@ func (a *App) build(ctx context.Context) error {
 			return err
 		}
 		a.Provider = a.Brief
+	} else if c.DataProvider == "tushare" {
+		if a.TuShare, err = tushare.Open(a.Pool, os.Getenv); err != nil {
+			return err
+		}
+		a.Provider = a.TuShare
+		a.Store = dataservice.NewResearchStore(a.Pool, cat, a.Provider.ID(), a.TuShare.SubjectCodes(), a.TuShare.AllowModelProcessing())
 	} else if a.Provider, err = newProvider(c); err != nil {
 		return err
 	}
@@ -145,6 +153,11 @@ func (a *App) build(ctx context.Context) error {
 		// at collection time; deployment config names only the runtime product.
 		a.Engine.RealtimeSource = &harness.BriefQuoteSource{ProviderID: a.Brief.ProviderID, Product: a.Brief.Product}
 	}
+	if a.TuShare != nil {
+		a.Engine.Skills = harness.TuShareSkills()
+		a.Engine.WithCloseResearchUse = a.Store.WithResearchUse
+		a.Engine.CloseResearchCutoff = a.Store.PublicationCutoff
+	}
 	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Provider.Now}
 	return nil
 }
@@ -152,6 +165,20 @@ func (a *App) build(ctx context.Context) error {
 // Sync loads provider data into the store (idempotent).
 func (a *App) Sync(ctx context.Context) error {
 	start := time.Now()
+	if a.TuShare != nil {
+		for _, code := range a.TuShare.SubjectCodes() {
+			batch, notes, err := a.TuShare.Collect(ctx, code, a.TuShare.Now())
+			if err != nil {
+				return fmt.Errorf("TuShare %s: %w", code, err)
+			}
+			n, err := a.Store.SyncObserved(ctx, batch)
+			if err != nil {
+				return err
+			}
+			slog.InfoContext(ctx, "TuShare observation published", "subject", code, "inserted", n, "limitations", notes)
+		}
+		return nil
+	}
 	n, err := a.Store.Sync(ctx, a.Provider)
 	if err == nil {
 		slog.Info("data sync finished", "provider", a.Provider.ID(), "inserted", n, "took", time.Since(start).Round(time.Millisecond))
@@ -183,7 +210,7 @@ func (a *App) HTTP() (http.Handler, error) {
 		mounts["/"] = spa(c.WebDir)
 	}
 	s := &httpapi.Server{Pool: a.Pool, ID: identity.New(a.Pool, opt), Store: a.Store, Engine: a.Engine, Watch: a.Watch, Synthetic: a.Engine.Synthetic, RequireChoiceQuote: c.RequireChoiceQuote,
-		Mounts: mounts}
+		Mounts: mounts, FullVendorResearch: a.TuShare != nil}
 	return s.Handler(), nil
 }
 

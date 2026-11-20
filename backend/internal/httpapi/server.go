@@ -39,6 +39,7 @@ type Server struct {
 	Watch              *watchlist.Service
 	Synthetic          bool
 	RequireChoiceQuote bool
+	FullVendorResearch bool
 	// Extra mounts (dev OIDC issuer, static web) added by the binary.
 	Mounts map[string]http.Handler
 }
@@ -58,7 +59,32 @@ func (s *Server) Handler() http.Handler {
 			// through the final write. An outer buffer would release those
 			// grant locks before the protected bytes are actually sent.
 			boundRead := (r.Method == http.MethodGet || r.Method == http.MethodHead) && (strings.HasPrefix(r.URL.Path, "/api/v1/reports/") || strings.HasPrefix(r.URL.Path, "/api/v1/evidence/"))
-			if s.Engine.Brief != nil && !cancel && !boundRead && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
+			if s.FullVendorResearch && !cancel && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
+				allowed := func(fn func() error) error {
+					err := s.Store.WithResearchUse(r.Context(), fn)
+					var pe *dataservice.ProviderError
+					if errors.As(err, &pe) {
+						return errs.Unavailable("SOURCE_UNAVAILABLE", "TuShare 研究来源当前不可用")
+					}
+					return err
+				}
+				callErr = allowed(func() error { return nil })
+				if callErr == nil {
+					buf := httptest.NewRecorder()
+					buf.Header().Set("Content-Type", w.Header().Get("Content-Type"))
+					callErr = s.protectBriefRead(buf, r, f)
+					if callErr == nil {
+						callErr = allowed(func() error {
+							for k, v := range buf.Header() {
+								w.Header()[k] = v
+							}
+							w.WriteHeader(buf.Code)
+							_, err := w.Write(buf.Body.Bytes())
+							return err
+						})
+					}
+				}
+			} else if s.Engine.Brief != nil && !cancel && !boundRead && r.URL.Path != "/api/v1/me" && r.URL.Path != "/api/v1/onboarding" {
 				callErr = s.Engine.Brief.WithDisplayCatalog(r.Context(), func() error { return nil })
 				if callErr == nil {
 					// Render without retaining a permission transaction across
@@ -244,6 +270,9 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 		if s.Engine.Brief != nil {
 			scope = s.Engine.Brief.ProviderID
 		}
+		if s.FullVendorResearch {
+			scope = "tushare"
+		}
 		sum := sha256.Sum256(append([]byte(r.URL.Path+"\x00"+representation(r)+"\x00"+scope+"\x00"), body...))
 		hash := hex.EncodeToString(sum[:])
 		route := r.Pattern
@@ -275,6 +304,10 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 			if s.Engine.Brief != nil && !cancelAck {
 				if err := s.Engine.Brief.WithDisplayCatalog(r.Context(), replay); err != nil {
 					httpx.Error(w, r, err)
+				}
+			} else if s.FullVendorResearch && !cancelAck {
+				if err := s.Store.WithResearchUse(r.Context(), replay); err != nil {
+					httpx.Error(w, r, errs.Unavailable("SOURCE_UNAVAILABLE", "TuShare 研究来源当前不可用"))
 				}
 			} else {
 				_ = replay()

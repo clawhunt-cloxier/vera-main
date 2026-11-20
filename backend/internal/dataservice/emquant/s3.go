@@ -20,9 +20,11 @@ const maxArchiveSize = 64 << 20
 // Credentials, endpoint and transport are supplied by the application's
 // configured AWS SDK client; no provider secrets are held here.
 type S3RawStore struct {
-	client *s3.Client
-	bucket string
-	prefix string
+	client      *s3.Client
+	bucket      string
+	prefix      string
+	suffix      string
+	contentType string
 }
 
 func NewS3RawStore(client *s3.Client, bucket, prefix string) (*S3RawStore, error) {
@@ -33,7 +35,18 @@ func NewS3RawStore(client *s3.Client, bucket, prefix string) (*S3RawStore, error
 	if strings.Contains(prefix, "..") || strings.ContainsAny(prefix, "\\\x00") {
 		return nil, errors.New("emquant: invalid S3 prefix")
 	}
-	return &S3RawStore{client: client, bucket: bucket, prefix: prefix}, nil
+	return &S3RawStore{client: client, bucket: bucket, prefix: prefix, suffix: ".json", contentType: "application/json"}, nil
+}
+
+// NewBinaryRawStore keeps response bytes, PDF originals and provenance manifests
+// in one content-addressed namespace without mislabelling their file format.
+func NewBinaryRawStore(client *s3.Client, bucket, prefix string) (*S3RawStore, error) {
+	s, err := NewS3RawStore(client, bucket, prefix)
+	if err != nil {
+		return nil, err
+	}
+	s.suffix, s.contentType = "", "application/octet-stream"
+	return s, nil
 }
 
 func (s *S3RawStore) key(hash string) (string, error) {
@@ -41,7 +54,7 @@ func (s *S3RawStore) key(hash string) (string, error) {
 	if err != nil || len(decoded) != 32 || hash != strings.ToLower(hash) {
 		return "", errors.New("emquant: invalid content hash")
 	}
-	key := "sha256/" + hash[:2] + "/" + hash + ".json"
+	key := "sha256/" + hash[:2] + "/" + hash + s.suffix
 	if s.prefix != "" {
 		key = s.prefix + "/" + key
 	}
@@ -58,7 +71,7 @@ func (s *S3RawStore) Put(ctx context.Context, hash string, body []byte) (string,
 	if len(body) > maxArchiveSize || digest(body) != hash {
 		return "", errors.New("emquant: invalid archive body or hash")
 	}
-	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key), Body: bytes.NewReader(body), ContentType: aws.String("application/json"), IfNoneMatch: aws.String("*")})
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key), Body: bytes.NewReader(body), ContentType: aws.String(s.contentType), IfNoneMatch: aws.String("*")})
 	if err != nil {
 		var api smithy.APIError
 		if !errors.As(err, &api) || api.ErrorCode() != "PreconditionFailed" {

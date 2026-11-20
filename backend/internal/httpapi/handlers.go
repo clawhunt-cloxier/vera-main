@@ -646,7 +646,7 @@ func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) error {
 	if _, _, err := s.Engine.CancelTask(r.Context(), ws, id, in.Expected); err != nil {
 		return err
 	}
-	if s.Engine.Brief != nil {
+	if s.Engine.Brief != nil || s.FullVendorResearch {
 		// No vendor-derived fields are needed to acknowledge this command.
 		w.WriteHeader(http.StatusNoContent)
 		return nil
@@ -940,6 +940,9 @@ func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidenc
 			ev.Label = it.Label + "（" + str("scope") + "，" + str("report_type") + "）"
 		}
 		v, u := str("value"), "元"
+		if str("item_code") == "IS.basic_eps" || str("item_code") == "IS.diluted_eps" {
+			u = "元/股"
+		}
 		ev.Value, ev.Unit = &v, &u
 		loc := "公告 " + str("filing_id") + fmt.Sprintf("，修订版本 %d", rec.Version)
 		ev.Locator = &loc

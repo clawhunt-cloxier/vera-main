@@ -87,6 +87,8 @@ func (s *tsTestUpstream) marketRows(codes []string, end time.Time) {
 		}
 	}
 	s.rows["suspend_d"] = []tsTestRow{}
+	when := end.AddDate(0, 0, -3).Format("2006-01-02 15:04:05")
+	s.add("major_news", tsTestRow{"pub_time": when, "title": tsTestName(0) + "披露生产经营进展", "src": "合成媒体", "content": "公司披露了报告期内生产线的运行情况。"})
 }
 
 func (s *tsTestUpstream) filingRows(t *testing.T, codes []string, end time.Time) {
@@ -224,6 +226,8 @@ func (s *tsTestUpstream) RoundTrip(req *http.Request) (*http.Response, error) {
 				switch query.API {
 				case "trade_cal":
 					dateField = "cal_date"
+				case "major_news":
+					dateField = "pub_time"
 				case "anns_d", "income", "balancesheet", "cashflow", "stk_holdernumber":
 					dateField = "ann_date"
 				}

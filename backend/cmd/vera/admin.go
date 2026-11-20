@@ -30,6 +30,7 @@ const adminUsage = `vera admin <command>
   user list | user disable <id> | user enable <id> | user reset-password <id>
   quota set --user <id> [--active N] [--queued N] [--daily N] [--deep N]
   provider list | provider test <id>
+  provider model-use tushare on|off     设置本数据库下一次研究可使用的 TuShare 权限
   data sync [--dataset <id>[,<id>]] [--since 2026-11-01]   按配置的数据提供方同步（只新增）
   usage report [--day 2026-11-07] [--tz UTC]   当日模型调用、token、费用（按用户与技能汇总）
   usage reconcile [--release <call-id> --cost <USD>]   列出 UNKNOWN 调用 / 按账单核销一条
@@ -256,6 +257,21 @@ func runAdmin(ctx context.Context, a *app.App, args []string, out io.Writer, who
 	case "provider test":
 		res.resource = "provider:" + sub(2)
 		return res, providerTest(ctx, a, sub(2), out)
+	case "provider model-use":
+		res.resource = "provider:tushare"
+		if a.TuShare == nil || len(args) != 4 || sub(2) != "tushare" || (sub(3) != "on" && sub(3) != "off") {
+			return res, errors.New("用法：provider model-use tushare on|off")
+		}
+		allowed := sub(3) == "on"
+		if allowed && !a.TuShare.AllowModelProcessing() {
+			return res, errors.New("需要先在部署中启用 TUSHARE_ALLOW_MODEL_PROCESSING")
+		}
+		res.detail = map[string]any{"allow_model_processing": allowed}
+		tag, err := a.Pool.Exec(ctx, `UPDATE providers SET allow_model_processing=$1 WHERE id='tushare' AND kind='vendor' AND NOT synthetic`, allowed)
+		if err == nil && tag.RowsAffected() == 0 {
+			return res, errors.New("请先同步以登记 TuShare")
+		}
+		return res, err
 	case "data sync":
 		fs := flag.NewFlagSet("data sync", flag.ContinueOnError)
 		ds := fs.String("dataset", "", "")
@@ -265,6 +281,12 @@ func runAdmin(ctx context.Context, a *app.App, args []string, out io.Writer, who
 		}
 		res.resource = "provider:" + a.Provider.ID()
 		res.detail = map[string]any{"dataset": *ds, "since": *since}
+		if a.TuShare != nil {
+			if *ds != "" || *since != "" {
+				return res, errors.New("TuShare 按研究对象发布完整观测，请使用 vera sync")
+			}
+			return res, a.Sync(ctx)
+		}
 		var list []string
 		for _, d := range strings.Split(*ds, ",") {
 			if d = strings.TrimSpace(d); d == "" {
@@ -378,6 +400,13 @@ func providerTest(ctx context.Context, a *app.App, id string, out io.Writer) err
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	start := time.Now()
+	if a.TuShare != nil {
+		if err := a.TuShare.Probe(ctx); err != nil {
+			return fmt.Errorf("TuShare 股票名录探测失败: %w", err)
+		}
+		fmt.Fprintf(out, "TuShare 股票名录已返回配置的证券，耗时 %s。其他接口的账号权限由同步结果确认。\n", time.Since(start).Round(time.Millisecond))
+		return nil
+	}
 	ents, err := a.Provider.Entities(ctx)
 	if err != nil {
 		return fmt.Errorf("实体列表请求失败: %w", err)
