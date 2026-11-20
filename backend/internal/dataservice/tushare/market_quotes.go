@@ -135,7 +135,9 @@ func (c *marketCollector) stockHistory() error {
 		if e != nil {
 			return e
 		}
-		c.Records = append(c.Records, marketRecord(r, "mkt.daily_bar", c.code, c.code+"|"+day, "exchange", "L2", "TuShare 全天停牌（无成交行情）", &d, map[string]any{"trade_date": d.Format(time.DateOnly), "suspended": true}))
+		// A suspension event has no observed prices. Keep its archived raw
+		// response and leave a gap in the canonical OHLC series.
+		c.Notes = append(c.Notes, c.code+" "+d.Format(time.DateOnly)+" 全天停牌")
 		seen[day] = true
 	}
 	return c.index("index_daily", marketBenchmark, 3)

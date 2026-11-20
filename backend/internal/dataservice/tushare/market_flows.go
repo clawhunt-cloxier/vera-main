@@ -90,7 +90,7 @@ func (c *marketCollector) holderCounts(window map[string]string) error {
 		if r.ReceivedAt.Before(pub) {
 			continue
 		}
-		rec := marketRecord(r, "corp.holder", c.code, c.code+"|"+period+"|count", "company_filing", "L2", "TuShare 整理的股东户数（按公告日）", &d, map[string]any{"period_end": d.Format(time.DateOnly), "rank": 0, "holder_kind": "count", "holder_count": n.IntPart(), "ann_date": r.Values["ann_date"]})
+		rec := marketRecord(r, "corp.holder", c.code, c.code+"|"+period+"|count", "company_filing", "L2", "TuShare 整理的股东户数（按公告日）", &d, map[string]any{"period_end": d.Format(time.DateOnly), "rank": 0, "holder_kind": "count", "holder_count": n.IntPart()})
 		rec.PublishedAt = &pub
 		c.Records = append(c.Records, rec)
 	}

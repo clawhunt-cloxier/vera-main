@@ -252,7 +252,6 @@ func (c *marketCollector) security(code string, member, value, eligible Row, pag
 		return entity, nil, nil
 	}
 	p["margin_eligible"] = eligible.Values != nil
-	p["share_date"] = value.Values["trade_date"]
 	joins.add(code, "stock_basic", r)
 	joins.add(code, "index_member_all", member)
 	joins.add(code, "daily_basic", value)

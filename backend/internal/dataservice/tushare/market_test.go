@@ -127,13 +127,19 @@ func TestMarketClosingResearch(t *testing.T) {
 	if err := json.Unmarshal(src.objects[bar.RawRef], &j); err != nil || len(j["20261120"]) != 3 {
 		t.Fatalf("missing join evidence %+v %v", j, err)
 	}
-	stop := lookup("mkt.daily_bar", code, func(v map[string]any) bool { return v["suspended"] == true })
-	if stop.Payload["close"] != nil {
-		t.Fatal("invented suspension price")
+	if !slices.Contains(b.Notes, code+" 2026-11-18 全天停牌") {
+		t.Fatal("lost suspension notice")
+	}
+	catalog, err := dataservice.LoadCatalog("../../../../contracts/datasets/catalog.json")
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, r := range b.Records {
-		if r.DatasetID == "mkt.daily_bar" && r.Payload["trade_date"] == "2026-11-17" {
-			t.Fatal("invented adjustment factor")
+		if err := catalog.Validate(r); err != nil {
+			t.Fatal(err)
+		}
+		if r.DatasetID == "mkt.daily_bar" && r.Payload["trade_date"] != "2026-11-20" {
+			t.Fatal("invented adjusted price")
 		}
 	}
 	security := lookup("ref.security", code, anyRow)
