@@ -14,6 +14,10 @@ func TestChoiceReadinessDuringProviderSwitch(t *testing.T) {
 	if _, err := Load(); err != nil {
 		t.Fatalf("Choice deployment: %v", err)
 	}
+	t.Setenv("VERA_DATA_PROVIDER", "emquant+tushare")
+	if c, err := Load(); err != nil || !c.ChoiceConfigured() || !c.TuShareConfigured() {
+		t.Fatalf("combined deployment: %v", err)
+	}
 	t.Setenv("VERA_DATA_PROVIDER", "tushare")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "VERA_REQUIRE_CHOICE_QUOTE") {
 		t.Fatalf("stale Choice readiness requirement: %v", err)

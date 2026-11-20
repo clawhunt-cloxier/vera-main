@@ -42,6 +42,12 @@ func NewVendorStore(pool *pgxpool.Pool, cat *Catalog) *Store {
 
 func (s *Store) Catalog() *Catalog { return s.cat }
 
+// RegisteredResearchSubject checks the current deployment's research list.
+// A persisted entity may outlive a configuration change.
+func (s *Store) RegisteredResearchSubject(code string) bool {
+	return s.providerID == "tushare" && slices.Contains(s.researchSubjects, code)
+}
+
 // Sync atomically upserts a provider's entities, records and capabilities.
 // Existing record keys are idempotent only when their content and provenance
 // agree; a conflicting key fails the entire sync without replacing either.
@@ -109,7 +115,7 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 			err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
 				VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
 				ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status, is_financial=excluded.is_financial, classification=excluded.classification, attrs=excluded.attrs
-                WHERE entities.synthetic=excluded.synthetic
+                WHERE entities.synthetic=excluded.synthetic AND entities.kind=excluded.kind
 				RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs).Scan(&id)
 			if err != nil {
 				return fmt.Errorf("entity %s: %w", e.Code, err)
@@ -567,7 +573,8 @@ func (s *Store) UpsertSearchEntity(ctx context.Context, kind, code, name string,
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,synthetic,status)
 			VALUES($1,$2,$3,false,'unknown')
-			ON CONFLICT (code) DO UPDATE SET name=excluded.name
+			ON CONFLICT (code) DO UPDATE SET name=CASE WHEN entities.attrs->>'tushare_research_subject'='true' THEN entities.name ELSE excluded.name END
+			WHERE NOT entities.synthetic AND entities.kind=excluded.kind
 			RETURNING id`, kind, code, name).Scan(&id); err != nil {
 			return err
 		}

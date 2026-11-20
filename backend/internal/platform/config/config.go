@@ -58,7 +58,7 @@ type Config struct {
 	PriceTablePath     string
 	ReplayDir          string
 	FixtureManifest    string
-	DataProvider       string // fixture | <vendor id>
+	DataProvider       string // fixture | emquant | tushare | emquant+tushare
 	Registration       bool
 	RealResearch       bool
 	RequireChoiceQuote bool
@@ -210,8 +210,8 @@ func (c *Config) validate(problems []string) error {
 	if c.DatabaseURL == "" {
 		problems = append(problems, "DATABASE_URL is required")
 	}
-	if c.RequireChoiceQuote && c.DataProvider != "emquant" {
-		problems = append(problems, "VERA_REQUIRE_CHOICE_QUOTE=true requires VERA_DATA_PROVIDER=emquant")
+	if c.RequireChoiceQuote && !c.ChoiceConfigured() {
+		problems = append(problems, "VERA_REQUIRE_CHOICE_QUOTE=true requires a configured Choice provider (emquant or emquant+tushare)")
 	}
 	if c.DevOIDC && c.Env == "production" {
 		problems = append(problems, "production refuses the development OIDC issuer (VERA_DEV_OIDC)")
@@ -248,6 +248,14 @@ func (c *Config) validate(problems []string) error {
 		return errors.New("config: " + strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func (c *Config) ChoiceConfigured() bool {
+	return c.DataProvider == "emquant" || c.DataProvider == "emquant+tushare"
+}
+
+func (c *Config) TuShareConfigured() bool {
+	return c.DataProvider == "tushare" || c.DataProvider == "emquant+tushare"
 }
 
 // Synthetic reports whether research output in this deployment is simulated (fixture data or sim/replay models).

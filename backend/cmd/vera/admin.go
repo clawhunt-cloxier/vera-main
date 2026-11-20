@@ -295,7 +295,7 @@ func runAdmin(ctx context.Context, a *app.App, args []string, out io.Writer, who
 		if err := fs.Parse(args[2:]); err != nil {
 			return res, err
 		}
-		res.resource = "provider:" + a.Provider.ID()
+		res.resource = "provider:" + a.Primary.ID()
 		res.detail = map[string]any{"dataset": *ds, "since": *since}
 		if a.TuShare != nil {
 			if *ds != "" || *since != "" {
@@ -321,7 +321,7 @@ func runAdmin(ctx context.Context, a *app.App, args []string, out io.Writer, who
 			}
 			from = t
 		}
-		n, err := a.Store.Sync(ctx, dataservice.FilterRecords(a.Provider, list, from))
+		n, err := a.Store.Sync(ctx, dataservice.FilterRecords(a.Primary, list, from))
 		res.detail["inserted"] = n
 		if err == nil {
 			fmt.Fprintf(out, "同步完成：新增 %d 条记录\n", n)
@@ -410,29 +410,30 @@ func providerList(ctx context.Context, a *app.App, out io.Writer) error {
 
 // providerTest makes read-only requests to the configured provider and reports what came back. Nothing is stored.
 func providerTest(ctx context.Context, a *app.App, id string, out io.Writer) error {
-	if id == "" || id != a.Provider.ID() {
-		return fmt.Errorf("只能测试当前配置的数据提供方 %q", a.Provider.ID())
+	p := a.ProviderByID(id)
+	if p == nil {
+		return errors.New("只能测试当前部署已配置的数据提供方")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	start := time.Now()
-	if a.TuShare != nil {
+	if a.TuShare != nil && id == a.TuShare.ID() {
 		if err := a.TuShare.Probe(ctx); err != nil {
 			return fmt.Errorf("TuShare 股票名录探测失败: %w", err)
 		}
 		fmt.Fprintf(out, "TuShare 股票名录已返回配置的证券，耗时 %s。其他接口的账号权限由同步结果确认。\n", time.Since(start).Round(time.Millisecond))
 		return nil
 	}
-	ents, err := a.Provider.Entities(ctx)
+	ents, err := p.Entities(ctx)
 	if err != nil {
 		return fmt.Errorf("实体列表请求失败: %w", err)
 	}
-	caps, err := a.Provider.Capabilities(ctx)
+	caps, err := p.Capabilities(ctx)
 	if err != nil {
 		return fmt.Errorf("能力清单请求失败: %w", err)
 	}
-	fmt.Fprintf(out, "提供方 %s（%s）可用：实体 %d 个，能力 %d 项，模拟数据 %v，耗时 %s\n", a.Provider.ID(), a.Provider.Name(),
-		len(ents), len(caps), a.Provider.Synthetic(), time.Since(start).Round(time.Millisecond))
+	fmt.Fprintf(out, "提供方 %s（%s），实体 %d 个，登记能力 %d 项，模拟数据 %v，耗时 %s\n", p.ID(), p.Name(),
+		len(ents), len(caps), p.Synthetic(), time.Since(start).Round(time.Millisecond))
 	return nil
 }
 

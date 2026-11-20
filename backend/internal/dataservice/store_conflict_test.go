@@ -63,6 +63,29 @@ func TestSyncRejectsConflictingImmutableRecordsAtomically(t *testing.T) {
 	}
 }
 
+func TestVendorSearchPreservesRegisteredSubject(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.New(t)
+	const code = "600519.SH"
+	_, err := pool.Exec(ctx, `INSERT INTO entities(kind,code,name,status,synthetic,attrs) VALUES
+		('stock',$1,'registered','listed',false,'{"tushare_research_subject":true}'),
+		('industry','801120.SI','sector','unknown',false,'{}'),
+		('stock','600999.SH','example','listed',true,'{}')`, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := dataservice.NewResearchStore(pool, nil, "tushare", []string{code}, true)
+	stock, err := store.UpsertSearchEntity(ctx, "stock", code, "Choice alias", nil)
+	if err != nil || stock.Name != "registered" || !store.RegisteredResearchSubject(code) {
+		t.Fatalf("merged subject: %v %v", stock, err)
+	}
+	for _, collision := range []string{"801120.SI", "600999.SH"} {
+		if _, err := store.UpsertSearchEntity(ctx, "stock", collision, "different identity", nil); err == nil || store.RegisteredResearchSubject(collision) {
+			t.Fatalf("mixed identity accepted: %s", collision)
+		}
+	}
+}
+
 func TestConcurrentSyncConflictingSources(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.New(t)
