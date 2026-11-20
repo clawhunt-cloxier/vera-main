@@ -1,6 +1,7 @@
 package tushare
 
 import (
+	"errors"
 	"maps"
 	"slices"
 	"time"
@@ -18,6 +19,14 @@ func (c *marketCollector) dividends() error {
 	rs, err := c.rows("dividend", map[string]string{"ts_code": c.code},
 		"ts_code end_date div_proc imp_ann_date record_date pay_date cash_div_tax base_share", 2000, true)
 	if err != nil {
+		if c.ctx.Err() != nil {
+			return c.ctx.Err()
+		}
+		var pe *dataservice.ProviderError
+		if errors.As(err, &pe) && (pe.Class == dataservice.ErrRateLimited || pe.Class == dataservice.ErrUpstreamUnavailable) {
+			c.Notes = append(c.Notes, "TuShare 分红实施数据本次更新未完成")
+			return nil
+		}
 		return err
 	}
 	// The entitlement date distinguishes separate distributions within a
@@ -64,7 +73,22 @@ func (c *marketCollector) dividends() error {
 		if err != nil {
 			return err
 		}
+		// An amendment can withdraw the amount, move payment to the future
+		// or leave the participating share count unspecified. Keep the new
+		// notice visible even when there is no cash amount to publish.
+		v := event.row.Values
+		period, _ := marketDate(v["end_date"])
+		registration, _ := marketDate(v["record_date"])
+		pub := dividendDayEnd(v["imp_ann_date"])
+		status := marketRecord(event.row, "corp.dividend_implementation", c.code, c.code+"|"+key, "company_filing", "L2",
+			"TuShare 当前实施公告的派息日期、税前金额与基准股本可用性", &period, map[string]any{
+				"report_period": period.Format(time.DateOnly), "record_date": registration.Format(time.DateOnly),
+				"implementation_date": pub.Format(time.DateOnly), "eligible": ok,
+			})
+		status.PublishedAt = &pub
+		c.Records = append(c.Records, status)
 		if ok {
+			r.Payload["record_date"] = registration.Format(time.DateOnly)
 			c.Records = append(c.Records, r)
 		}
 	}

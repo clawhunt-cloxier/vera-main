@@ -3,6 +3,7 @@ package tushare
 import (
 	"errors"
 	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -31,13 +32,30 @@ func TestDividendImplementedEvents(t *testing.T) {
 		dividendData(map[string]string{"imp_ann_date": "20260421", "pay_date": "20260523", "cash_div_tax": "0.25555"}),
 	}
 	c := marketCollector{ctx: t.Context(), Source: src, code: "600000.SH", from: "20211101", until: "20261120"}
-	if err := c.dividends(); err != nil || len(c.Records) != 2 {
-		t.Fatalf("events %d, %v", len(c.Records), err)
+	if err := c.dividends(); err != nil {
+		t.Fatal(err)
 	}
-	interim, final := c.Records[0], c.Records[1]
+	var payments []dataservice.Record
+	var eligible, excluded int
+	for _, r := range c.Records {
+		switch r.DatasetID {
+		case "corp.dividend":
+			payments = append(payments, r)
+		case "corp.dividend_implementation":
+			if r.Payload["eligible"] == true {
+				eligible++
+			} else {
+				excluded++
+			}
+		}
+	}
+	if len(payments) != 2 || eligible != 2 || excluded != 4 {
+		t.Fatalf("payments %d, eligible %d, excluded %d", len(payments), eligible, excluded)
+	}
+	interim, final := payments[0], payments[1]
 	if interim.Payload["report_period"] != "2025-06-30" || interim.Payload["fiscal_year"] != "2025" || interim.Payload["base_shares"] != "98765" ||
 		final.Payload["cash_per_10_shares"] != "2.5555" || final.Payload["total_cash"] != "25870.3487" ||
-		final.Payload["base_shares"] != "101234" || final.Payload["payment_date"] != "2026-05-23" || final.Payload["implementation_date"] != "2026-04-21" {
+		final.Payload["base_shares"] != "101234" || final.Payload["record_date"] != "2026-05-21" || final.Payload["payment_date"] != "2026-05-23" || final.Payload["implementation_date"] != "2026-04-21" {
 		t.Fatalf("unverified conversion or revision: %v %v", interim.Payload, final.Payload)
 	}
 	expectedPub := time.Date(2026, 4, 21, 23, 59, 59, 999999000, marketZone)
@@ -58,8 +76,9 @@ func TestDividendRejectsConflictsAndHonorsEntitlement(t *testing.T) {
 		{"fractional participating share", []map[string]string{dividendData(map[string]string{"base_share": "2.12345"})}, "", true},
 		{"wrong date order", []map[string]string{dividendData(map[string]string{"pay_date": "20260520"})}, "", true},
 		{"denied", nil, dataservice.ErrNotCovered, false},
+		{"rate limited", nil, dataservice.ErrRateLimited, false},
+		{"upstream unavailable", nil, dataservice.ErrUpstreamUnavailable, false},
 		{"global authentication failure", nil, dataservice.ErrAuthFailed, true},
-		{"revised to unconfirmed new payment", []map[string]string{dividendData(nil), dividendData(map[string]string{"imp_ann_date": "20260501", "pay_date": ""})}, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := marketTestData()
@@ -71,6 +90,54 @@ func TestDividendRejectsConflictsAndHonorsEntitlement(t *testing.T) {
 			err := c.dividends()
 			if (err != nil) != tc.wantErr || len(c.Records) != 0 {
 				t.Fatalf("got rows=%d, err=%v", len(c.Records), err)
+			}
+			if tc.class != "" && !tc.wantErr && len(c.Notes) == 0 {
+				t.Fatal("missing disclosure coverage note")
+			}
+		})
+	}
+}
+
+func TestDividendCorrectionSuppressesPreviousPayment(t *testing.T) {
+	for field, value := range map[string]string{"base_share": "", "cash_div_tax": "0", "pay_date": "20261123"} {
+		t.Run(field, func(t *testing.T) {
+			src := marketTestData()
+			src.data["dividend"] = []map[string]string{dividendData(nil)}
+			collect := func() []dataservice.Record {
+				c := marketCollector{ctx: t.Context(), Source: src, code: "600000.SH", from: "20211101", until: "20261120"}
+				if err := c.dividends(); err != nil {
+					t.Fatal(err)
+				}
+				return c.Records
+			}
+			original := collect()
+			src.data["dividend"] = append(src.data["dividend"], dividendData(map[string]string{"imp_ann_date": "20260501", field: value}))
+			revised := collect()
+			if len(original) != 2 || len(revised) != 1 {
+				t.Fatalf("unexpected generated rows: %d / %d", len(original), len(revised))
+			}
+			old, current := original[0], revised[0]
+			if old.DatasetID != "corp.dividend_implementation" || current.DatasetID != old.DatasetID || current.LogicalKey != old.LogicalKey ||
+				current.Payload["eligible"] != false || old.Payload["eligible"] != true || current.Payload["implementation_date"] != "2026-05-01" ||
+				!current.PublishedAt.After(*old.PublishedAt) || current.RawLocator != "1" {
+				t.Fatalf("incomplete correction identity or evidence: %+v", current)
+			}
+		})
+	}
+}
+
+func TestDividendUpstreamFailurePreservesMarket(t *testing.T) {
+	for _, class := range []dataservice.ErrClass{dataservice.ErrRateLimited, dataservice.ErrUpstreamUnavailable} {
+		t.Run(string(class), func(t *testing.T) {
+			src := marketTestData()
+			src.fail["dividend"] = &dataservice.ProviderError{Class: class, Err: errors.New("test")}
+			c := marketCollector{ctx: t.Context(), Source: src, code: "600000.SH", from: "20211101", until: "20261120"}
+			err := c.dividends()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(c.Records) != 0 || !slices.Contains(c.Notes, "TuShare 分红实施数据本次更新未完成") {
+				t.Fatalf("optional failure was not downgraded: records=%d notes=%v", len(c.Records), c.Notes)
 			}
 		})
 	}
