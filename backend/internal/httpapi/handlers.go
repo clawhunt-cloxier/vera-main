@@ -281,9 +281,13 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 	paused := harness.KillSwitch(r.Context(), s.Pool)
 	items := []Skill{}
 	registry := s.skillsFor(r)
+	choice := s.choiceRequest(r)
 	for _, id := range skillOrder {
 		sk := registry[id]
-		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (!s.choiceRequest(r) || id == "stock_analysis")})
+		// Choice protocols build single-stock plans. On a combined deployment,
+		// ordinary JSON requests use the close research registry instead.
+		available := !paused && (!choice || id == "stock_analysis")
+		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: available})
 	}
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
 	return nil
@@ -306,7 +310,10 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if realtimeVersion(r) && len(in.QuoteRequirement) == 0 {
-		return errs.BadRequest("INVALID_BODY", "0.4 请求必须明确 quote_requirement")
+		// The current product policy is latest available market data. The
+		// explicit field remains readable for old clients that requested
+		// realtime_trade, but new clients do not need to choose a requirement.
+		in.QuoteRequirement = json.RawMessage(`"latest_available"`)
 	}
 	if !realtimeVersion(r) && len(in.QuoteRequirement) != 0 {
 		return errs.BadRequest("INVALID_BODY", "旧版请求不支持 quote_requirement，请使用 0.4 协议")

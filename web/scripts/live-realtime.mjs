@@ -6,7 +6,10 @@ const media = 'application/vnd.vera.v0.4+json';
 const skillVersion = '1.1.0-demo.3';
 const dataset = 'mkt.intraday_quote';
 // Separate acceptance targets: latest checks the initial TIME,NOW-only policy;
-// strict realtime still requires a verified continuous-trading snapshot.
+// strict realtime still requires a verified continuous-trading snapshot. The
+// web flow only exposes latest_available. Strict mode creates its explicitly
+// requested v0.4 plan through the same-origin API, then continues through the
+// normal browser review and confirmation pages.
 const modes = {
   realtime_trade: {
     latency: 'real_time',
@@ -374,28 +377,67 @@ async function run(config, progress) {
     );
     requireValue(new URL(page.url()).origin === config.origin, 'UNEXPECTED_NAVIGATION');
     progress.phase = 'selection';
-    await page.locator('a[href="/app/quick/stock_analysis"]').click();
-    await page.getByRole('heading', { name: '行情数据简报', exact: true }).waitFor();
-    await page.getByRole('combobox', { name: '搜索研究对象' }).fill(config.code);
-    await page.getByRole('option').filter({ hasText: config.code }).click();
+    // A combined deployment's generic stock shortcut uses closing research.
+    const entry = me.closing_research_available ? 'choice-quote' : 'stock_analysis';
+    await page.goto(config.origin + '/app/quick/' + entry, { waitUntil: 'domcontentloaded' });
+    const search = page.getByRole('combobox', { name: '搜索研究对象' });
+    await search.waitFor();
+    requireValue(new URL(page.url()).origin === config.origin, 'UNEXPECTED_NAVIGATION');
     requireValue(
-      await page.getByRole('radio', { name: '最近可用行情', exact: true }).isChecked(),
-      'DEFAULT_QUOTE_REQUIREMENT_MISMATCH'
+      (await page.locator('input[name="quote_requirement"]').count()) === 0 &&
+        (await page.getByRole('group', { name: /^行情要求/ }).count()) === 0,
+      'QUOTE_REQUIREMENT_CONTROL_PRESENT'
     );
+    const entityStart = responses.length;
+    await search.fill(config.code);
+    await page.getByRole('option').filter({ hasText: config.code }).click();
+    const entityResult = await read(await responseAfter('/api/v1/entities', 'GET', entityStart));
+    const subject = entityResult.items?.find(
+      (item) => item.symbol === config.code && item.kind === 'stock'
+    );
+    requireValue(subject?.id, 'SUBJECT_NOT_FOUND');
     const strict = config.requirement === 'realtime_trade';
-    const radio = page.getByRole('radio', { name: '交易中实时成交行情', exact: true });
-    if (strict) await radio.check();
-    else requireValue(await radio.isDisabled(), 'UNVERIFIED_REALTIME_OPTION_ENABLED');
 
     progress.phase = 'plan';
     let start = responses.length;
-    await page.getByRole('button', { name: '发起研究', exact: true }).click();
+    if (strict) {
+      requireValue(me.realtime_trade_available === true, 'STRICT_REALTIME_POLICY_UNAVAILABLE');
+      requireValue(typeof me.csrf_token === 'string' && me.csrf_token, 'CSRF_TOKEN_MISSING');
+      await page.evaluate(
+        async ({ subjectID, csrf, media }) => {
+          await fetch('/api/v1/research-plans', {
+            method: 'POST',
+            headers: {
+              Accept: media,
+              'Content-Type': media,
+              'X-CSRF-Token': csrf,
+              'Idempotency-Key': crypto.randomUUID(),
+            },
+            credentials: 'same-origin',
+            redirect: 'error',
+            signal: AbortSignal.timeout(15000),
+            body: JSON.stringify({
+              skill_id: 'stock_analysis',
+              subject_id: subjectID,
+              params: {},
+              quote_requirement: 'realtime_trade',
+            }),
+          });
+        },
+        { subjectID: subject.id, csrf: me.csrf_token, media }
+      );
+    } else {
+      await page.getByRole('button', { name: '发起研究', exact: true }).click();
+    }
     const planResponse = await responseAfter('/api/v1/research-plans', 'POST', start);
     const input = planResponse.request().postDataJSON();
     requireValue(
-      input.skill_id === 'stock_analysis' && input.quote_requirement === config.requirement,
-      'REQUEST_INTENT_MISMATCH'
+      input.skill_id === 'stock_analysis' && input.subject_id === subject.id,
+      'REQUEST_SUBJECT_OR_SKILL_MISMATCH'
     );
+    if (strict)
+      requireValue(input.quote_requirement === config.requirement, 'REQUEST_INTENT_MISMATCH');
+    else requireValue(!Object.hasOwn(input, 'quote_requirement'), 'REQUEST_INTENT_MISMATCH');
     const result = await read(planResponse);
     requireValue(result.kind === 'plan' && result.plan, 'PLAN_NOT_AVAILABLE');
     const plan = result.plan;
@@ -412,6 +454,8 @@ async function run(config, progress) {
         plan.executable === true,
       'REALTIME_PLAN_NOT_EXECUTABLE'
     );
+    if (strict)
+      await page.goto(config.origin + '/app/plan/' + plan.id, { waitUntil: 'domcontentloaded' });
     const review = await read(
       await responseAfter('/api/v1/research-plans/' + plan.id, 'GET', start)
     );

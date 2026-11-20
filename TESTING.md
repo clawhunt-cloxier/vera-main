@@ -17,13 +17,13 @@ ADR-0004 的 [盘中时点与来源样例](tests/fixtures/intraday-cases.json) �
 
 Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch policy 只检查 PR 来源分支，不证明业务正确。
 
-前端页面验收可运行 `cd web && npm ci && npx playwright install --with-deps chromium && npm run test:realtime-ui`。该命令需要下载 Playwright Chromium 及系统依赖；使用标注为模拟的 API 响应，在桌面和手机视口检查 0.4 选择、确认、冻结时间、证据展示，并回归旧 observation 计划、历史报告与取消流程，不调用真实数据厂商或模型。浏览器用例不替代真实行情时点与授权的端到端验收。
+前端页面验收可运行 `cd web && npm ci && npx playwright install --with-deps chromium && npm run test:realtime-ui`。该命令需要下载 Playwright Chromium 及系统依赖；使用标注为模拟的 API 响应，在桌面和手机视口检查 0.4 默认最近可用、确认、冻结时间和证据展示，并回归双来源报告、旧 observation 计划、历史报告与取消流程，不调用真实数据厂商或模型。浏览器用例不替代真实行情时点与授权的端到端验收。
 
 ### 真实部署的盘中浏览器验收（显式运行）
 
-`npm run accept:live-realtime` 通过部署网站正常选择证券、选择“交易中实时成交行情”、检查计划、提交一次任务、等待交付、打开报告和证据侧栏。脚本只观察浏览器收到的响应，不拦截、模拟或直接调用计划/任务 API；会消耗真实厂商和模型额度，并保留一项真实研究任务。它不在默认测试、`make verify` 或 CI 中运行，CI 环境显式拒绝。脚本没有实现真实厂商语义证明，成功仍依赖已核实的 TIME、交易状态、延迟及用途许可登记；非交易时段、停牌、弃权、权限不足或协议降级均为验收失败。
+`npm run accept:live-realtime` 通过部署网站选择证券，确认页面不再提供“行情要求”控件，然后用同源 v0.4 API 显式创建 `realtime_trade` 计划，再回到网页检查计划、提交一次任务、等待交付、打开报告和证据侧栏。严格模式的 API 请求只用于保留兼容的盘中验收路径，网页默认流程始终省略 `quote_requirement`。脚本只使用当前登录会话，不拦截或改写网页请求；会消耗真实厂商和模型额度，并保留一项真实研究任务。它不在默认测试、`make verify` 或 CI 中运行，CI 环境显式拒绝。脚本没有实现真实厂商语义证明，成功仍依赖已核实的 TIME、交易状态、延迟及用途许可登记；非交易时段、停牌、弃权、权限不足或协议降级均为验收失败。
 
-初始 MVP 的真实验收运行 `npm run accept:live-latest`（同样支持 `-- --check-config`）。它检查默认的最近可用选项、禁用的实时选项、`TIME,NOW` 策略下报告和证据标出的未知延迟与交易状态，并同样校验真实来源、冻结年龄、时间顺序和归档哈希。该模式通过不证明实时成交；升级策略后再单独运行严格实时验收。
+初始 MVP 的真实验收运行 `npm run accept:live-latest`（同样支持 `-- --check-config`）。它检查网页没有“行情要求”选择控件，默认请求省略 `quote_requirement`，服务端计划和任务持久化为 `latest_available`，并校验 `TIME,NOW` 策略下报告和证据标出的未知延迟与交易状态、真实来源、冻结年龄、时间顺序和归档哈希。该模式不证明实时成交；需要盘中策略时再单独运行严格实时验收。
 
 运维先用已有测试账户登录目标站点，在仓库外的受控目录保存 Playwright `storageState`；文件须由当前用户持有且权限为 `0600`，不要提交文件、cookie、账号口令、CSRF 或授权材料。脚本不创建账户、不读取账号口令、不保存或更新登录状态，不自动重新提交失败或超时的任务。超时后应在该测试账户的正常任务页核对在途任务，避免直接重跑产生第二项研究。
 
@@ -31,7 +31,7 @@ Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch 
 
 `--check-config` 只离线校验配置及登录状态文件，返回 `configuration_valid` 不代表实时验收通过。缺配置、会话失效、运行错误或断言失败都返回非零退出码，不跳过或输出假成功。运行时关闭 `DEBUG`、`PWDEBUG`、`NODE_DEBUG`；脚本不输出异常原文、响应正文、报价、报告文本、用户/workspace/任务 ID，也不保存截图、trace、HAR 或视频。仅输出 JSON 验收元数据：结果/阶段/错误码、技能版本、来源校验结果、真实标记、来源与冻结时点、新鲜度、结论/证据数量和耗时。
 
-验收同时检查 `Me.synthetic=false`、报告 `synthetic=false`、计划/任务的 `realtime_trade`、0.4 媒体类型、不可混淆的预览与冻结时点、`real_time`/`fresh`、连续交易说明、报告与证据的事件/接收/可用时间完全一致及先后关系、指定厂商 ID/显示名称、归档哈希定位，以及网页中秒级时间与来源展示。当前 Evidence 没有独立 `synthetic` 或结构化交易状态字段：脚本从同一报告引用取得证据，核对来源与连续交易说明，不能把 `fresh` 当成交易状态。
+验收同时检查 `Me.synthetic=false`、报告 `synthetic=false`、计划/任务的行情策略（网页默认 `latest_available`，严格模式 `realtime_trade`）、0.4 媒体类型、不可混淆的预览与冻结时点、对应的新鲜度和交易状态、报告与证据的事件/接收/可用时间完全一致及先后关系、指定厂商 ID/显示名称、归档哈希定位，以及网页中秒级时间与来源展示。当前 Evidence 没有独立 `synthetic` 或结构化交易状态字段：脚本从同一报告引用取得证据，核对来源与交易状态说明，不能把 `fresh` 当成交易状态。
 
 ## 2. 按任务补齐的测试
 

@@ -33,6 +33,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T030 | TuShare 收盘研究与 Choice 双来源研报 | T014 | REVIEW | Codex / agent/codex/T030-tushare | PR #40 接入收盘三技能与双来源成交简报。远端隔离环境用真实账号交付资金动向受限版。公告接口权限不足，个股分析和公司深研在计划阶段阻止执行。[验收与交接](docs/handoffs/2026-11-20-T030-codex.md) |
 
 | T031 | TuShare 早期样报数据补齐 | T014 | REVIEW | Codex / agent/codex/T031-mvp-coverage | 2026-11-20T07:53Z 领取并协调目录及技能版本。龙虎榜、实际分红和基金披露样例已接入，合成协议三种研报回归通过；真实财报和公司深研仍待 `anns_d` 授权。[交接](docs/handoffs/2026-11-20-T031-codex.md) |
+| T032 | 统一最近可用行情与三技能入口 | T030、T031 | REVIEW | Codex / agent/codex/T032-unified-research | 2026-11-20T10:36Z 领取（范围含 0.4 请求契约、前端、计划、技能可用性与验收，无迁移）；网页移除行情要求，0.4 未显式指定时绑定 `latest_available`，保留旧协议。双厂商部署保留三类技能和双来源报告。见 [T032 交接](docs/handoffs/2026-11-20-T032-codex.md) |
 
 ## 里程碑
 

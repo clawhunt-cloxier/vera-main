@@ -14,7 +14,6 @@ import {
   terminal,
   type Entity,
   type PlanResult,
-  type QuoteRequirement,
   type ResearchPlan,
   type ResearchProtocol,
   type Skill,
@@ -23,7 +22,6 @@ import {
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
-import { QuoteRequirementField } from '../components/QuoteRequirementField';
 import { ResearchSourceField } from '../components/ResearchSourceField';
 import { Empty, ErrorBox, Loading, Skeleton, SyntheticBanner, Tag } from '../components/ui';
 
@@ -40,7 +38,6 @@ export function App() {
   const [source, setSource] = useState<ResearchProtocol>('legacy');
   const protocol: ResearchProtocol = combined ? source : (me.data?.research_protocol ?? 'legacy');
   const registryProtocol = combined ? 'legacy' : protocol;
-  const realtime = protocol === 'v0.4';
   const skills = useQuery({
     queryKey: ['skills', registryProtocol],
     queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol: registryProtocol }),
@@ -54,16 +51,12 @@ export function App() {
     refetchInterval: 5000,
   });
   const [text, setText] = useState('');
-  const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
-  const allowRealtime = me.data?.realtime_trade_available === true;
-  const quoteRequirement = allowRealtime ? selection : 'latest_available';
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
-      if (realtime && !quoteRequirement) throw new Error('请选择行情要求');
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
-        { text, ...(realtime ? { quote_requirement: quoteRequirement } : {}) },
+        { text },
         { idem: newKey(), protocol }
       );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
@@ -93,14 +86,7 @@ export function App() {
         <>
           {synthetic && <SyntheticBanner />}
           {observation && !combined && (
-            <p className="notice">
-              当前可生成已接入股票的真实成交数据简报，包含成交量、成交额和换手率。使用已取得的日成交数据，非盘中实时行情；实时行情与财务分析尚未开放。
-            </p>
-          )}
-          {realtime && (
-            <p className="notice">
-              请选择行情要求。确认后采集并冻结一次数据快照，报告会分别显示行情实际时点与来源限制。
-            </p>
+            <p className="notice">当前研究使用已授权的 Choice 日成交数据，不是盘中实时行情。</p>
           )}
           {!combined && !synthetic && protocol === 'legacy' && stockOnly && (
             <p className="notice">
@@ -171,17 +157,10 @@ export function App() {
                 <div className="meta" style={{ marginTop: 12 }}>
                   <span className="muted">{text.length}/500</span>
                 </div>
-                {realtime && (
-                  <QuoteRequirementField
-                    value={quoteRequirement}
-                    onChange={setQuoteRequirement}
-                    allowRealtime={allowRealtime}
-                  />
-                )}
                 <div className="actions">
                   <button
                     type="submit"
-                    disabled={plan.isPending || !text.trim() || (realtime && !quoteRequirement)}
+                    disabled={plan.isPending || !text.trim()}
                     className="primary"
                   >
                     {plan.isPending ? '识别中…' : '开始研究'}
@@ -206,24 +185,6 @@ export function App() {
             <h2>快速启动</h2>
             {skills.error && <ErrorBox error={skills.error} />}
             <div className="grid">
-              {(combined || realtime) && (
-                <Link
-                  to="/app/quick/$skill"
-                  params={{ skill: 'daily-observation' }}
-                  className="card interactive"
-                >
-                  <h3>{combined ? '日成交简报（Choice + TuShare）' : 'Choice 日成交简报'}</h3>
-                </Link>
-              )}
-              {combined && me.data.research_protocol === 'v0.4' && (
-                <Link
-                  to="/app/quick/$skill"
-                  params={{ skill: 'choice-quote' }}
-                  className="card interactive"
-                >
-                  <h3>Choice 行情快照</h3>
-                </Link>
-              )}
               {skills.isLoading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="card small">
@@ -338,7 +299,6 @@ export function Quick({
       : combined
         ? 'legacy'
         : (me.data?.research_protocol ?? 'legacy');
-  const realtime = protocol === 'v0.4';
   const routeAvailable =
     (!daily || !!me.data?.research_protocol) &&
     (!quote || (combined && me.data?.research_protocol === 'v0.4'));
@@ -358,21 +318,16 @@ export function Quick({
     supportsMode(s.data?.params_schema, 'company_industry');
   const selectedMode = allowComparison && mode === 'company_industry' ? mode : '';
   const available = routeAvailable && !!s.data?.available;
-  const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
-  const allowRealtime = me.data?.realtime_trade_available === true;
-  const quoteRequirement = allowRealtime ? selection : 'latest_available';
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
       if (!subject || !available || !s.data?.subject_kinds.includes(subject.kind)) return;
-      if (realtime && !quoteRequirement) throw new Error('请选择行情要求');
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
         {
           skill_id: skill,
           subject_id: subject.id,
           params: selectedMode ? { mode: selectedMode } : {},
-          ...(realtime ? { quote_requirement: quoteRequirement } : {}),
         },
         { idem: newKey(), protocol }
       );
@@ -386,18 +341,10 @@ export function Quick({
       <p>
         <Link to="/app">← 返回工作台</Link>
       </p>
-      <h1>
-        {daily
-          ? combined
-            ? '日成交简报（Choice + TuShare）'
-            : 'Choice 日成交简报'
-          : quote
-            ? 'Choice 行情快照'
-            : s.data?.title}
-      </h1>
+      <h1>{daily || quote ? '个股分析' : s.data?.title}</h1>
       {daily && combined && (
         <p className="muted">
-          成交数据来自 Choice。已登记股票可补充 TuShare 数据，实际引用来源见报告。
+          此历史入口已归入个股分析。报告会分别列出 Choice 与 TuShare 的实际来源和数据时点。
         </p>
       )}
       {s.error && <ErrorBox error={s.error} />}
@@ -436,21 +383,13 @@ export function Quick({
             </select>
           </label>
         )}
-        {realtime && (
-          <QuoteRequirementField
-            value={quoteRequirement}
-            onChange={setQuoteRequirement}
-            allowRealtime={allowRealtime}
-          />
-        )}
         <button
           type="submit"
           disabled={
             !available ||
             !subject ||
             !s.data?.subject_kinds.includes(subject.kind) ||
-            plan.isPending ||
-            (realtime && !quoteRequirement)
+            plan.isPending
           }
         >
           {plan.isPending ? '准备中…' : '发起研究'}

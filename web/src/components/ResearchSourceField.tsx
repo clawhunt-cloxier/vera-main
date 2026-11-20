@@ -14,10 +14,8 @@ export function ResearchSourceField({
       研究数据
       <select value={value} onChange={(event) => onChange(event.target.value as ResearchProtocol)}>
         <option value="legacy">TuShare 收盘研究</option>
-        <option value="observation.v1">
-          日成交简报（Choice 成交数据，已登记股票可补充 TuShare 数据）
-        </option>
-        {snapshot && <option value="v0.4">Choice 行情快照</option>}
+        <option value="observation.v1">Choice + TuShare 双来源行情研究</option>
+        {snapshot && <option value="v0.4">Choice 最近可用行情</option>}
       </select>
     </label>
   );

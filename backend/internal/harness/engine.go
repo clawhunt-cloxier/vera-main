@@ -106,7 +106,7 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
 	if e.Brief != nil && !e.hasCloseSkills() && skillID != "stock_analysis" {
-		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "真实数据模式当前仅提供成交数据简报")
+		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "仅接入 Choice 时只支持个股行情分析")
 	}
 	sk, ok := e.Skills[skillID]
 	if !ok {
