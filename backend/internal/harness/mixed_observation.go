@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
 const MixedObservationVersion = emquant.MixedObservationVersion
@@ -113,7 +114,7 @@ func (e *Engine) ParseObservationPlan(ctx context.Context, ws uuid.UUID, text st
 
 func (e *Engine) WithChoiceResearchUse(ctx context.Context, fn func() error) error {
 	if e.Brief == nil {
-		return errors.New("Choice 数据源不可用")
+		return errors.New("choice 数据源不可用")
 	}
 	return pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
 		if err := e.Brief.MixedProviderUse(ctx, tx, dataservice.SourceModel); err != nil {
@@ -144,7 +145,7 @@ func (e *Engine) WithMixedDisplay(ctx context.Context, ws, task uuid.UUID, fn fu
 
 func (e *Engine) withObservation(ctx context.Context, ws, task uuid.UUID, version string, use dataservice.SourceUse, fn func(emquant.BriefObservation, []dataservice.StoredRecord) error) error {
 	if e.Brief == nil {
-		return errors.New("Choice 数据源不可用")
+		return errors.New("choice 数据源不可用")
 	}
 	if version == emquant.ObservationBriefVersion {
 		return e.Brief.WithSnapshot(ctx, ws, task, use, func(o emquant.BriefObservation) error { return fn(o, nil) })

@@ -1,0 +1,13 @@
+{
+  "version": "1",
+  "synthetic": true,
+  "skill_id": "stock_analysis",
+  "skill_version": "1.1.0-demo.4",
+  "cases": [
+    {"id": "MIX-01", "scenario": "choice_turnover_and_tushare_close_for_same_security", "expect": "limited_report_with_separate_source_dates_and_evidence"},
+    {"id": "MIX-02", "scenario": "only_another_security_has_a_recent_close", "expect": "new_choice_only_plan"},
+    {"id": "MIX-03", "scenario": "publication_between_plan_and_confirmation_or_after_freeze", "expect": "exact_original_close_and_choice_archive"},
+    {"id": "MIX-04", "scenario": "source_disabled_after_delivery", "expect": "current_research_and_display_denied"},
+    {"id": "MIX-05", "scenario": "cancelled_task_or_wrong_workspace_or_version", "expect": "no_mixed_snapshot_read_or_delivery"}
+  ]
+}

@@ -91,8 +91,17 @@ func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (j
 	}
 	// Validate cached reuse without retaining a connection while the gateway
 	// reserves budget or waits for a slot. Every real send acquires fresh rights.
-	if err := e.withObservation(ctx, t.Workspace, t.ID, t.Version, dataservice.SourceModel, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return nil }); err != nil {
-		return nil, model.Meta{}, err
+	req.WithReuse = func(callCtx context.Context, cached func(pgx.Tx) error) error {
+		return pgx.BeginFunc(callCtx, e.Pool, func(tx pgx.Tx) error {
+			if t.Version == MixedObservationVersion {
+				if _, _, err := e.Brief.ReadMixed(callCtx, tx, t.Workspace, t.ID, dataservice.SourceModel, e.Store); err != nil {
+					return err
+				}
+			} else if _, err := e.Brief.Read(callCtx, tx, t.Workspace, t.ID, dataservice.SourceModel); err != nil {
+				return err
+			}
+			return cached(tx)
+		})
 	}
 	req.WithSend = func(callCtx context.Context, send func() (model.Raw, error)) (model.Raw, error) {
 		if err := e.stillCurrent(callCtx, t); err != nil {

@@ -436,6 +436,34 @@ func checkMixedObservation(t *testing.T, a *App, ws uuid.UUID, subject dataservi
 		t.Fatal(err)
 	}
 	checkMixedHTTP(t, a, &e, store, subject, historical, doc, bar, token)
+	deniedRead := func(emquant.BriefObservation, []dataservice.StoredRecord) error {
+		t.Fatal("unauthorized mixed snapshot read")
+		return nil
+	}
+	if err := e.WithMixedDisplay(ctx, uuid.New(), task, deniedRead); err == nil {
+		t.Fatal("cross-workspace read")
+	}
+	next, err := e.BuildObservationPlan(ctx, ws, "stock_analysis", subject, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := e.CreateTask(ctx, ws, next.ID, next.Hash, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rev int64
+	if err := a.Pool.QueryRow(ctx, `SELECT revision FROM research_tasks WHERE id=$1`, cancelled).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	if _, status, err := e.CancelTask(ctx, ws, cancelled, rev); err != nil || status != "CANCELLED" {
+		t.Fatalf("cancelled mixed task: %s %v", status, err)
+	}
+	if err := e.Run(ctx, ws, cancelled, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.WithMixedDisplay(ctx, ws, cancelled, deniedRead); err == nil {
+		t.Fatal("cancelled mixed snapshot available")
+	}
 	for _, provider := range []string{"tushare", a.Brief.ProviderID} {
 		if _, err := a.Pool.Exec(ctx, `UPDATE providers SET enabled=false WHERE id=$1`, provider); err != nil {
 			t.Fatal(err)

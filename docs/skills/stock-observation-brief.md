@@ -16,4 +16,4 @@
 
 S2 必须引用 Choice 成交数据，S3 必须引用 TuShare 的交易日期和不复权收盘价，两段均通过事实核验后交付 limited。报告以各自交易日期和系统取得或可用时间区分两家来源。若创建计划时无法取得当前证券的收盘数据，可提供明确标识的 Choice 日成交简报。已确认的双来源任务必须按原版本执行。
 
-自动化评测 `TestObservationBriefDelivery/mixed_closing_snapshot` 使用模拟供应商数据和模拟模型。样例包括同名数据集的不同厂商、其他证券有数据但目标证券无覆盖、计划与交付间出现新版本、冻结后重试、任一来源停用后读取和历史版本隔离。真实账号的报告另行验收。
+自动化评测 `TestObservationBriefDelivery/mixed_closing_snapshot` 使用模拟供应商数据和模拟模型。样例包括同名数据集的不同厂商、其他证券有数据但目标证券无覆盖、计划与交付间出现新版本、冻结后重试、取消、任一来源停用后读取和历史版本隔离。真实账号的报告另行验收。见[双来源评测样例](../../tests/fixtures/mixed-observation-cases.json)。
