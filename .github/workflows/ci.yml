@@ -55,8 +55,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends poppler-utils util-linux
+      - name: Cache the pinned PostgreSQL binary for database tests
+        run: bash scripts/cache-ci-postgres.sh "$RUNNER_TEMP/vera-test-pg"
       - run: make verify
         env:
+          VERA_TEST_PG_DIR: ${{ runner.temp }}/vera-test-pg
           # Database-heavy packages each start PostgreSQL. Limit package-level
           # concurrency so deadline tests are not starved on small runners;
           # every test and the Go race detector still run.
