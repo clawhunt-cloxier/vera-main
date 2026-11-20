@@ -12,8 +12,8 @@ func (s *Server) historyVersions() []string {
 		return []string{emquant.ObservationBriefVersion, harness.RealtimeBriefVersion}
 	}
 	if sk := s.Engine.Skills["stock_analysis"]; sk != nil {
-		if sk.Version == harness.CloseResearchVersion {
-			return []string{harness.CloseResearchVersion}
+		if harness.IsCloseResearchVersion(sk.Version) {
+			return []string{harness.CloseResearchVersion, harness.CloseCompanyVersion}
 		}
 		if s.Engine.Synthetic && sk.Version == "1.0.0" {
 			return []string{sk.Version}
@@ -26,7 +26,7 @@ func (s *Server) historyVersions() []string {
 // close research can read unified records through the generic evidence route.
 func (s *Server) historyRecordProvider() string {
 	if s.Engine.Brief == nil {
-		if sk := s.Engine.Skills["stock_analysis"]; sk != nil && sk.Version == harness.CloseResearchVersion {
+		if sk := s.Engine.Skills["stock_analysis"]; sk != nil && harness.IsCloseResearchVersion(sk.Version) {
 			return "tushare"
 		}
 		if s.Engine.Synthetic {

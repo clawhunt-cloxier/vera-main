@@ -116,7 +116,8 @@ func TestFilingSegmentsAndMissingNumbers(t *testing.T) {
 		filingTestRow(map[string]string{"end_date": a.period, "bz_code": "P", "bz_item": "美元业务", "bz_sales": "18", "curr_type": "USD"}),
 		filingTestRow(map[string]string{"end_date": a.period, "bz_code": "D", "bz_item": "境内", "bz_sales": "90", "curr_type": "CNY"})}
 	rs, err := mapSegments(rows, filingTestCode, a, "P")
-	if err != nil || len(rs) != 1 || rs[0].Payload["cost"] != nil || rs[0].Payload["revenue"] != "45000.4" {
+	if err != nil || len(rs) != 1 || rs[0].Payload["cost"] != nil || rs[0].Payload["revenue"] != "45000.4" ||
+		rs[0].Payload["filing_id"] != a.id || rs[0].MappingVersion != 2 {
 		t.Fatal(rs, err)
 	}
 	add := filingTestRow(map[string]string{"end_date": a.period, "bz_code": "P", "bz_item": "部件", "bz_sales": "45001", "curr_type": "CNY"})

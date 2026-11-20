@@ -267,7 +267,7 @@ func mapSegments(rows []Row, code string, a disclosure, typ string) ([]dataservi
 			return nil, err
 		}
 		d := a.periodDate()
-		p := map[string]any{"report_period": d.Format(time.DateOnly), "dimension": dim, "segment_name": v["bz_item"], "revenue": sales}
+		p := map[string]any{"report_period": d.Format(time.DateOnly), "filing_id": a.id, "dimension": dim, "segment_name": v["bz_item"], "revenue": sales}
 		if v["bz_cost"] != "" {
 			p["cost"], err = filingDecimal(v["bz_cost"])
 			if err != nil {
@@ -276,6 +276,7 @@ func mapSegments(rows []Row, code string, a disclosure, typ string) ([]dataservi
 		}
 		r := a.record("fin.segment", a.period+"|"+dim+"|"+v["bz_item"], "TuShare fina_mainbz（人民币元）；按报告期关联唯一年度公告 "+a.id+"，以本次采集时间可见", "L2", p, row)
 		r.Period = &d
+		r.MappingVersion = 2
 		if prev, ok := seen[r.RecordKey]; ok && r.Hash() != prev.Hash() {
 			conflict[r.RecordKey] = true
 		}

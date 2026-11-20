@@ -122,7 +122,7 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 		return nil, err
 	}
 	var asOf time.Time
-	if sk.Version == CloseResearchVersion {
+	if IsCloseResearchVersion(sk.Version) {
 		if e.CloseResearchCutoff == nil {
 			return nil, errs.Unavailable("PUBLICATION_CUTOFF_UNAVAILABLE", "数据发布截止时点不可用")
 		}
@@ -673,7 +673,7 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	if t.Epoch != epoch || IsTerminal(t.Status) || t.Status == "CANCEL_REQUESTED" {
 		return nil
 	}
-	if t.Version == CloseResearchVersion && !e.RealResearch {
+	if IsCloseResearchVersion(t.Version) && !e.RealResearch {
 		return e.finish(ctx, t, "BLOCKED", "REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
 	if !e.supportsSnapshotMode(t.SnapshotMode, t.Version) {
@@ -692,7 +692,7 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
 	case emquant.ObservationBriefVersion:
 		err = e.observationPipeline(runCtx, ctx, t, sk)
-	case CloseResearchVersion:
+	case CloseResearchVersion, CloseCompanyVersion:
 		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
 			err = e.pipeline(runCtx, ctx, t, sk)
 		}
@@ -774,7 +774,7 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 	if err != nil {
 		return err
 	}
-	if t.Version == CloseResearchVersion {
+	if IsCloseResearchVersion(t.Version) {
 		t.Snapshot = &co.Snapshot
 	}
 	sheet, err := step(ctx, e, t, "compute", func() (*facts.Sheet, error) {

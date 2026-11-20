@@ -59,7 +59,7 @@ func ObservationBriefSkill() *Skill {
 // complete rechecks the frozen inputs and holds current license locks for each
 // model use, including cached step retries and summary/verifier calls.
 func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (json.RawMessage, model.Meta, error) {
-	if t.Version == CloseResearchVersion {
+	if IsCloseResearchVersion(t.Version) {
 		if t.Snapshot == nil || *t.Snapshot == "" {
 			return nil, model.Meta{}, errors.New("harness: missing close research snapshot")
 		}
@@ -253,7 +253,7 @@ func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Pla
 }
 
 func (e *Engine) deliverTransaction(ctx context.Context, t *taskRow, fn func(pgx.Tx) error) error {
-	if t.Version == CloseResearchVersion {
+	if IsCloseResearchVersion(t.Version) {
 		return e.withCloseRights(ctx, func() error { return db.InWorkspace(ctx, e.Pool, t.Workspace, fn) })
 	}
 	if t.Version == RealtimeBriefVersion {

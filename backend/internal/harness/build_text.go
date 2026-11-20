@@ -159,37 +159,57 @@ func (b *builder) profile(e uuid.UUID, group string) {
 	}
 }
 
+func annualSegmentRows(b *Bundle, e uuid.UUID) (string, []dataservice.StoredRecord) {
+	rows := b.Rows("fin.segment", e)
+	latest := ""
+	filing := ""
+	if b.Subject.Synthetic {
+		for _, r := range rows {
+			if p := str(r, "report_period"); strings.HasSuffix(p, "-12-31") {
+				latest = max(latest, p)
+			}
+		}
+	} else {
+		docs := periodicDocuments(b.Rows("doc.announcement", e))
+		for p := range docs {
+			if strings.HasSuffix(p, "-12-31") {
+				latest = max(latest, p)
+			}
+		}
+		filing = str(docs[latest], "announcement_id")
+		if filing == "" {
+			return "", nil
+		}
+	}
+	var selected []dataservice.StoredRecord
+	for _, r := range rows {
+		if latest != "" && str(r, "report_period") == latest && (b.Subject.Synthetic || str(r, "filing_id") == filing) {
+			selected = append(selected, r)
+		}
+	}
+	return latest, selected
+}
+
 // segments adds latest-year segment revenue, share and gross margin.
 func (b *builder) segments(e uuid.UUID, group, section string) bool {
-	rs := b.B.Rows("fin.segment", e)
+	latest, rs := annualSegmentRows(b.B, e)
 	if len(rs) == 0 {
 		return false
 	}
 	b.sources(rs)
-	latest := ""
-	for _, r := range rs {
-		if p := str(r, "report_period"); strings.HasSuffix(p, "-12-31") && p > latest {
-			latest = p
-		}
-	}
-	if latest == "" {
-		return false
-	}
 	subj := b.name(e)
 	revs := map[string][]facts.Input{}
 	incomplete := map[string]bool{}
 	var cur []int
 	for i, r := range rs {
-		if str(r, "report_period") == latest {
-			dim := str(r, "dimension")
-			in, ok := input(r, "revenue", "CNY")
-			if !ok {
-				incomplete[dim] = true
-				continue
-			}
-			revs[dim] = append(revs[dim], in)
-			cur = append(cur, i)
+		dim := str(r, "dimension")
+		in, ok := input(r, "revenue", "CNY")
+		if !ok {
+			incomplete[dim] = true
+			continue
 		}
+		revs[dim] = append(revs[dim], in)
+		cur = append(cur, i)
 	}
 	pl := latest[:4] + " 年度（" + latest + "）"
 	t := facts.Table{Title: subj + " " + latest[:4] + " 年分业务收入", Columns: []string{"维度", "业务", "收入（亿元）", "毛利率"}}

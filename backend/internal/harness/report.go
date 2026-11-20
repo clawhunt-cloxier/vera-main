@@ -324,7 +324,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 			doc.Limitations = append(doc.Limitations, "本报告使用模拟模型，仅用于工程验证。")
 		}
 	}
-	if t.Version == CloseResearchVersion {
+	if IsCloseResearchVersion(t.Version) {
 		doc.DataAsOf = t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间；收盘及已披露数据）"
 		names := map[string]string{}
 		for _, dataset := range slices.Sorted(maps.Keys(sheet.SourceProviders)) {
@@ -456,7 +456,7 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.SnapshotMode == "collect_latest" && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
 			return errStale
 		}
-		if t.Version == CloseResearchVersion && (t.Snapshot == nil || *t.Snapshot != *snapshot) {
+		if IsCloseResearchVersion(t.Version) && (t.Snapshot == nil || *t.Snapshot != *snapshot) {
 			return errStale
 		}
 		if t.Version == RealtimeBriefVersion && revision != t.Revision {

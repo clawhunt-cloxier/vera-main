@@ -17,10 +17,15 @@ import (
 // CloseResearchVersion identifies the company reports backed by registered
 // close/disclosure data. Real-time and fixture plans retain their own versions.
 const CloseResearchVersion = "1.0.1"
+const CloseCompanyVersion = "1.0.2"
+
+func IsCloseResearchVersion(version string) bool {
+	return version == CloseResearchVersion || version == CloseCompanyVersion
+}
 
 func (e *Engine) realResearchDisabled() bool {
 	s := e.Skills["stock_analysis"]
-	return !e.RealResearch && (!e.Synthetic || (s != nil && s.Version == CloseResearchVersion))
+	return !e.RealResearch && (!e.Synthetic || (s != nil && IsCloseResearchVersion(s.Version)))
 }
 
 func (e *Engine) withCloseRights(ctx context.Context, fn func() error) error {
@@ -39,6 +44,9 @@ func TuShareSkills() map[string]*Skill {
 	registry := Skills()
 	for id, sk := range registry {
 		sk.Version = CloseResearchVersion
+		if id == "stock_analysis" || id == "deep_research" {
+			sk.Version = CloseCompanyVersion
+		}
 		sk.Subjects = []string{"stock"}
 		validate := sk.Validate
 		sk.Validate = func(s dataservice.EntityRow, raw map[string]any) (Params, error) {
@@ -68,6 +76,9 @@ func TuShareSkills() map[string]*Skill {
 
 func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject dataservice.EntityRow, p Params, at time.Time, av map[string]Availability) error {
 	ds := []string{"ref.industry", "fin.statement", "doc.periodic_text", "news.item", "doc.announcement", "flow.margin", "mkt.daily_bar", "mkt.valuation_daily"}
+	if id == "deep_research" {
+		ds = append(ds, "fin.segment")
+	}
 	recs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: ds, EntityIDs: []uuid.UUID{subject.ID}, AsOf: at})
 	if err != nil {
 		return err
@@ -175,6 +186,9 @@ func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject datas
 			}
 		}
 	} else {
+		if _, rows := annualSegmentRows(b, subject.ID); len(rows) == 0 {
+			av["S3"] = unavailable("缺少可对应最近年度公告版本的分部收入")
+		}
 		if !finOK {
 			av["S4"] = unavailable("缺少连续两个年度可比的合并营收和归母净利润")
 		}

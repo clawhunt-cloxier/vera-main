@@ -59,8 +59,9 @@ func TestCloseMarketDoesNotInventFactorsOrCrossDates(t *testing.T) {
 
 func TestCloseSegmentsOnlyCompareWithinDimension(t *testing.T) {
 	b := closeTestBuilder()
+	addSegmentFiling(b, "2025-12-31", "filing-A", b.B.AsOf)
 	row := func(p, dim, name, rev string) {
-		addCloseRecord(b, "fin.segment", map[string]any{"report_period": p, "dimension": dim, "segment_name": name, "revenue": rev})
+		addCloseRecord(b, "fin.segment", map[string]any{"report_period": p, "filing_id": "filing-A", "dimension": dim, "segment_name": name, "revenue": rev})
 	}
 	row("2026-06-30", "product", "甲", "30")
 	if b.segments(b.B.Subject.ID, "seg", "S3") {
@@ -75,6 +76,57 @@ func TestCloseSegmentsOnlyCompareWithinDimension(t *testing.T) {
 	if len(b.S.Calcs) != 3 || b.S.Calcs[0].Result.String() != "0.3" || b.S.Calcs[2].Result.String() != "1" ||
 		b.S.Calcs[0].ID == b.S.Calcs[2].ID {
 		t.Fatalf("unexpected segment calculations %+v", b.S.Calcs)
+	}
+}
+
+func addSegmentFiling(b *builder, period, id string, at time.Time) {
+	end, _ := time.Parse(time.DateOnly, period)
+	addCloseRecord(b, "doc.announcement", map[string]any{"category": "periodic_report", "announcement_id": id})
+	docs := b.B.Rows("doc.announcement", b.B.Subject.ID)
+	docs[len(docs)-1].Period, docs[len(docs)-1].PublishedAt = &end, &at
+}
+
+func TestCloseSegmentsRequireCurrentAnnualEdition(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		edition        string
+		newPeriod      string
+		newDay         int
+		includeCurrent bool
+	}{
+		{"legacy unbound", "", "", 0, false},
+		{"amended annual report", "filing-A", "2025-12-31", 1, false},
+		{"ambiguous filing pair", "filing-A", "2025-12-31", 0, false},
+		{"new annual report has no segments", "filing-A", "2026-12-31", 1, false},
+		{"verified replacement", "filing-A", "2025-12-31", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := closeTestBuilder()
+			id := b.B.Subject.ID
+			date := b.B.AsOf.AddDate(0, -1, 0)
+			addSegmentFiling(b, "2025-12-31", "filing-A", date)
+			if tc.newPeriod != "" {
+				addSegmentFiling(b, tc.newPeriod, "filing-B", date.AddDate(0, 0, tc.newDay))
+			}
+			add := func(filing, revenue string) dataservice.StoredRecord {
+				return addCloseRecord(b, "fin.segment", map[string]any{"report_period": "2025-12-31", "filing_id": filing, "dimension": "product", "segment_name": "产品", "revenue": revenue})
+			}
+			add(tc.edition, "50")
+			var current dataservice.StoredRecord
+			if tc.includeCurrent {
+				current = add("filing-B", "40")
+			}
+			ok := b.segments(id, "seg", "S3")
+			if ok != tc.includeCurrent {
+				t.Fatalf("accepted segment facts: %v", ok)
+			}
+			if !ok && (len(b.S.Facts)+len(b.S.Calcs)+len(b.S.Tables["S3"])+len(b.S.SourceProviders) != 0) {
+				t.Fatal("obsolete segment produced report inputs")
+			}
+			if ok && (len(b.S.Calcs) != 1 || !slices.Equal(b.S.Tables["S3"][0].Evidence, []uuid.UUID{current.ID}) || b.S.Calcs[0].Result.String() != "1") {
+				t.Fatal("replacement must exclude previous row from the denominator and table")
+			}
+		})
 	}
 }
 
