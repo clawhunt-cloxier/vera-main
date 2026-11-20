@@ -82,6 +82,28 @@ func TestAuthenticatedPaginationAndArchivedPrecision(t *testing.T) {
 	}
 }
 
+func TestEmptyHistoryPagePreservesRequestEvidence(t *testing.T) {
+	const empty = `{"code":0,"data":{"fields":[],"items":[]}}`
+	c, archive := testClient(t, empty)
+	rows, err := c.Rows(t.Context(), "margin_detail", map[string]string{"ts_code": "600519.SH"}, []string{"rzye"}, 100)
+	if err != nil || len(rows) != 0 || len(archive) != 2 {
+		t.Fatalf("empty observation: rows=%d objects=%d err=%v", len(rows), len(archive), err)
+	}
+	for _, body := range archive {
+		if body == empty {
+			continue
+		}
+		var request struct {
+			API    string `json:"api_name"`
+			Hash   string `json:"response_sha256"`
+			Params map[string]any
+		}
+		if json.Unmarshal([]byte(body), &request) != nil || request.API != "margin_detail" || request.Params["ts_code"] != "600519.SH" || archive[request.Hash] != empty || strings.Contains(body, c.token) {
+			t.Fatal("missing credential-free request or empty response")
+		}
+	}
+}
+
 func TestErrorsDoNotLeakTokenOrPublishBadRows(t *testing.T) {
 	cases := []struct {
 		body  string

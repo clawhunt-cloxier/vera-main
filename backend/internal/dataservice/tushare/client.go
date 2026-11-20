@@ -189,22 +189,24 @@ func (c *client) Rows(ctx context.Context, api string, params map[string]string,
 		if err != nil {
 			return nil, err
 		}
-		if len(data.Items) == 0 && !data.HasMore {
-			return result, nil
-		}
-		pageRows, err := decodeRows(api, fields, data)
-		if err != nil {
-			return nil, err
-		}
-		// Detect endpoints ignoring offset, without relying on request IDs or envelope hashes.
-		cells, _ := json.Marshal(data.Items)
-		digest := sha256.Sum256(cells)
-		if seen[digest] || len(pageRows) == 0 {
+		var pageRows []map[string]string
+		if len(data.Items) != 0 {
+			pageRows, err = decodeRows(api, fields, data)
+			if err != nil {
+				return nil, err
+			}
+			// Detect endpoints ignoring offset, without relying on request IDs or envelope hashes.
+			cells, _ := json.Marshal(data.Items)
+			digest := sha256.Sum256(cells)
+			if seen[digest] {
+				return nil, classified(ds.ErrSchemaChanged, api)
+			}
+			seen[digest] = true
+		} else if data.HasMore {
 			return nil, classified(ds.ErrSchemaChanged, api)
 		}
-		seen[digest] = true
-		// Bind the credential-free request to the exact upstream response bytes. The
-		// manifest is independent of local timestamps and can be reused on refresh.
+		// Archive valid empty responses too: they document a checked range and
+		// distinguish an empty final page from an incomplete collection.
 		ref, hash, err := c.Archive(ctx, "response", raw)
 		if err != nil {
 			return nil, err
