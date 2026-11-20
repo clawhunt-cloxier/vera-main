@@ -1010,6 +1010,29 @@ func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidenc
 		}
 		ex := clip(strings.Join(parts, "；"), 1000)
 		ev.Excerpt = &ex
+		if rec.ProviderID == "tushare" {
+			var location string
+			switch rec.DatasetID {
+			case "flow.dragon_tiger_day":
+				location = "龙虎榜日查询 · " + str("trade_date")
+			case "flow.dragon_tiger":
+				board := "买入榜"
+				if str("side") == "sell" {
+					board = "卖出榜"
+				}
+				location = strings.Join([]string{str("trade_date"), str("reason_text"), board, str("seat_name")}, " · ")
+			case "fund.disclosed_position":
+				location = str("fund_code") + " · " + str("period_end") + " 持仓 · " + str("announcement_date") + " 公告"
+			case "corp.dividend":
+				if announced := str("implementation_date"); announced != "" {
+					location = "分红实施公告 · " + announced
+				}
+			}
+			if location != "" {
+				location = clip(location, 300)
+				ev.Locator = &location
+			}
+		}
 	}
 	return ev
 }
