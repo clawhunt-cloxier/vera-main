@@ -31,12 +31,11 @@ const mediaTypes: Record<ResearchProtocol, string> = {
   legacy: 'application/json',
 };
 
-export const planProtocol = (plan: ResearchPlan): ResearchProtocol =>
-  plan.quote_requirement
-    ? 'v0.4'
-    : plan.snapshot_mode === 'collect_latest'
-      ? 'observation.v1'
-      : 'legacy';
+export const planProtocol = (plan: ResearchPlan): ResearchProtocol => {
+  // A newer read representation also exposes the quote policy on fixed plans.
+  if (plan.snapshot_mode !== 'collect_latest') return 'legacy';
+  return plan.quote_requirement ? 'v0.4' : 'observation.v1';
+};
 
 export const quoteRequirementLabel: Record<QuoteRequirement, string> = {
   realtime_trade: '交易中实时成交行情',

@@ -47,7 +47,14 @@ test('0.4 research keeps explicit intent and rejects a downgraded response', asy
 
   for (const [plan, media, contentType] of [
     [{ snapshot_mode: 'collect_latest', quote_requirement: 'latest_available' }, v04, v04],
+    [{ snapshot_mode: 'collect_latest', quote_requirement: 'realtime_trade' }, v04, v04],
     [{ snapshot_mode: 'collect_latest', quote_requirement: null }, observation, observation],
+    [
+      { snapshot_mode: 'fixed_legacy', quote_requirement: 'latest_available' },
+      'application/json',
+      'application/json',
+    ],
+    [{}, 'application/json', 'application/json'],
     [
       { snapshot_mode: 'fixed_legacy', quote_requirement: null },
       'application/json',
