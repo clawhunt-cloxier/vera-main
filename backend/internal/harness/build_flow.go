@@ -314,8 +314,17 @@ func (b *builder) corp(e uuid.UUID, group string) bool {
 		sh, _ := input(r, "shares", "shares")
 		b.S.Value(group, subj, "限售股解禁股数（"+str(r, "holder_type")+"）", d, facts.KindReported, "公司公告", "shares", sh.Value, r.ID).Flag("scheduled")
 	}
-	if ds := b.B.Rows("corp.dividend", e); len(ds) > 0 {
-		r := ds[len(ds)-1]
+	if b.paidDividendEvents && b.paidDividends(e, group) {
+		found = true
+	}
+	// Older providers can supply an explicit fiscal-year aggregate. An
+	// individual implemented distribution belongs only in the event table.
+	ds := b.B.Rows("corp.dividend", e)
+	for i := len(ds) - 1; i >= 0; i-- {
+		r := ds[i]
+		if str(r, "report_period") != "" {
+			continue
+		}
 		b.source(r)
 		found = true
 		if c, ok := input(r, "cash_per_10_shares", "CNY"); ok {
@@ -324,6 +333,7 @@ func (b *builder) corp(e uuid.UUID, group string) bool {
 		if t, ok := input(r, "total_cash", "CNY"); ok {
 			b.S.Value(group, subj, "现金分红总额", str(r, "fiscal_year")+" 年度", facts.KindReported, "", "CNY", t.Value, r.ID)
 		}
+		break
 	}
 	return found
 }
