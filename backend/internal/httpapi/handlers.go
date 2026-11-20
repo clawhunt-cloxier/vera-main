@@ -150,7 +150,7 @@ func choiceSearchResults(q string, cached []dataservice.EntityRow, lookup func()
 		if err != nil {
 			return nil, err
 		}
-		all = append(discovered, cached...)
+		all = slices.Concat(discovered, cached)
 	}
 	result := make([]dataservice.EntityRow, 0, min(len(all), maxSearchEntities))
 	seen := make(map[uuid.UUID]bool)
