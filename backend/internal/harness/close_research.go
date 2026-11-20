@@ -61,7 +61,13 @@ func tuShareSkills(disclosures bool) map[string]*Skill {
 				if err != nil {
 					return nil, err
 				}
-				rs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{seatDayDataset, "fund.disclosed_position"}, EntityIDs: []uuid.UUID{s.ID}, AsOf: at})
+				extra := []string{seatDayDataset}
+				if id == "stock_analysis" {
+					extra = append(extra, "corp.dividend_implementation")
+				} else {
+					extra = append(extra, "fund.disclosed_position")
+				}
+				rs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: extra, EntityIDs: []uuid.UUID{s.ID}, AsOf: at})
 				if err != nil {
 					return nil, err
 				}

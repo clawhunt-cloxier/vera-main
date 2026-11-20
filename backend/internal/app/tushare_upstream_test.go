@@ -102,7 +102,7 @@ func (s *tsTestUpstream) marketRows(codes []string, end time.Time) {
 	}
 	s.rows["suspend_d"] = []tsTestRow{}
 	for _, period := range []string{"0331", "0630", "0930", "1231"} {
-		for _, y := range []int{end.Year()-1, end.Year()} {
+		for _, y := range []int{end.Year() - 1, end.Year()} {
 			q, _ := time.Parse("20060102", fmt.Sprintf("%d%s", y, period))
 			pub := q.AddDate(0, 0, 22)
 			if pub.After(end) {

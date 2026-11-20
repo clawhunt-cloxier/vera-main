@@ -1319,7 +1319,7 @@
         {
           "name": "observation_state",
           "type": "enum",
-          "values": ["disclosed", "conflicting"],
+          "values": ["disclosed", "undisclosed", "conflicting"],
           "unit": "none",
           "required": true,
           "description": "单次披露的数量是否一致"
@@ -1512,6 +1512,55 @@
           "unit": "shares",
           "required": false,
           "description": "本次实施分配的股本基数（股）"
+        },
+        {
+          "name": "record_date",
+          "type": "date",
+          "unit": "none",
+          "required": false,
+          "description": "股权登记日，与同次实施公告匹配"
+        }
+      ]
+    },
+    {
+      "id": "corp.dividend_implementation",
+      "title": "现金分红实施公告状态",
+      "origin": "company_filing",
+      "default_tier": "L2",
+      "grain": [
+        "entity_id",
+        "report_period",
+        "record_date"
+      ],
+      "mvp": true,
+      "fields": [
+        {
+          "name": "report_period",
+          "type": "date",
+          "unit": "none",
+          "required": true,
+          "description": "分配所属报告期末"
+        },
+        {
+          "name": "record_date",
+          "type": "date",
+          "unit": "none",
+          "required": true,
+          "description": "股权登记日"
+        },
+        {
+          "name": "implementation_date",
+          "type": "date",
+          "unit": "none",
+          "required": true,
+          "description": "对应最新实施公告日"
+        },
+        {
+          "name": "eligible",
+          "type": "boolean",
+          "unit": "none",
+          "required": true,
+          "description": "此版实施公告是否具备已支付且可核对的现金分红金额"
         }
       ]
     },

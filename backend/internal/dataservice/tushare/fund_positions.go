@@ -61,7 +61,7 @@ func (c *marketCollector) fundQuarter(period time.Time) error {
 		if v["symbol"] != c.code || v["end_date"] != params["period"] || !fundIdentifier.MatchString(fund) {
 			return marketBad(api, "fund or position identity")
 		}
-		if v["ann_date"] == "" || v["amount"] == "" {
+		if v["ann_date"] == "" {
 			continue
 		}
 		pub, err := time.ParseInLocation(marketDay, v["ann_date"], marketZone)
@@ -71,18 +71,22 @@ func (c *marketCollector) fundQuarter(period time.Time) error {
 		if v["ann_date"] > c.until {
 			continue
 		}
-		shares, err := decimal.NewFromString(v["amount"])
-		if err != nil || shares.Exponent() > 18 || shares.Exponent() < -30 || shares.IsNegative() {
-			return marketBad(api, "amount")
-		}
 		key := c.code + "|" + fund + "|" + v["end_date"] + "|" + v["ann_date"]
 		rec := marketRecord(row, "fund.disclosed_position", c.code, key, "company_filing", "L2",
 			"TuShare 基金定期披露，按单个基金代码及公告日期列示", &period, map[string]any{
-				"fund_code": fund, "period_end": period.Format(time.DateOnly), "announcement_date": pub.Format(time.DateOnly), "holding_shares": shares.String(), "observation_state": "disclosed",
+				"fund_code": fund, "period_end": period.Format(time.DateOnly), "announcement_date": pub.Format(time.DateOnly), "observation_state": "undisclosed",
 			})
+		if v["amount"] != "" {
+			shares, err := decimal.NewFromString(v["amount"])
+			if err != nil || shares.Exponent() > 18 || shares.Exponent() < -30 || shares.IsNegative() {
+				return marketBad(api, "amount")
+			}
+			rec.Payload["holding_shares"] = shares.String()
+			rec.Payload["observation_state"] = "disclosed"
+		}
 		// The provider gives a date, not an intraday publication timestamp.
 		// The archived receipt already bounds actual visibility on that date.
-		pub = pub.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		pub = pub.AddDate(0, 0, 1).Add(-time.Microsecond)
 		rec.PublishedAt = &pub
 		if prev, ok := byKey[key]; ok && prev.Payload["holding_shares"] != rec.Payload["holding_shares"] {
 			conflicts[key] = true
