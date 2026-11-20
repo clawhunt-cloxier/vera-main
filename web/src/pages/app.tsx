@@ -87,7 +87,8 @@ export function App() {
           {synthetic && <SyntheticBanner />}
           {observation && !combined && (
             <p className="notice">
-              当前研究使用已授权的 Choice 与 TuShare 数据。报告会分别标明各来源的交易日期、口径和数据时点。
+              当前研究使用已授权的 Choice 与 TuShare
+              数据。报告会分别标明各来源的交易日期、口径和数据时点。
             </p>
           )}
           {!combined && !synthetic && protocol === 'legacy' && stockOnly && (
@@ -343,9 +344,7 @@ export function Quick({
       <p>
         <Link to="/app">← 返回工作台</Link>
       </p>
-      <h1>
-        {daily || quote ? '个股分析' : s.data?.title}
-      </h1>
+      <h1>{daily || quote ? '个股分析' : s.data?.title}</h1>
       {daily && combined && (
         <p className="muted">
           此历史入口已归入个股分析。报告会分别列出 Choice 与 TuShare 的实际来源和数据时点。
