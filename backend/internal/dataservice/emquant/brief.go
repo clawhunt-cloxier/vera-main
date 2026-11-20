@@ -15,6 +15,7 @@ import (
 )
 
 const ObservationBriefVersion = "1.1.0-demo.2"
+const MixedObservationVersion = "1.1.0-demo.4"
 
 // RealtimeBriefVersion is the negotiated 0.4 single-stock brief. It is kept
 // separate from the historical observation brief so an old worker cannot
@@ -34,6 +35,7 @@ type BriefManifest struct {
 	Version             string
 	Code, From, To      string
 	Security, Liquidity RegisteredArchive
+	Supplement          []dataservice.ObservationRef `json:",omitempty"`
 }
 type BriefObservation struct {
 	Manifest BriefManifest
@@ -125,7 +127,7 @@ func (b *BriefService) verifyArchive(ctx context.Context, tx pgx.Tx, raw Registe
 }
 func (b *BriefService) Replay(ctx context.Context, tx pgx.Tx, m BriefManifest, cutoff time.Time, use dataservice.SourceUse) (BriefObservation, error) {
 	out := BriefObservation{Manifest: m, Cutoff: cutoff}
-	if m.Version != ObservationBriefVersion || m.Security.DatasetID != "ref.security" || m.Liquidity.DatasetID != "mkt.daily_bar" {
+	if m.Version != ObservationBriefVersion || len(m.Supplement) != 0 || m.Security.DatasetID != "ref.security" || m.Liquidity.DatasetID != "mkt.daily_bar" {
 		return out, errors.New("emquant: brief scope mismatch")
 	}
 	if err := b.Ready(ctx, tx, m.Code, use); err != nil {
@@ -169,6 +171,17 @@ func (b *BriefService) Replay(ctx context.Context, tx pgx.Tx, m BriefManifest, c
 // Freeze binds only a consumed, unchanged, live task. Concurrent retries keep
 // the first committed snapshot, and never replace it with a later observation.
 func (b *BriefService) Freeze(ctx context.Context, ws, task uuid.UUID, epoch int64, m BriefManifest) error {
+	return b.freeze(ctx, ws, task, epoch, m, nil)
+}
+
+func (b *BriefService) FreezeMixed(ctx context.Context, ws, task uuid.UUID, epoch int64, m BriefManifest, store *dataservice.Store) error {
+	if store == nil {
+		return errors.New("emquant: missing closing data source")
+	}
+	return b.freeze(ctx, ws, task, epoch, m, store)
+}
+
+func (b *BriefService) freeze(ctx context.Context, ws, task uuid.UUID, epoch int64, m BriefManifest, store *dataservice.Store) error {
 	return pgx.BeginFunc(ctx, b.Runtime.database, func(tx pgx.Tx) error {
 		var code, version, status, mode string
 		var actual int64
@@ -176,13 +189,18 @@ func (b *BriefService) Freeze(ctx context.Context, ws, task uuid.UUID, epoch int
 		var hash *string
 		var subject uuid.UUID
 		var live bool
-		err := tx.QueryRow(ctx, `SELECT e.code,e.id,t.skill_version,t.status,t.snapshot_mode,t.epoch,t.snapshot_manifest_hash,clock_timestamp(),t.deadline>clock_timestamp()
+		var preview time.Time
+		err := tx.QueryRow(ctx, `SELECT e.code,e.id,t.skill_version,t.status,t.snapshot_mode,t.epoch,t.snapshot_manifest_hash,clock_timestamp(),t.deadline>clock_timestamp(),p.as_of
    FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
-   JOIN entities e ON e.id=t.subject_id WHERE t.id=$1 AND t.workspace_id=$2 AND p.consumed_task_id=t.id AND NOT e.synthetic FOR UPDATE OF t`, task, ws).Scan(&code, &subject, &version, &status, &mode, &actual, &hash, &cutoff, &live)
+   JOIN entities e ON e.id=t.subject_id WHERE t.id=$1 AND t.workspace_id=$2 AND p.consumed_task_id=t.id AND NOT e.synthetic FOR UPDATE OF t`, task, ws).Scan(&code, &subject, &version, &status, &mode, &actual, &hash, &cutoff, &live, &preview)
 		if err != nil {
 			return err
 		}
-		if actual != epoch || !live || version != ObservationBriefVersion || mode != "collect_latest" || status != "COLLECTING" || code != m.Code {
+		expectedVersion := ObservationBriefVersion
+		if store != nil {
+			expectedVersion = MixedObservationVersion
+		}
+		if actual != epoch || !live || version != expectedVersion || mode != "collect_latest" || status != "COLLECTING" || code != m.Code {
 			return errors.New("emquant: brief task changed")
 		}
 		if hash != nil {
@@ -190,6 +208,17 @@ func (b *BriefService) Freeze(ctx context.Context, ws, task uuid.UUID, epoch int
 		}
 		if _, err = b.Replay(ctx, tx, m, cutoff, dataservice.SourceStorage); err != nil {
 			return err
+		}
+		if store != nil {
+			if err := b.MixedReady(ctx, tx, code, dataservice.SourceStorage); err != nil {
+				return err
+			}
+			row, err := store.ObservationBar(ctx, tx, subject, code, preview, nil)
+			if err != nil {
+				return err
+			}
+			m.Version = MixedObservationVersion
+			m.Supplement = []dataservice.ObservationRef{{ID: row.ID, DatasetID: row.DatasetID, ContentHash: row.ContentHash}}
 		}
 		body, err := json.Marshal(m)
 		if err != nil {
@@ -210,23 +239,73 @@ func (b *BriefService) Freeze(ctx context.Context, ws, task uuid.UUID, epoch int
 	})
 }
 func (b *BriefService) Read(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID, use dataservice.SourceUse) (BriefObservation, error) {
+	o, _, err := b.read(ctx, tx, ws, task, use, nil)
+	return o, err
+}
+
+func (b *BriefService) ReadMixed(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID, use dataservice.SourceUse, store *dataservice.Store) (BriefObservation, []dataservice.StoredRecord, error) {
+	if store == nil {
+		return BriefObservation{}, nil, errors.New("emquant: missing TuShare store")
+	}
+	return b.read(ctx, tx, ws, task, use, store)
+}
+
+func (b *BriefService) MixedReady(ctx context.Context, tx pgx.Tx, code string, use dataservice.SourceUse) error {
+	if err := b.Ready(ctx, tx, code, use); err != nil {
+		return err
+	}
+	return b.MixedProviderUse(ctx, tx, use)
+}
+
+func (b *BriefService) MixedProviderUse(ctx context.Context, tx pgx.Tx, use dataservice.SourceUse) error {
+	if b.Runtime == nil || b.ProviderID == "" || b.ProviderID == "tushare" || b.Product == "" {
+		return errors.New("emquant: invalid mixed source")
+	}
+	var id string
+	return tx.QueryRow(ctx, `SELECT id FROM providers WHERE id=$1 AND enabled AND NOT synthetic AND kind='vendor' AND ($2::text <> 'model' OR allow_model_processing) FOR SHARE`, b.ProviderID, string(use)).Scan(&id)
+}
+
+func (b *BriefService) read(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID, use dataservice.SourceUse, store *dataservice.Store) (BriefObservation, []dataservice.StoredRecord, error) {
 	var m BriefManifest
 	var body []byte
 	var cutoff time.Time
 	var h string
-	err := tx.QueryRow(ctx, `SELECT s.manifest,s.cutoff,s.content_hash FROM observation_brief_snapshots s JOIN research_tasks t
+	version := ObservationBriefVersion
+	if store != nil {
+		version = MixedObservationVersion
+	}
+	var subject uuid.UUID
+	var preview time.Time
+	err := tx.QueryRow(ctx, `SELECT s.manifest,s.cutoff,s.content_hash,s.entity_id,t.as_of FROM observation_brief_snapshots s JOIN research_tasks t
  ON t.id=s.task_id AND t.workspace_id=s.workspace_id AND t.epoch=s.epoch AND t.subject_id=s.entity_id
  AND t.snapshot_manifest_hash=s.content_hash AND t.snapshot_as_of=s.cutoff
- WHERE s.workspace_id=$1 AND s.task_id=$2 AND t.skill_version=$3 AND t.status NOT IN ('CANCEL_REQUESTED','CANCELLED','FAILED','ABSTAINED','BLOCKED')`, ws, task, ObservationBriefVersion).Scan(&body, &cutoff, &h)
+ WHERE s.workspace_id=$1 AND s.task_id=$2 AND t.skill_version=$3 AND t.status NOT IN ('CANCEL_REQUESTED','CANCELLED','FAILED','ABSTAINED','BLOCKED')`, ws, task, version).Scan(&body, &cutoff, &h, &subject, &preview)
 	if err != nil {
-		return BriefObservation{}, err
+		return BriefObservation{}, nil, err
 	}
-	if digest(body) != h || json.Unmarshal(body, &m) != nil {
-		return BriefObservation{}, errors.New("emquant: corrupt brief manifest")
+	if digest(body) != h || json.Unmarshal(body, &m) != nil || m.Version != version {
+		return BriefObservation{}, nil, errors.New("emquant: corrupt brief manifest")
 	}
-	out, err := b.Replay(ctx, tx, m, cutoff, use)
+	daily := m
+	var records []dataservice.StoredRecord
+	if store != nil {
+		if len(m.Supplement) != 1 || m.Security.Product != b.Product || m.Liquidity.Product != b.Product {
+			return BriefObservation{}, nil, errors.New("emquant: mixed scope mismatch")
+		}
+		if err := b.MixedReady(ctx, tx, m.Code, use); err != nil {
+			return BriefObservation{}, nil, err
+		}
+		row, err := store.ObservationBar(ctx, tx, subject, m.Code, preview, &m.Supplement[0])
+		if err != nil {
+			return BriefObservation{}, nil, err
+		}
+		records = []dataservice.StoredRecord{row}
+		daily.Version, daily.Supplement = ObservationBriefVersion, nil
+	}
+	out, err := b.Replay(ctx, tx, daily, cutoff, use)
+	out.Manifest = m
 	out.Hash = h
-	return out, err
+	return out, records, err
 }
 func (b *BriefService) WithSnapshot(ctx context.Context, ws, task uuid.UUID, use dataservice.SourceUse, fn func(BriefObservation) error) error {
 	return pgx.BeginFunc(ctx, b.Runtime.database, func(tx pgx.Tx) error {

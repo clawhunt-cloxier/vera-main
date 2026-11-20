@@ -83,7 +83,7 @@ func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (j
 	if t.Version == RealtimeBriefVersion {
 		return e.completeRealtime(ctx, t, req)
 	}
-	if t.Version != emquant.ObservationBriefVersion {
+	if t.Version != emquant.ObservationBriefVersion && t.Version != MixedObservationVersion {
 		return e.Gateway.Complete(ctx, req)
 	}
 	if e.Brief == nil {
@@ -91,7 +91,7 @@ func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (j
 	}
 	// Validate cached reuse without retaining a connection while the gateway
 	// reserves budget or waits for a slot. Every real send acquires fresh rights.
-	if err := e.Brief.WithSnapshot(ctx, t.Workspace, t.ID, dataservice.SourceModel, func(emquant.BriefObservation) error { return nil }); err != nil {
+	if err := e.withObservation(ctx, t.Workspace, t.ID, t.Version, dataservice.SourceModel, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return nil }); err != nil {
 		return nil, model.Meta{}, err
 	}
 	req.WithSend = func(callCtx context.Context, send func() (model.Raw, error)) (model.Raw, error) {
@@ -99,7 +99,7 @@ func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (j
 			return model.Raw{}, err
 		}
 		var raw model.Raw
-		err := e.Brief.WithSnapshot(callCtx, t.Workspace, t.ID, dataservice.SourceModel, func(emquant.BriefObservation) error {
+		err := e.withObservation(callCtx, t.Workspace, t.ID, t.Version, dataservice.SourceModel, func(emquant.BriefObservation, []dataservice.StoredRecord) error {
 			var err error
 			raw, err = send()
 			return err
@@ -179,7 +179,11 @@ func (e *Engine) observationPipeline(ctx, parent context.Context, t *taskRow, sk
 		if err != nil {
 			return false, abstain("DATA_SOURCE_UNAVAILABLE", "Choice 日成交数据采集或许可校验失败")
 		}
-		if err := e.Brief.Freeze(ctx, t.Workspace, t.ID, t.Epoch, m); err != nil {
+		if t.Version == MixedObservationVersion {
+			if err := e.Brief.FreezeMixed(ctx, t.Workspace, t.ID, t.Epoch, m, e.Store); err != nil {
+				return false, abstain("MIXED_SOURCE_UNAVAILABLE", "双来源数据或权限不可用")
+			}
+		} else if err := e.Brief.Freeze(ctx, t.Workspace, t.ID, t.Epoch, m); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -188,11 +192,14 @@ func (e *Engine) observationPipeline(ctx, parent context.Context, t *taskRow, sk
 		return err
 	}
 	var sheet *facts.Sheet
-	err = e.Brief.WithSnapshot(ctx, t.Workspace, t.ID, dataservice.SourceModel, func(o emquant.BriefObservation) error {
+	err = e.withObservation(ctx, t.Workspace, t.ID, t.Version, dataservice.SourceModel, func(o emquant.BriefObservation, rows []dataservice.StoredRecord) error {
 		t.AsOf = o.Cutoff
 		t.Snapshot = &o.Hash
 		subject.Name = o.Name
 		sheet = observationFacts(t, o)
+		if t.Version == MixedObservationVersion {
+			return addMixedFacts(sheet, o, e.Brief.ProviderID, rows[0])
+		}
 		return nil
 	})
 	if err != nil {
@@ -230,12 +237,17 @@ func (e *Engine) observationPipeline(ctx, parent context.Context, t *taskRow, sk
 }
 
 func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Plan, fn func(pgx.Tx) error) error {
-	if plan.SkillVersion != emquant.ObservationBriefVersion {
+	if plan.SkillVersion != emquant.ObservationBriefVersion && plan.SkillVersion != MixedObservationVersion {
 		return db.InWorkspace(ctx, e.Pool, ws, fn)
 	}
 	return pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
 		if e.Brief == nil {
 			return errs.Unavailable("DATA_SOURCE_UNAVAILABLE", "真实数据源未配置")
+		}
+		if plan.SkillVersion == MixedObservationVersion {
+			if err := e.requireMixedPlan(ctx, tx, plan.Subject, plan.AsOf); err != nil {
+				return errs.Unavailable("MIXED_SOURCE_UNAVAILABLE", "确认所需的双来源数据或权限不可用")
+			}
 		}
 		for _, use := range []dataservice.SourceUse{dataservice.SourceStorage, dataservice.SourceModel, dataservice.SourceDisplay} {
 			if err := e.Brief.Ready(ctx, tx, plan.Subject.Code, use); err != nil {
@@ -267,14 +279,18 @@ func (e *Engine) deliverTransaction(ctx context.Context, t *taskRow, fn func(pgx
 			return fn(tx)
 		})
 	}
-	if t.Version != emquant.ObservationBriefVersion {
+	if t.Version != emquant.ObservationBriefVersion && t.Version != MixedObservationVersion {
 		return db.InWorkspace(ctx, e.Pool, t.Workspace, fn)
 	}
 	return pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
 		if e.Brief == nil {
 			return errors.New("brief runtime unavailable")
 		}
-		if _, err := e.Brief.Read(ctx, tx, t.Workspace, t.ID, dataservice.SourceDisplay); err != nil {
+		if t.Version == MixedObservationVersion {
+			if _, _, err := e.Brief.ReadMixed(ctx, tx, t.Workspace, t.ID, dataservice.SourceDisplay, e.Store); err != nil {
+				return err
+			}
+		} else if _, err := e.Brief.Read(ctx, tx, t.Workspace, t.ID, dataservice.SourceDisplay); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, "SET LOCAL ROLE vera_app"); err != nil {

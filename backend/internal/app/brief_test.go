@@ -344,5 +344,109 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if err := (&App{Cfg: &fixtureCfg, Pool: pool}).build(ctx); err == nil {
 		t.Fatal("fixture rollback accepted real database")
 	}
+	t.Run("mixed closing snapshot", func(t *testing.T) { checkMixedObservation(t, a, ws, sub, id) })
+}
 
+func checkMixedObservation(t *testing.T, a *App, ws uuid.UUID, subject dataservice.EntityRow, historical uuid.UUID) {
+	ctx := t.Context()
+	store := dataservice.NewResearchStore(a.Pool, a.Store.Catalog(), "tushare", []string{subject.Code}, true)
+	e := *a.Engine
+	e.Store, e.ChoiceCatalog, e.Skills = store, a.Store, harness.TuShareSkills()
+	e.WithCloseResearchUse, e.CloseResearchCutoff = store.WithResearchUse, store.PublicationCutoff
+	if _, err := a.Pool.Exec(ctx, `INSERT INTO providers(id,name,kind,allow_model_processing) VALUES('tushare','TuShare Test','vendor',true)`); err != nil {
+		t.Fatal(err)
+	}
+	put := func(entity uuid.UUID, period, price string) uuid.UUID {
+		t.Helper()
+		rec := dataservice.Record{DatasetID: "mkt.daily_bar", RecordKey: entity.String() + period, Payload: map[string]any{"trade_date": period, "close": price}}
+		var id uuid.UUID
+		err := a.Pool.QueryRow(ctx, `INSERT INTO records(dataset_id,entity_id,record_key,logical_key,period,available_at,provider_id,origin,source_tier,payload,content_hash,raw_ref,raw_sha256,raw_locator,mapping_version)
+			VALUES('mkt.daily_bar',$1,$2,$2,$3,clock_timestamp(),'tushare','exchange','L2',$4,$5,'synthetic-object',repeat('1',64),'row=1',1) RETURNING id`, entity, rec.RecordKey, period, rec.Payload, rec.Hash()).Scan(&id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	other, err := a.Store.UpsertSearchEntity(ctx, "stock", "600001.SH", "Synthetic Different Stock", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := time.Now().UTC().AddDate(0, 0, -3)
+	day0, day1, day2 := day.Format(time.DateOnly), day.AddDate(0, 0, 1).Format(time.DateOnly), day.AddDate(0, 0, 2).Format(time.DateOnly)
+	put(other.ID, day2, "99.99")
+	classic, err := e.BuildObservationPlan(ctx, ws, "stock_analysis", subject, nil)
+	if err != nil || classic.SkillVersion != emquant.ObservationBriefVersion {
+		t.Fatalf("missing current subject did not yield a Choice plan: %+v %v", classic, err)
+	}
+	bar := put(subject.ID, day0, "12.34")
+	plan, err := e.BuildObservationPlan(ctx, ws, "stock_analysis", subject, nil)
+	if err != nil || plan.SkillVersion != harness.MixedObservationVersion || !plan.Executable {
+		t.Fatalf("mixed plan: %+v %v", plan, err)
+	}
+	put(subject.ID, day1, "56.78")
+	task, err := e.CreateTask(ctx, ws, plan.ID, plan.Hash, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.Run(ctx, ws, task, 1); err != nil {
+		t.Fatal(err)
+	}
+	var body []byte
+	if err := a.Pool.QueryRow(ctx, `SELECT document FROM report_versions WHERE task_id=$1`, task).Scan(&body); err != nil {
+		var status string
+		var reason *string
+		_ = a.Pool.QueryRow(ctx, `SELECT status,reason_message FROM research_tasks WHERE id=$1`, task).Scan(&status, &reason)
+		t.Fatalf("mixed delivery %s: %v / %v", status, reason, err)
+	}
+	var doc harness.Document
+	if err = json.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if !doc.AsOf.Equal(plan.AsOf) || doc.ResultKind != "limited" || len(doc.Sources) != 2 || len(doc.SourceFreshness) != 2 || doc.SourceFreshness[1].Provider != "tushare" || *doc.SourceFreshness[1].Period != day0 {
+		t.Fatalf("mixed source freshness: %+v %+v", doc.Sources, doc.SourceFreshness)
+	}
+	put(subject.ID, day2, "78.90")
+	read := func() error {
+		return e.WithMixedDisplay(ctx, ws, task, func(o emquant.BriefObservation, records []dataservice.StoredRecord) error {
+			if len(records) != 1 || records[0].ID != bar || records[0].Payload["close"] != "12.34" || len(o.Manifest.Supplement) != 1 {
+				t.Fatal("frozen row changed")
+			}
+			proofs := map[uuid.UUID]bool{}
+			for _, c := range doc.Claims {
+				for _, id := range c.EvidenceRefs {
+					proofs[id] = true
+				}
+			}
+			if !proofs[bar] || !proofs[o.Manifest.Liquidity.ID] {
+				t.Fatalf("both vendors must contribute claims: %+v", doc.Claims)
+			}
+			return nil
+		})
+	}
+	if err := read(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Brief.WithSnapshot(ctx, ws, task, dataservice.SourceDisplay, func(emquant.BriefObservation) error { return nil }); err == nil {
+		t.Fatal("mixed snapshot read as single-source")
+	}
+	if err := e.WithMixedDisplay(ctx, ws, historical, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return nil }); err == nil {
+		t.Fatal("historical snapshot read as mixed")
+	}
+	if err := e.Run(ctx, ws, task, 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{"tushare", a.Brief.ProviderID} {
+		if _, err := a.Pool.Exec(ctx, `UPDATE providers SET enabled=false WHERE id=$1`, provider); err != nil {
+			t.Fatal(err)
+		}
+		if err := read(); err == nil {
+			t.Fatalf("display after revocation of %s", provider)
+		}
+		if err := e.WithMixedResearchUse(ctx, func() error { t.Fatal("metadata after revocation"); return nil }); err == nil {
+			t.Fatalf("model use after revocation of %s", provider)
+		}
+		if _, err := a.Pool.Exec(ctx, `UPDATE providers SET enabled=true WHERE id=$1`, provider); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

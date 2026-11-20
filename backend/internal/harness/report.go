@@ -227,7 +227,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 		SkillVersion: sk.Version, SubjectID: subject.ID, AsOf: t.AsOf, SnapshotMode: t.SnapshotMode, DataAsOf: t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间）",
 		ResultKind: "full", Synthetic: e.Synthetic || subject.Synthetic, AIGenerated: true, Disclaimer: Disclaimer, Claims: []DocClaim{},
 		Limitations: []string{}, Sources: []DocSource{}, SummaryRefs: []string{}}
-	if t.Version == RealtimeBriefVersion {
+	if t.Version == RealtimeBriefVersion || t.Version == MixedObservationVersion {
 		// Deterministic fact checks use t.AsOf as the frozen evaluation
 		// cutoff; the public 0.4 as_of retains the user's plan preview time.
 		doc.AsOf = t.PreviewAt
@@ -313,7 +313,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 			doc.DataAsOf = "数据冻结截止时点：" + cutoff.In(cst).Format("2006-01-02 15:04:05") + "（北京时间）"
 		}
 	}
-	if t.Version == emquant.ObservationBriefVersion {
+	if t.Version == emquant.ObservationBriefVersion || t.Version == MixedObservationVersion {
 		doc.ResultKind = "limited"
 		doc.DataAsOf = "数据采集后的冻结时点：" + t.AsOf.In(cst).Format("2006-01-02 15:04:05") + "（北京时间；非实时）"
 	}
@@ -324,8 +324,10 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 			doc.Limitations = append(doc.Limitations, "本报告使用模拟模型，仅用于工程验证。")
 		}
 	}
-	if IsCloseResearchVersion(t.Version) {
-		doc.DataAsOf = t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间；收盘及已披露数据）"
+	if IsCloseResearchVersion(t.Version) || t.Version == MixedObservationVersion {
+		if IsCloseResearchVersion(t.Version) {
+			doc.DataAsOf = t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间；收盘及已披露数据）"
+		}
 		names := map[string]string{}
 		for _, dataset := range slices.Sorted(maps.Keys(sheet.SourceProviders)) {
 			for _, provider := range slices.Sorted(maps.Keys(sheet.SourceProviders[dataset])) {
@@ -368,15 +370,19 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 // realtimeFreshness reads and reauthorizes the immutable quote bound to the
 // task. It never chooses a newer record from a progress revision or wall clock.
 func (e *Engine) realtimeFreshness(ctx context.Context, t *taskRow) (*time.Time, []SourceFreshness, error) {
-	if t.Version == emquant.ObservationBriefVersion {
+	if t.Version == emquant.ObservationBriefVersion || t.Version == MixedObservationVersion {
 		if e.Brief == nil {
 			return nil, nil, errors.New("harness: observation source unavailable")
 		}
 		var cutoff *time.Time
 		var fresh []SourceFreshness
-		err := e.Brief.WithSnapshot(ctx, t.Workspace, t.ID, dataservice.SourceDisplay, func(o emquant.BriefObservation) error {
+		err := e.withObservation(ctx, t.Workspace, t.ID, t.Version, dataservice.SourceDisplay, func(o emquant.BriefObservation, rows []dataservice.StoredRecord) error {
 			cutoff = timePtr(o.Cutoff)
 			fresh = ObservationFreshness(o, e.Brief.ProviderID)
+			for _, r := range rows {
+				day := str(r, "trade_date")
+				fresh = append(fresh, SourceFreshness{Provider: r.ProviderID, DatasetID: r.DatasetID, Period: &day, PublishedAt: r.PublishedAt, AvailableAt: timePtr(r.AvailableAt), LatencyMode: "unknown", Status: "unknown", Note: "TuShare 不复权收盘日线，标注交易日期与系统可用时间。"})
+			}
 			return nil
 		})
 		return cutoff, fresh, err

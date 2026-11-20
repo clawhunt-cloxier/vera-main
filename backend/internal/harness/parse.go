@@ -140,7 +140,7 @@ func (e *Engine) ParsePlan(ctx context.Context, ws uuid.UUID, text string) (*Par
 		return res, nil
 	}
 	en := ents[0]
-	if e.Brief != nil {
+	if e.Brief != nil && !e.hasCloseSkills() {
 		p, err := e.BuildPlan(ctx, ws, "stock_analysis", en, map[string]any{})
 		if err != nil {
 			return nil, err
