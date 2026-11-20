@@ -167,13 +167,14 @@ func (a *App) Sync(ctx context.Context) error {
 	start := time.Now()
 	if a.TuShare != nil {
 		for _, code := range a.TuShare.SubjectCodes() {
-			batch, notes, err := a.TuShare.Collect(ctx, code, a.TuShare.Now())
+			var notes []string
+			n, err := a.Store.SyncObserved(ctx, a.TuShare.ID(), func(ctx context.Context) (dataservice.Provider, error) {
+				batch, limitations, err := a.TuShare.Collect(ctx, code, a.TuShare.Now())
+				notes = limitations
+				return batch, err
+			})
 			if err != nil {
 				return fmt.Errorf("TuShare %s: %w", code, err)
-			}
-			n, err := a.Store.SyncObserved(ctx, batch)
-			if err != nil {
-				return err
 			}
 			slog.InfoContext(ctx, "TuShare observation published", "subject", code, "inserted", n, "limitations", notes)
 		}

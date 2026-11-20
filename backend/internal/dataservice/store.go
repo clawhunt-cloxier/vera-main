@@ -46,20 +46,14 @@ func (s *Store) Catalog() *Catalog { return s.cat }
 // Existing record keys are idempotent only when their content and provenance
 // agree; a conflicting key fails the entire sync without replacing either.
 func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
-	return s.sync(ctx, p, false)
+	return s.sync(ctx, s.pool, p, false)
 }
 
-// SyncObserved publishes a prepared, fully archived vendor observation. A
-// repeated fetch of the same row keeps the original evidence identity even if
-// the upstream page order, pagination or receiving time has changed.
-func (s *Store) SyncObserved(ctx context.Context, p Provider) (int, error) {
-	if p.Synthetic() || !s.excludeSynthetic {
-		return 0, fmt.Errorf("observed data requires a vendor store")
-	}
-	return s.sync(ctx, p, true)
+type txBeginner interface {
+	Begin(context.Context) (pgx.Tx, error)
 }
 
-func (s *Store) sync(ctx context.Context, p Provider, observed bool) (int, error) {
+func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bool) (int, error) {
 	if s.excludeSynthetic && p.Synthetic() {
 		return 0, fmt.Errorf("synthetic provider not permitted in vendor store")
 	}
@@ -87,7 +81,7 @@ func (s *Store) sync(ctx context.Context, p Provider, observed bool) (int, error
 	}
 	ids := map[string]uuid.UUID{}
 	n := 0
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		if observed {
 			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 508417))`, p.ID()); err != nil {
 				return err

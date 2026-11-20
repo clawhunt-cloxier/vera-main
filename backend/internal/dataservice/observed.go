@@ -12,6 +12,62 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// SyncObserved serializes collection and publication per provider. Different
+// research subjects can fetch the same indexes, trading calendar and peers.
+func (s *Store) SyncObserved(ctx context.Context, provider string, collect func(context.Context) (Provider, error)) (int, error) {
+	if !s.excludeSynthetic || provider == "" || (s.providerID != "" && provider != s.providerID) {
+		return 0, errors.New("observation requires its configured vendor store")
+	}
+	conn, err := s.acquireObservationSession(ctx, provider)
+	if err != nil {
+		return 0, err
+	}
+	defer closeObservationSession(conn)
+	batch, err := collect(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if batch == nil || batch.ID() != provider || batch.Synthetic() {
+		return 0, errors.New("observation does not belong to the locked vendor")
+	}
+	// Use the session that owns the lock for the write. A collector whose
+	// session died during a fetch cannot publish after another process takes over.
+	return s.sync(ctx, conn, batch, true)
+}
+
+func (s *Store) acquireObservationSession(ctx context.Context, provider string) (*pgx.Conn, error) {
+	for {
+		c, err := s.pool.Acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var locked bool
+		err = c.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1, 508418))`, provider).Scan(&locked)
+		if err != nil {
+			// The query may have taken the lock before the response was lost.
+			closeObservationSession(c.Hijack())
+			return nil, err
+		}
+		if locked {
+			// The collector needs the pool for per-request rate limiting. Only
+			// the lock owner keeps a dedicated connection, even with MaxConns=1.
+			return c.Hijack(), nil
+		}
+		c.Release()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func closeObservationSession(conn *pgx.Conn) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = conn.Close(ctx) // Physical close releases all session advisory locks.
+}
+
 type observedIdentity struct{ dataset, logical string }
 type observedVersion struct {
 	key, hash, basis, origin, tier, quality string
