@@ -38,7 +38,13 @@ vera admin provider model-use tushare on
 
 同步进程需要直连 PostgreSQL 或使用保留物理会话的连接池，以便在同一会话内发布。有效的空响应及其脱敏请求同样归档，供核对查询的股票和时段。
 
+<a id="account-acceptance"></a>
+
 ## 用真实账号验收
+
+从已有 Choice 测试站切换时，先在 Choice 配置下部署支持两家厂商的镜像并确认就绪，保存这次镜像 SHA、原有密钥配置版本和数据库备份。Compose 从宿主机 `/opt/vera/.env` 读取运行配置（权限 0600）。切换该文件内的厂商时一并设置 `VERA_REQUIRE_CHOICE_QUOTE=false`，保留旧值 true 会在启动时报告配置冲突。对象存储可复用现有桶，需为 `TUSHARE_S3_*` 对应身份授予桶内 `tushare/` 前缀的写入与读取权限。重复归档会读回原文核对哈希。
+
+在 `/opt/vera` 使用已验证的同一镜像运行 `VERA_IMAGE="$(cat .current_image)" docker compose up -d vera`，使容器加载新配置。回退时先恢复原 Choice 密钥配置版本，再用切换前记录的镜像重建容器并核对 `/readyz`。CD 自动回滚只恢复镜像，厂商配置由运维恢复。保留数据库和归档对象，以便读取历史报告及证据。
 
 测试站的 Compose 默认运行 `vera demo`。启动后它会在后台同步，首次同步期间 `/readyz` 返回 `tushare_initial_sync`。每个登记标的已有归档日线后服务可就绪。若首次同步失败，可在运行中的测试容器重试。以下命令使用内嵌测试数据库的默认端口与开发登录配置。
 

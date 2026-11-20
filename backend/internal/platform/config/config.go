@@ -210,6 +210,9 @@ func (c *Config) validate(problems []string) error {
 	if c.DatabaseURL == "" {
 		problems = append(problems, "DATABASE_URL is required")
 	}
+	if c.RequireChoiceQuote && c.DataProvider != "emquant" {
+		problems = append(problems, "VERA_REQUIRE_CHOICE_QUOTE=true requires VERA_DATA_PROVIDER=emquant")
+	}
 	if c.DevOIDC && c.Env == "production" {
 		problems = append(problems, "production refuses the development OIDC issuer (VERA_DEV_OIDC)")
 	}

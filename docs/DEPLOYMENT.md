@@ -31,6 +31,8 @@
 
 ## 更新与回滚
 
+从 Choice 切换到 TuShare 涉及镜像和宿主机配置两个版本，具体顺序与对象存储权限见 [TuShare 测试站切换](TUSHARE.md#account-acceptance)。
+
 - 触发：push 到 dev，同一 commit 的 `Verify` 成功后才构建；只改 `**.md` 或 `docs/**` 的推送不会触发部署，`deploy/**` 的改动会触发。
 
 - CD 拉取 `sha-<commit>` 镜像并启动，每五秒检查 `/readyz`，收到 HTTP 200 后记录新版本。普通启动等待约 200 秒。在 TuShare 模式下，服务开始监听后会在后台采集一次。只有 HTTP 503 且原因为 `tushare_initial_sync` 时，CD 才把等待上限延至本次启动后 30 分钟。每个已配置标的都已有已发布的 TuShare 日线时，可继续使用既有数据，刷新错误写入日志。若首次采集结束后仍有标的缺少可用日线，健康检查返回 `tushare_sync_failed`，CD 回滚到 `.current_image` 记录的上一版本。健康检查仅表示服务和基础数据已就绪，具体研究章节按其数据与用途权限判定。

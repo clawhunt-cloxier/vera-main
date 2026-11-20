@@ -5,6 +5,25 @@ import (
 	"testing"
 )
 
+func TestChoiceReadinessDuringProviderSwitch(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("VERA_DEV_OIDC", "true")
+	t.Setenv("VERA_ENV", "test")
+	t.Setenv("VERA_REQUIRE_CHOICE_QUOTE", "true")
+	t.Setenv("VERA_DATA_PROVIDER", "emquant")
+	if _, err := Load(); err != nil {
+		t.Fatalf("Choice deployment: %v", err)
+	}
+	t.Setenv("VERA_DATA_PROVIDER", "tushare")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "VERA_REQUIRE_CHOICE_QUOTE") {
+		t.Fatalf("stale Choice readiness requirement: %v", err)
+	}
+	t.Setenv("VERA_REQUIRE_CHOICE_QUOTE", "false")
+	if _, err := Load(); err != nil {
+		t.Fatalf("TuShare deployment: %v", err)
+	}
+}
+
 func TestRealtimeSourceGovernanceIsNotProcessConfiguration(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://x")
 	t.Setenv("VERA_DEV_OIDC", "true")
