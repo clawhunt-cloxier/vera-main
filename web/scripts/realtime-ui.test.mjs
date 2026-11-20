@@ -722,6 +722,109 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
     });
   }
 
+  await t.test(
+    'stock picker creates and confirms research using the selected catalog',
+    async () => {
+      const context = await browser.newContext();
+      try {
+        const page = await context.newPage();
+        page.setDefaultTimeout(6000);
+        const json = 'application/json';
+        const stocks = [
+          { ...entity, id: 'maotai', name: '贵州茅台', symbol: '600519.SH' },
+          { ...entity, id: 'mobile', name: '中国移动', symbol: '600941.SH' },
+          { ...entity, id: 'petro', name: '中国石油', symbol: '601857.SH' },
+        ];
+        let selected, selectedMedia;
+        const searches = [];
+        const confirmations = [];
+        await page.route(origin + '/app**', (route) =>
+          route.fulfill({ contentType: 'text/html', body: appHTML })
+        );
+        await page.route(origin + '/api/v1/**', async (route) => {
+          const req = route.request();
+          const { pathname, searchParams } = new URL(req.url());
+          const path = pathname.slice('/api/v1/'.length);
+          const accept = req.headers().accept;
+          let body;
+          if (path === 'me')
+            body = {
+              onboarded: true,
+              csrf_token: 'mock-csrf',
+              closing_research_available: true,
+              research_protocol: 'v0.4',
+            };
+          else if (path === 'skills') body = { items: [stockSkill] };
+          else if (path === 'entities') {
+            const q = searchParams.get('q');
+            const item = stocks.find((stock) => stock.name === q || stock.symbol === q);
+            searches.push([q, accept]);
+            assert.equal(searchParams.get('kind'), 'stock');
+            // The registered result is a near hit for two names. It must not
+            // hide the exact discovery hit or be duplicated in the list.
+            body = { items: accept === json ? [stocks[0]] : [stocks[0], item] };
+          } else if (path === 'research-plans') {
+            selected = stocks.find((stock) => stock.id === req.postDataJSON().subject_id);
+            selectedMedia = selected.id === 'maotai' ? json : observationMedia;
+            assert.equal(accept, selectedMedia);
+            assert.equal(req.headers()['content-type'], selectedMedia);
+            body = { kind: 'plan', plan: { ...plan, subject: selected } };
+          } else if (path === 'research-plans/mock-plan') {
+            body = {
+              ...plan,
+              subject: selected,
+              snapshot_mode: selectedMedia === json ? 'fixed_legacy' : 'collect_latest',
+              quote_requirement: undefined,
+            };
+          } else if (path === 'research-tasks' && req.method() === 'POST') {
+            assert.equal(accept, selectedMedia);
+            assert.equal(req.headers()['content-type'], selectedMedia);
+            confirmations.push(selected.id);
+            body = task;
+          } else if (path === 'research-tasks/mock-task') body = { ...task, subject: selected };
+          else if (path === 'research-tasks') body = { items: [] };
+          else throw new Error('Unexpected request ' + path);
+          await route.fulfill({ contentType: accept.includes(',') ? media : accept, json: body });
+        });
+        for (const stock of stocks) {
+          await page.goto(origin + '/app/quick/stock_analysis');
+          const input = page.getByRole('combobox');
+          const create = page.getByRole('button', { name: '发起研究' });
+          if (stock.id === 'petro') {
+            await input.fill(stocks[0].symbol);
+            await page.getByRole('option', { name: /贵州茅台/ }).click();
+            assert.ok(await create.isEnabled());
+          }
+          await input.fill(stock.name);
+          assert.ok(await create.isDisabled());
+          await page.getByRole('option', { name: new RegExp(stock.name) }).waitFor();
+          const options = page.getByRole('option');
+          assert.match(await options.first().innerText(), new RegExp(stock.name));
+          assert.equal(await options.count(), stock.id === 'maotai' ? 1 : 2);
+          await input.press('Enter');
+          await create.click();
+          await page.getByRole('heading', { name: '研究计划：' + stock.name }).waitFor();
+          await page.getByRole('button', { name: '提交任务' }).click();
+          await page.getByRole('link', { name: '查看报告' }).waitFor();
+        }
+        assert.deepEqual(searches, [
+          ['贵州茅台', json],
+          ['中国移动', json],
+          ['中国移动', observationMedia],
+          ['600519.SH', json],
+          ['中国石油', json],
+          ['中国石油', observationMedia],
+        ]);
+        assert.deepEqual(
+          confirmations,
+          stocks.map((s) => s.id)
+        );
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
   await t.test('quick research distinguishes loading from an unavailable skill', async () => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();

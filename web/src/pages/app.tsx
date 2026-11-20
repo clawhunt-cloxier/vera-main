@@ -15,6 +15,7 @@ import {
   type Entity,
   type PlanResult,
   type ResearchPlan,
+  type ResearchProtocol,
   type Skill,
   type SkillId,
   type Task,
@@ -278,7 +279,14 @@ export function Quick({ skill }: { skill: SkillId }) {
     enabled: !!me.data,
     select: (d) => d.items.find((x) => x.id === skill),
   });
-  const [subject, setSubject] = useState<Entity | null>(null);
+  const [selection, setSelection] = useState<{ entity: Entity; protocol: ResearchProtocol } | null>(
+    null
+  );
+  const subject = selection?.entity;
+  const searchObservation =
+    skill === 'stock_analysis' &&
+    !!me.data?.closing_research_available &&
+    (me.data.research_protocol === 'observation.v1' || me.data.research_protocol === 'v0.4');
   const [mode, setMode] = useState('');
   const stockOnly = s.data?.subject_kinds.length === 1 && s.data.subject_kinds[0] === 'stock';
   const allowComparison =
@@ -298,7 +306,7 @@ export function Quick({ skill }: { skill: SkillId }) {
           subject_id: subject.id,
           params: selectedMode ? { mode: selectedMode } : {},
         },
-        { idem: newKey(), protocol }
+        { idem: newKey(), protocol: selection.protocol }
       );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
       return r;
@@ -328,9 +336,11 @@ export function Quick({ skill }: { skill: SkillId }) {
             研究对象
             <EntitySearch
               kinds={s.data?.subject_kinds}
-              onPick={setSubject}
+              onPick={(entity, source) => setSelection({ entity, protocol: source ?? protocol })}
+              onEdit={() => setSelection(null)}
               protocol={protocol}
-              placeholder={stockOnly ? '输入已登记的股票名称或代码' : undefined}
+              searchObservation={searchObservation}
+              placeholder={stockOnly ? '输入 A 股简称或代码' : undefined}
             />
           </label>
           {skill === 'deep_research' && available && (
