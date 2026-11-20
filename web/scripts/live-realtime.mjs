@@ -377,9 +377,8 @@ async function run(config, progress) {
     );
     requireValue(new URL(page.url()).origin === config.origin, 'UNEXPECTED_NAVIGATION');
     progress.phase = 'selection';
-    // A combined deployment's generic stock shortcut uses closing research.
-    const entry = me.closing_research_available ? 'choice-quote' : 'stock_analysis';
-    await page.goto(config.origin + '/app/quick/' + entry, { waitUntil: 'domcontentloaded' });
+    requireValue(!me.closing_research_available, 'CHOICE_ONLY_WORKBENCH_REQUIRED');
+    await page.goto(config.origin + '/app/quick/stock_analysis', { waitUntil: 'domcontentloaded' });
     const search = page.getByRole('combobox', { name: '搜索研究对象' });
     await search.waitFor();
     requireValue(new URL(page.url()).origin === config.origin, 'UNEXPECTED_NAVIGATION');

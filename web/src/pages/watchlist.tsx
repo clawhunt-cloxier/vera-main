@@ -3,18 +3,16 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
   api,
-  combinedResearch,
   get,
   newKey,
+  newResearchProtocol,
   post,
   type PlanResult,
-  type ResearchProtocol,
   type WatchItem,
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
-import { ResearchSourceField } from '../components/ResearchSourceField';
-import { Dialog, Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
+import { Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
 
 const ruleLabel: Record<string, string> = {
   price_above: '价格高于阈值',
@@ -26,16 +24,13 @@ const ruleLabel: Record<string, string> = {
 
 export function Watchlist() {
   const me = useMe();
-  const combined = combinedResearch(me.data);
-  const [source, setSource] = useState<ResearchProtocol>('legacy');
-  const protocol = combined ? source : (me.data?.research_protocol ?? 'legacy');
+  const protocol = newResearchProtocol(me.data);
   const items = useQuery({
     queryKey: ['watchlist'],
     queryFn: () => get<{ items: WatchItem[] }>('/api/v1/watchlist'),
     staleTime: 10_000,
   });
   const [adding, setAdding] = useState(false);
-  const [researchItem, setResearchItem] = useState<WatchItem | null>(null);
   const qc = useQueryClient();
   const nav = useNavigate();
   const add = useMutation({
@@ -128,15 +123,7 @@ export function Watchlist() {
                     <button
                       className="ghost small"
                       disabled={!me.data || analyze.isPending}
-                      onClick={() => {
-                        if (combined) {
-                          setSource('legacy');
-                          setResearchItem(it);
-                          analyze.reset();
-                        } else {
-                          analyze.mutate(it.entity.id);
-                        }
-                      }}
+                      onClick={() => analyze.mutate(it.entity.id)}
                     >
                       分析
                     </button>
@@ -149,31 +136,6 @@ export function Watchlist() {
             })}
           </tbody>
         </table>
-      )}
-      {researchItem && (
-        <Dialog title={`研究 ${researchItem.entity.name}`} onClose={() => setResearchItem(null)}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              analyze.mutate(researchItem.entity.id);
-            }}
-          >
-            {combined && (
-              <ResearchSourceField
-                value={source}
-                onChange={(value) => {
-                  setSource(value);
-                  analyze.reset();
-                }}
-                snapshot={me.data?.research_protocol === 'v0.4'}
-              />
-            )}
-            <button type="submit" disabled={analyze.isPending}>
-              {analyze.isPending ? '准备中…' : '生成研究计划'}
-            </button>
-            {analyze.error && <ErrorBox error={analyze.error} />}
-          </form>
-        </Dialog>
       )}
       {adding && (
         <div className="overlay" onClick={() => setAdding(false)}>

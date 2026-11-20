@@ -2,10 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
-  combinedResearch,
   fmtTime,
   get,
   newKey,
+  newResearchProtocol,
   planProtocol,
   post,
   quoteRequirementLabel,
@@ -15,14 +15,12 @@ import {
   type Entity,
   type PlanResult,
   type ResearchPlan,
-  type ResearchProtocol,
   type Skill,
   type SkillId,
   type Task,
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
-import { ResearchSourceField } from '../components/ResearchSourceField';
 import { Empty, ErrorBox, Loading, Skeleton, SyntheticBanner, Tag } from '../components/ui';
 
 function supportsMode(schema: unknown, mode: string): boolean {
@@ -34,15 +32,12 @@ function supportsMode(schema: unknown, mode: string): boolean {
 
 export function App() {
   const me = useMe();
-  const combined = combinedResearch(me.data);
-  const [source, setSource] = useState<ResearchProtocol>('legacy');
-  const protocol: ResearchProtocol = combined ? source : (me.data?.research_protocol ?? 'legacy');
-  const registryProtocol = combined ? 'legacy' : protocol;
+  const protocol = newResearchProtocol(me.data);
   const skills = useQuery({
-    queryKey: ['skills', registryProtocol],
-    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol: registryProtocol }),
+    queryKey: ['skills', protocol],
+    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol }),
     enabled: !!me.data,
-    staleTime: 3600_000,
+    staleTime: 15_000,
   });
   const tasks = useQuery({
     queryKey: ['tasks'],
@@ -65,34 +60,23 @@ export function App() {
     onSuccess: () => setText(''),
   });
   const synthetic = me.data?.synthetic ?? false;
-  const observation = protocol === 'observation.v1';
   const enabledSkills = skills.data?.items.filter((sk) => sk.available) ?? [];
   const stockOnly =
     enabledSkills.length > 0 &&
     enabledSkills.every((sk) => sk.subject_kinds.length === 1 && sk.subject_kinds[0] === 'stock');
-  const placeholders = [
-    '分析宁德时代最近的资金面',
-    '深度研究贵州茅台',
-    ...(stockOnly ? [] : ['看看半导体行业最近的资金动向']),
-    '个股分析：比亚迪',
-  ];
-  const [placeholderIdx, setPlaceholderIdx] = useState(0);
+  const placeholder = enabledSkills.some((skill) => skill.id === 'capital_flow')
+    ? stockOnly
+      ? '例如：分析宁德时代最近的资金面'
+      : '例如：看看半导体行业最近的资金动向'
+    : '例如：个股分析，比亚迪';
 
   return (
     <main>
       {me.isLoading && <Loading />}
-      {(me.isError || (!me.isLoading && !me.data)) && null}
+      {me.error && <ErrorBox error={me.error} />}
       {me.data && (
         <>
           {synthetic && <SyntheticBanner />}
-          {observation && !combined && (
-            <p className="notice">当前研究使用已授权的 Choice 日成交数据，不是盘中实时行情。</p>
-          )}
-          {!combined && !synthetic && protocol === 'legacy' && stockOnly && (
-            <p className="notice">
-              可研究已登记的 A 股个股。行情采用收盘数据，财报与公告按计划截止时点取用。
-            </p>
-          )}
           <header className="app-head">
             <strong className="logo">VERA</strong>
             <nav>
@@ -126,16 +110,6 @@ export function App() {
                   plan.mutate();
                 }}
               >
-                {combined && (
-                  <ResearchSourceField
-                    value={source}
-                    onChange={(value) => {
-                      setSource(value);
-                      plan.reset();
-                    }}
-                    snapshot={me.data.research_protocol === 'v0.4'}
-                  />
-                )}
                 <label htmlFor="queryInput" className="form-label">
                   描述你想要的研究
                 </label>
@@ -143,12 +117,7 @@ export function App() {
                   id="queryInput"
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  placeholder={
-                    observation
-                      ? '输入已接入的股票名称或代码，生成真实成交简报'
-                      : placeholders[placeholderIdx] || '输入研究需求…'
-                  }
-                  onFocus={() => setPlaceholderIdx((i) => (i + 1) % placeholders.length)}
+                  placeholder={placeholder}
                   rows={3}
                   required
                   maxLength={500}
@@ -186,24 +155,23 @@ export function App() {
             {skills.error && <ErrorBox error={skills.error} />}
             <div className="grid">
               {skills.isLoading ? (
-                Array.from({ length: 4 }).map((_, i) => (
+                Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="card small">
                     <Skeleton height={24} />
                     <Skeleton height={16} style={{ marginTop: 12 }} />
                   </div>
                 ))
-              ) : skills.data?.items.length === 0 ? (
+              ) : skills.isSuccess && skills.data.items.length === 0 ? (
                 <Empty>暂无可用技能</Empty>
               ) : (
                 skills.data?.items.map((sk) => (
                   <Link
                     key={sk.id}
                     to="/app/quick/$skill"
-                    params={{ skill: sk.id as any }}
+                    params={{ skill: sk.id }}
                     className="card interactive"
                   >
-                    <h3>{sk.title}</h3>
-                    {combined && <span className="muted">TuShare 收盘研究</span>}
+                    <h3>{skillTitle[sk.id]}</h3>
                     {!sk.available && <Tag tone="warn">暂不可用</Tag>}
                   </Link>
                 ))
@@ -281,32 +249,14 @@ export function App() {
   );
 }
 
-export function Quick({
-  skill,
-  daily = false,
-  quote = false,
-}: {
-  skill: SkillId;
-  daily?: boolean;
-  quote?: boolean;
-}) {
+export function Quick({ skill }: { skill: SkillId }) {
   const me = useMe();
-  const combined = combinedResearch(me.data);
-  const protocol: ResearchProtocol = daily
-    ? 'observation.v1'
-    : quote
-      ? 'v0.4'
-      : combined
-        ? 'legacy'
-        : (me.data?.research_protocol ?? 'legacy');
-  const routeAvailable =
-    (!daily || !!me.data?.research_protocol) &&
-    (!quote || (combined && me.data?.research_protocol === 'v0.4'));
+  const protocol = newResearchProtocol(me.data);
   const s = useQuery({
     queryKey: ['skills', protocol],
     queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol }),
-    staleTime: 3600_000,
-    enabled: !!me.data && routeAvailable,
+    staleTime: 15_000,
+    enabled: !!me.data,
     select: (d) => d.items.find((x) => x.id === skill),
   });
   const [subject, setSubject] = useState<Entity | null>(null);
@@ -317,7 +267,7 @@ export function Quick({
     subject?.kind === 'stock' &&
     supportsMode(s.data?.params_schema, 'company_industry');
   const selectedMode = allowComparison && mode === 'company_industry' ? mode : '';
-  const available = routeAvailable && !!s.data?.available;
+  const available = !!s.data?.available;
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
@@ -341,60 +291,57 @@ export function Quick({
       <p>
         <Link to="/app">← 返回工作台</Link>
       </p>
-      <h1>{daily || quote ? '个股分析' : s.data?.title}</h1>
-      {daily && combined && (
-        <p className="muted">
-          此历史入口已归入个股分析。报告会分别列出 Choice 与 TuShare 的实际来源和数据时点。
-        </p>
-      )}
+      <h1>{skillTitle[skill]}</h1>
+      {(me.isPending || (me.data && s.isPending)) && <Loading label="加载研究能力…" />}
+      {me.error && <ErrorBox error={me.error} />}
       {s.error && <ErrorBox error={s.error} />}
-      {me.data && !s.isFetching && !s.error && !available && (
+      {me.data && s.isSuccess && !s.isFetching && !available && (
         <p className="notice">当前部署未开放这项研究。</p>
       )}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          plan.mutate();
-        }}
-      >
-        <label>
-          研究对象
-          {available && (
+      {available && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            plan.mutate();
+          }}
+        >
+          <label>
+            研究对象
             <EntitySearch
               kinds={s.data?.subject_kinds}
               onPick={setSubject}
               protocol={protocol}
               placeholder={stockOnly ? '输入已登记的股票名称或代码' : undefined}
             />
-          )}
-        </label>
-        {skill === 'deep_research' && available && (
-          <label>
-            模式
-            <select value={selectedMode} onChange={(e) => setMode(e.target.value)}>
-              <option value="">
-                {stockOnly || subject?.kind === 'stock'
-                  ? '公司深度研究'
-                  : subject?.kind === 'industry'
-                    ? '行业深度研究'
-                    : '按研究对象确定'}
-              </option>
-              {allowComparison && <option value="company_industry">公司 + 所在行业对比</option>}
-            </select>
           </label>
-        )}
-        <button
-          type="submit"
-          disabled={
-            !available ||
-            !subject ||
-            !s.data?.subject_kinds.includes(subject.kind) ||
-            plan.isPending
-          }
-        >
-          {plan.isPending ? '准备中…' : '发起研究'}
-        </button>
-      </form>
+          {skill === 'deep_research' && available && (
+            <label>
+              模式
+              <select value={selectedMode} onChange={(e) => setMode(e.target.value)}>
+                <option value="">
+                  {stockOnly || subject?.kind === 'stock'
+                    ? '公司深度研究'
+                    : subject?.kind === 'industry'
+                      ? '行业深度研究'
+                      : '按研究对象确定'}
+                </option>
+                {allowComparison && <option value="company_industry">公司 + 所在行业对比</option>}
+              </select>
+            </label>
+          )}
+          <button
+            type="submit"
+            disabled={
+              !available ||
+              !subject ||
+              !s.data?.subject_kinds.includes(subject.kind) ||
+              plan.isPending
+            }
+          >
+            {plan.isPending ? '准备中…' : '发起研究'}
+          </button>
+        </form>
+      )}
       {plan.error && <ErrorBox error={plan.error} />}
       {plan.data?.kind === 'unsupported' && (
         <p className="muted">这个对象暂不支持：{plan.data.unsupported_reason}</p>
@@ -447,6 +394,13 @@ export function PlanReview({ id }: { id: string }) {
     staleTime: 60_000,
   });
   const [disabled, setDisabled] = useState<string[]>([]);
+  const coverage = p.data?.sections.reduce(
+    (counts, section) => {
+      counts[section.availability]++;
+      return counts;
+    },
+    { available: 0, limited: 0, unavailable: 0 }
+  );
   const qc = useQueryClient();
   const nav = useNavigate();
   const submit = useMutation({
@@ -500,12 +454,15 @@ export function PlanReview({ id }: { id: string }) {
                   : '确认后采集真实成交数据并冻结快照。这是非实时简报；实时行情和未核实字段不纳入分析。'}
               </p>
             )}
+            {p.data.snapshot_mode !== 'collect_latest' && (
+              <p className="muted">报告将列明各项数据的来源、日期和覆盖限制。</p>
+            )}
           </div>
-          {p.data.executable && (
-            <p>
-              计划生成 {p.data.sections.length} 个章节，你可以取消勾选不需要的章节再提交。
-              {p.data.sections.some((s) => s.availability === 'limited') &&
-                '部分章节因数据不足而受限。'}
+          {coverage && (
+            <p className="coverage-summary">
+              <span>{coverage.available} 个可用</span>
+              <span>{coverage.limited} 个受限</span>
+              <span>{coverage.unavailable} 个不可用</span>
             </p>
           )}
           <form
@@ -517,16 +474,29 @@ export function PlanReview({ id }: { id: string }) {
             <fieldset className="sections">
               <legend>章节</legend>
               {p.data.sections.map((s) => (
-                <label key={s.id} className={disabled.includes(s.id) ? 'muted' : ''}>
+                <label
+                  key={s.id}
+                  className={disabled.includes(s.id) ? 'section-option muted' : 'section-option'}
+                >
                   <input
                     type="checkbox"
                     checked={s.availability !== 'unavailable' && !disabled.includes(s.id)}
                     onChange={() => toggle(s.id)}
                     disabled={s.availability === 'unavailable' || s.required}
                   />
-                  {s.id} {s.title} {s.availability === 'limited' && <Tag tone="warn">受限</Tag>}{' '}
-                  {s.availability === 'unavailable' && <Tag tone="bad">不可用</Tag>}
-                  {s.reason && <span className="muted"> — {s.reason}</span>}
+                  <span className="section-option-body">
+                    <span className="section-option-title">
+                      <span>
+                        {s.id} {s.title}
+                      </span>
+                      {s.required && <Tag>必需</Tag>}
+                      {s.availability === 'limited' && <Tag tone="warn">受限</Tag>}
+                      {s.availability === 'unavailable' && <Tag tone="bad">不可用</Tag>}
+                    </span>
+                    {s.reason && (
+                      <span className="muted small section-option-reason">{s.reason}</span>
+                    )}
+                  </span>
                 </label>
               ))}
             </fieldset>
@@ -543,7 +513,7 @@ export function PlanReview({ id }: { id: string }) {
           </form>
           {submit.error && <ErrorBox error={submit.error} />}
           {me.data &&
-            ((me.data.research_protocol ?? 'legacy') === 'legacy' || combinedResearch(me.data)) &&
+            newResearchProtocol(me.data) === 'legacy' &&
             !p.data.executable &&
             p.data.reason_code === 'REQUIRED_SECTION_UNAVAILABLE' &&
             planProtocol(p.data) === 'legacy' &&

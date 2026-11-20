@@ -266,13 +266,23 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 			n := r.Note
 			ds.Note = &n
 		}
+		if t.Version == CloseUnifiedVersion && ds.Status == "omitted" {
+			switch {
+			case e.sectionState(t, s.ID) == "unavailable":
+				ds.Tables = []facts.Table{}
+			case !s.Required && len(ds.Tables) > 0:
+				ds.Status = "limited"
+				n := "保留可核验的数据表；未生成有效的文字结论。"
+				ds.Note = &n
+			}
+		}
 		if ds.Status != "ok" {
 			if s.Required && ds.Status == "omitted" {
 				return doc, fmt.Errorf("required section %s omitted at render", s.ID)
 			}
 			doc.ResultKind = "limited"
 		}
-		if (ds.Status == "ok" || ds.Status == "limited") && !r.Verified {
+		if (ds.Status == "ok" || ds.Status == "limited") && !r.Verified && len(r.Claims) > 0 {
 			doc.Limitations = append(doc.Limitations, fmt.Sprintf("%s %s：语义核验不可用，已删除推断与情景结论，仅保留经确定性检查的事实与计算结论。", s.ID, s.Title))
 		}
 		for _, c := range final {
@@ -327,6 +337,9 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 	if IsCloseResearchVersion(t.Version) || t.Version == MixedObservationVersion {
 		if IsCloseResearchVersion(t.Version) {
 			doc.DataAsOf = t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间；收盘及已披露数据）"
+		}
+		if t.Version == CloseUnifiedVersion {
+			doc.DataAsOf = "最近可用行情；收盘及披露数据截止 " + t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间）"
 		}
 		names := map[string]string{}
 		for _, dataset := range slices.Sorted(maps.Keys(sheet.SourceProviders)) {

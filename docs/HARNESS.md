@@ -48,7 +48,9 @@ flowchart LR
 
 ### 3.2 计划内容
 
-`ResearchPlan` 字段：`plan_id`、`skill_id`、`skill_version`、`subject`（entity_id 与类型）、`params`（技能参数，经 Schema 校验）、`as_of`（v1.0 为固定截止；ADR-0004 新版本中仅为计划预览时点）、`sections`（每章的可用性：available / limited / unavailable 及原因）、`estimated_budget`、`quota_cost`、`expires_at`、`plan_hash`。新版本计划绑定“采集后冻结最近可用数据”的策略，系统统一使用 `latest_available` 行情并在计划、任务和证据中记录该要求。客户端不再选择行情模式。历史 0.4 计划仍保留 `quote_requirement` 字段以便读取和重放，旧的 `realtime_trade` 计划按原协议执行。任务在数据和血缘持久化完成后原子记录 `snapshot_as_of` 与快照，恢复时不可重选。T027 已在单股 `stock_analysis/1.1.0-demo.3` 路径实现这些约束；完整技能覆盖和低频数据快照仍待后续任务。
+`ResearchPlan` 字段：`plan_id`、`skill_id`、`skill_version`、`subject`（entity_id 与类型）、`params`（技能参数，经 Schema 校验）、`as_of`（普通 JSON 的正式数据固定截止；0.4 `collect_latest` 的计划预览时点）、`sections`（每章的可用性：available / limited / unavailable 及原因）、`estimated_budget`、`quota_cost`、`expires_at`、`plan_hash`。网页不选择行情或厂商。0.4 的默认 `latest_available` 按 ADR-0004 在采集完成后原子冻结数据和血缘，恢复时不可重选；既有 0.4 计划和显式 `realtime_trade` 客户端沿用原语义。T027 单股 `stock_analysis/1.1.0-demo.3` 支持该流程，完整盘中技能覆盖仍待后续任务。
+
+普通 JSON 的 `1.0.4` 技能按计划 `as_of` 查询 TuShare 正式数据，之后发布的批次不得混入。运行时可向登记的补充源取得同一标的的日成交观察，目前由 Choice 适配器实现。计划可说明会尝试补充，不能保证取得。补充证据与任务、epoch 和冻结快照绑定，记录独立的接收归档时间、来源、请求指纹及内容哈希；重试复用冻结清单，不能以另一批替换同一快照。读取复核来源用途和原始归档。日序列标签不是实际成交事件时间或首次披露时间；补充不是标准日线，不解除必需数据门禁。模型不得决定采集或凭补充推导未接入字段。[数据覆盖及验收](TUSHARE.md)
 
 章节可用性由能力登记计算：某章节的必需数据集当前没有已启用、已授权的厂商时，标为 unavailable。技能的必需章节不可用时，计划直接返回不可执行和原因，不创建任务。
 

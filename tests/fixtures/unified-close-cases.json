@@ -1,0 +1,69 @@
+{
+  "skill_version": "1.0.4",
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "optional_annual_and_supplement_unavailable",
+      "skills": ["stock_analysis", "deep_research"],
+      "facts": {
+        "security_profile": true,
+        "valid_industry_classification": true,
+        "eligible_daily_close": true,
+        "current_annual_filing": false,
+        "current_segment_disclosure": false,
+        "requested_supplement_available": false
+      },
+      "expect": {
+        "executable": true,
+        "quality": "limited",
+        "company_section": "S2",
+        "company_section_availability": "limited",
+        "display_company_facts": ["listed_date", "industry_classification"],
+        "omit": ["annual_financial_comparison", "business_mix", "annual_risk_excerpts", "supplement_table"],
+        "disclose_supplement_gap": true
+      }
+    },
+    {
+      "id": "missing_required_industry_classification",
+      "skills": ["stock_analysis", "deep_research"],
+      "facts": {"security_profile": true, "valid_industry_classification": false, "eligible_daily_close": true},
+      "expect": {"executable": false, "unavailable_required_section": "S2"}
+    },
+    {
+      "id": "supplement_does_not_repair_stale_daily_close",
+      "skills": ["stock_analysis", "capital_flow", "deep_research"],
+      "plan_as_of": "2026-10-29T16:00:00+08:00",
+      "last_two_closed_sessions": ["2026-10-28", "2026-10-29"],
+      "facts": {"last_eligible_daily_close_date": "2026-10-27", "supplement_source_configured": true},
+      "expect": {"executable": false, "unavailable_market_sections": {"stock_analysis": "S6", "capital_flow": "S2", "deep_research": "S11"}}
+    },
+    {
+      "id": "missing_required_margin_disclosure",
+      "skills": ["capital_flow"],
+      "facts": {"eligible_daily_close": true, "margin_balance_sessions_in_window": 1},
+      "expect": {"executable": false, "unavailable_required_section": "S3"}
+    },
+    {
+      "id": "two_sources_distinct_timelines_and_replay",
+      "skills": ["stock_analysis"],
+      "plan_as_of": "2026-10-29T16:00:00+08:00",
+      "confirmed_at": "2026-10-29T16:01:00+08:00",
+      "sources": [
+        {"provider": "tushare", "kind": "canonical_close", "trade_date": "2026-10-28", "published_locally_at": "2026-10-28T17:20:00+08:00", "close_cny": "20.00"},
+        {"provider": "tushare", "kind": "canonical_close", "trade_date": "2026-10-29", "published_locally_at": "2026-10-29T16:03:00+08:00", "close_cny": "21.00"},
+        {"provider": "emquant", "kind": "daily_liquidity_supplement", "date_label": "2026-10-28", "received_at": "2026-10-29T16:02:00+08:00", "archived_at": "2026-10-29T16:02:03+08:00", "shares": "10000", "amount_cny": "200000", "turnover_ratio": null}
+      ],
+      "expect": {
+        "eligible_close_cny": "20.00",
+        "providers": ["tushare", "emquant"],
+        "supplement_event_at": null,
+        "supplement_first_published_at": null,
+        "supplement_display_turnover": null,
+        "supplement_content_hash_required": true,
+        "supplement_retry_uses_same_archive": true,
+        "treat_supplement_as_standard_bar": false,
+        "treat_supplement_as_realtime": false
+      }
+    }
+  ]
+}

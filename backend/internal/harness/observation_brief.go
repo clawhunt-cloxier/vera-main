@@ -59,6 +59,24 @@ func ObservationBriefSkill() *Skill {
 // complete rechecks the frozen inputs and holds current license locks for each
 // model use, including cached step retries and summary/verifier calls.
 func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (json.RawMessage, model.Meta, error) {
+	if t.Version == CloseUnifiedVersion {
+		req.WithReuse = func(callCtx context.Context, cached func(pgx.Tx) error) error {
+			return e.WithUnifiedSources(callCtx, t.Workspace, t.ID, dataservice.SourceModel, func(tx pgx.Tx, _ []BoundResearchSupplement) error { return cached(tx) })
+		}
+		req.WithSend = func(callCtx context.Context, send func() (model.Raw, error)) (model.Raw, error) {
+			if err := e.stillCurrent(callCtx, t); err != nil {
+				return model.Raw{}, err
+			}
+			var raw model.Raw
+			err := e.WithUnifiedSources(callCtx, t.Workspace, t.ID, dataservice.SourceModel, func(pgx.Tx, []BoundResearchSupplement) error {
+				var err error
+				raw, err = send()
+				return err
+			})
+			return raw, err
+		}
+		return e.Gateway.Complete(ctx, req)
+	}
 	if IsCloseResearchVersion(t.Version) {
 		if t.Snapshot == nil || *t.Snapshot == "" {
 			return nil, model.Meta{}, errors.New("harness: missing close research snapshot")
@@ -246,6 +264,17 @@ func (e *Engine) observationPipeline(ctx, parent context.Context, t *taskRow, sk
 }
 
 func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Plan, fn func(pgx.Tx) error) error {
+	if plan.SkillVersion == CloseUnifiedVersion {
+		return pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
+			if err := e.Store.RequireResearchUseTx(ctx, tx); err != nil {
+				return errs.Unavailable("DATA_SOURCE_UNAVAILABLE", "收盘研究数据源当前不可用").Wrap(err)
+			}
+			if err := setResearchWorkspace(ctx, tx, ws); err != nil {
+				return err
+			}
+			return fn(tx)
+		})
+	}
 	if plan.SkillVersion != emquant.ObservationBriefVersion && plan.SkillVersion != MixedObservationVersion {
 		return db.InWorkspace(ctx, e.Pool, ws, fn)
 	}
@@ -274,6 +303,14 @@ func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Pla
 }
 
 func (e *Engine) deliverTransaction(ctx context.Context, t *taskRow, fn func(pgx.Tx) error) error {
+	if t.Version == CloseUnifiedVersion {
+		return e.WithUnifiedSources(ctx, t.Workspace, t.ID, dataservice.SourceDisplay, func(tx pgx.Tx, _ []BoundResearchSupplement) error {
+			if err := setResearchWorkspace(ctx, tx, t.Workspace); err != nil {
+				return err
+			}
+			return fn(tx)
+		})
+	}
 	if IsCloseResearchVersion(t.Version) {
 		return e.withCloseRights(ctx, func() error { return db.InWorkspace(ctx, e.Pool, t.Workspace, fn) })
 	}

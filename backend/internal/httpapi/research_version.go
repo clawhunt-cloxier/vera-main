@@ -94,13 +94,17 @@ func observationVersion(r *http.Request) bool { return representation(r) == obse
 func realtimeVersion(r *http.Request) bool    { return representation(r) == realtimeMedia }
 
 func planConfirmationVersion(mode string, quoteRequirement *string, media string) bool {
-	if quoteRequirement != nil {
-		return mode == "collect_latest" && media == realtimeMedia
-	}
-	if mode == "collect_latest" {
+	switch mode {
+	case "fixed_legacy":
+		return media == legacyMedia
+	case "collect_latest":
+		if quoteRequirement != nil {
+			return media == realtimeMedia
+		}
 		return media == observationMedia
+	default:
+		return false
 	}
-	return mode == "fixed_legacy" && media == legacyMedia
 }
 
 func requestRepresentationMatches(r *http.Request, selected string) bool {

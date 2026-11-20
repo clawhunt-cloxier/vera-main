@@ -167,10 +167,7 @@ func TestTuShareThreeReportDelivery(t *testing.T) {
 		lastTask = task.ID
 		var report httpapi.Report
 		decode(request("GET", lastReport, "", 200), &report)
-		expectedVersion := harness.CloseDisclosureVersion
-		if skill == "deep_research" {
-			expectedVersion = harness.CloseCompanyVersion
-		}
+		expectedVersion := harness.CloseUnifiedVersion
 		if plan.Plan.SkillVersion != expectedVersion || report.SkillVersion != expectedVersion {
 			t.Fatalf("%s plan=%s report=%s want %s", skill, plan.Plan.SkillVersion, report.SkillVersion, expectedVersion)
 		}
