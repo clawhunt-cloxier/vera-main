@@ -150,10 +150,21 @@ func (p *Provider) Collect(ctx context.Context, code string, end time.Time) (ds.
 			news, err := collectNews(ctx, p.source, entity, end)
 			if err != nil {
 				var pe *ds.ProviderError
-				if !errors.As(err, &pe) || pe.Class != ds.ErrNotCovered {
+				if ctx.Err() != nil {
+					return nil, nil, ctx.Err()
+				}
+				if !errors.As(err, &pe) {
 					return nil, nil, err
 				}
-				batch.Notes = append(batch.Notes, "账号未开通新闻通讯")
+				switch pe.Class {
+				case ds.ErrNotCovered:
+					batch.Notes = append(batch.Notes, "账号未开通新闻通讯")
+				case ds.ErrRateLimited:
+					// A partial feed is not evidence of an empty news window.
+					batch.Notes = append(batch.Notes, "TuShare 新闻通讯达到请求频率限制，近 30 天覆盖不完整，本批省略新闻")
+				default:
+					return nil, nil, err
+				}
 			} else {
 				batch.Records = append(batch.Records, news...)
 			}

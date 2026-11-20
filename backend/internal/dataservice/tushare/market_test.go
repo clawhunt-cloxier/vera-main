@@ -98,6 +98,28 @@ func marketTestData() *marketTestSource {
 	return &marketTestSource{data: data, objects: map[string][]byte{}, fail: map[string]error{}}
 }
 
+func TestOptionalNewsRateLimitPreservesIndependentMarketData(t *testing.T) {
+	const code = "600000.SH"
+	end := time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC)
+	src := marketTestData()
+	p := Provider{source: src, codes: []string{code}}
+	src.fail["major_news"] = &dataservice.ProviderError{Class: dataservice.ErrRateLimited, Err: errors.New("synthetic rate limit")}
+	obs, notes, err := p.Collect(t.Context(), code, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := obs.Records(t.Context())
+	if err != nil || !slices.ContainsFunc(records, func(r dataservice.Record) bool { return r.DatasetID == "mkt.daily_bar" }) ||
+		slices.ContainsFunc(records, func(r dataservice.Record) bool { return r.DatasetID == "news.item" }) ||
+		!slices.Contains(notes, "TuShare 新闻通讯达到请求频率限制，近 30 天覆盖不完整，本批省略新闻") {
+		t.Fatalf("records=%d notes=%v err=%v", len(records), notes, err)
+	}
+	src.fail["major_news"] = &dataservice.ProviderError{Class: dataservice.ErrAuthFailed, Err: errors.New("synthetic auth failure")}
+	if obs, _, err = p.Collect(t.Context(), code, end); err == nil || obs != nil {
+		t.Fatal("global authentication failure must prevent publication")
+	}
+}
+
 func TestMarketClosingResearch(t *testing.T) {
 	src := marketTestData()
 	const code = "600000.SH"
