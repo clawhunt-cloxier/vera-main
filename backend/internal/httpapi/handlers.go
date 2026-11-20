@@ -108,37 +108,64 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 
-	// Try local store first (previously cached vendor results and demo data)
-	choice := s.choiceRequest(r)
-	ents, err := s.catalogFor(r).Search(r.Context(), q, kind, 20)
+	ents, err := s.catalogFor(r).Search(r.Context(), q, kind, maxSearchEntities)
 	if err != nil {
 		return err
 	}
-	queryCode := strings.ToUpper(q)
-	for _, e := range ents {
-		if choice && (kind == "" || kind == "stock") {
-			// The local index is fuzzy. A near match must not mask a new
-			// qualified code; a bare code needs all vendor market candidates.
-			if isStockCode(q) || (emquantBriefCodeLike(queryCode) && (e.Kind != "stock" || e.Code != queryCode)) {
-				continue
-			}
-		}
-		items = append(items, toEntity(e, s.skillsFor(r)))
-	}
-
-	// If local search found nothing and we have a real vendor, query Choice in real-time
-	if len(items) == 0 && choice {
-		if vendorEnts, err := s.searchVendorStocks(r, q, kind); err != nil {
+	if s.choiceRequest(r) && (kind == "" || kind == "stock") {
+		ents, err = choiceSearchResults(q, ents, func() ([]dataservice.EntityRow, error) {
+			return s.searchVendorStocks(r, q, kind)
+		})
+		if err != nil {
 			return errs.Unavailable("STOCK_SEARCH_UNAVAILABLE", "证券搜索暂时不可用，请稍后重试")
-		} else {
-			for _, e := range vendorEnts {
-				items = append(items, toEntity(e, s.skillsFor(r)))
-			}
 		}
+	}
+	registry := s.skillsFor(r)
+	for _, e := range ents {
+		items = append(items, toEntity(e, registry))
 	}
 
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
 	return nil
+}
+
+const maxSearchEntities = 20
+
+func choiceSearchResults(q string, cached []dataservice.EntityRow, lookup func() ([]dataservice.EntityRow, error)) ([]dataservice.EntityRow, error) {
+	qualified := emquantBriefCodeLike(strings.ToUpper(q))
+	bareCode := isStockCode(q)
+	exact := func(e dataservice.EntityRow) bool {
+		return e.Kind == "stock" && (strings.EqualFold(e.Code, q) || strings.EqualFold(e.Name, q))
+	}
+	// A bare code requires the vendor's exchange candidates. For a qualified
+	// code only its exact match is relevant, including when the cache is fuzzy.
+	if qualified || bareCode {
+		cached = slices.DeleteFunc(cached, func(e dataservice.EntityRow) bool {
+			return bareCode || e.Kind != "stock" || !strings.EqualFold(e.Code, q)
+		})
+	}
+	all := cached
+	if !slices.ContainsFunc(cached, exact) && (bareCode || qualified || isStockName(q)) {
+		discovered, err := lookup()
+		if err != nil {
+			return nil, err
+		}
+		all = append(discovered, cached...)
+	}
+	result := make([]dataservice.EntityRow, 0, min(len(all), maxSearchEntities))
+	seen := make(map[uuid.UUID]bool)
+	for _, wantExact := range []bool{true, false} {
+		for _, e := range all {
+			if exact(e) == wantExact && !seen[e.ID] {
+				seen[e.ID] = true
+				result = append(result, e)
+				if len(result) == maxSearchEntities {
+					return result, nil
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 // isStockCode returns true for 6-digit numeric strings (A-share code without exchange suffix).
@@ -156,12 +183,17 @@ func isStockCode(q string) bool {
 
 // isStockName returns true for strings that contain letter/CJK characters and only valid name chars.
 func isStockName(q string) bool {
+	if len([]rune(q)) > 32 {
+		return false
+	}
+	hasLetter := false
 	for _, ch := range q {
+		hasLetter = hasLetter || unicode.IsLetter(ch)
 		if !unicode.IsLetter(ch) && !unicode.IsNumber(ch) && !strings.ContainsRune(" *.-·()（）", ch) {
 			return false
 		}
 	}
-	return true
+	return hasLetter
 }
 
 // searchVendorStocks calls the Choice API for the query, upserts discovered entities, and
