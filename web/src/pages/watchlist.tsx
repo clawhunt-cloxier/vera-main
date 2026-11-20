@@ -8,13 +8,11 @@ import {
   newKey,
   post,
   type PlanResult,
-  type QuoteRequirement,
   type ResearchProtocol,
   type WatchItem,
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
-import { QuoteRequirementField } from '../components/QuoteRequirementField';
 import { ResearchSourceField } from '../components/ResearchSourceField';
 import { Dialog, Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
 
@@ -31,7 +29,6 @@ export function Watchlist() {
   const combined = combinedResearch(me.data);
   const [source, setSource] = useState<ResearchProtocol>('legacy');
   const protocol = combined ? source : (me.data?.research_protocol ?? 'legacy');
-  const realtime = protocol === 'v0.4';
   const items = useQuery({
     queryKey: ['watchlist'],
     queryFn: () => get<{ items: WatchItem[] }>('/api/v1/watchlist'),
@@ -39,9 +36,6 @@ export function Watchlist() {
   });
   const [adding, setAdding] = useState(false);
   const [researchItem, setResearchItem] = useState<WatchItem | null>(null);
-  const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
-  const allowRealtime = me.data?.realtime_trade_available === true;
-  const quoteRequirement = allowRealtime ? selection : 'latest_available';
   const qc = useQueryClient();
   const nav = useNavigate();
   const add = useMutation({
@@ -53,14 +47,12 @@ export function Watchlist() {
   });
   const analyze = useMutation({
     mutationFn: async (subject_id: string) => {
-      if (realtime && !quoteRequirement) throw new Error('请选择行情要求');
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
         {
           skill_id: 'stock_analysis',
           subject_id,
           params: {},
-          ...(realtime ? { quote_requirement: quoteRequirement } : {}),
         },
         { idem: newKey(), protocol }
       );
@@ -137,9 +129,8 @@ export function Watchlist() {
                       className="ghost small"
                       disabled={!me.data || analyze.isPending}
                       onClick={() => {
-                        if (combined || realtime) {
+                        if (combined) {
                           setSource('legacy');
-                          setQuoteRequirement('latest_available');
                           setResearchItem(it);
                           analyze.reset();
                         } else {
@@ -177,14 +168,7 @@ export function Watchlist() {
                 snapshot={me.data?.research_protocol === 'v0.4'}
               />
             )}
-            {realtime && (
-              <QuoteRequirementField
-                value={quoteRequirement}
-                onChange={setQuoteRequirement}
-                allowRealtime={allowRealtime}
-              />
-            )}
-            <button type="submit" disabled={!quoteRequirement || analyze.isPending}>
+            <button type="submit" disabled={analyze.isPending}>
               {analyze.isPending ? '准备中…' : '生成研究计划'}
             </button>
             {analyze.error && <ErrorBox error={analyze.error} />}
