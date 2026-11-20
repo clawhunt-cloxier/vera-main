@@ -79,6 +79,12 @@ func demo(ctx context.Context, args []string) error {
 		if err := a.Sync(ctx); err != nil {
 			return err
 		}
+	} else if a.Brief != nil {
+		// Register the live SDK identity before workers can claim existing
+		// Choice tasks or cached TuShare observations can satisfy readiness.
+		if err := a.RegisterChoice(ctx); err != nil {
+			return err
+		}
 	}
 	if n := os.Getenv("VERA_DEMO_INVITES"); n != "0" {
 		codes, err := identity.CreateInvites(ctx, a.Pool, 3, 1, 14*24*time.Hour, "demo", "vera-demo")
@@ -107,7 +113,11 @@ func demo(ctx context.Context, args []string) error {
 		return err
 	}
 	if a.TuShare != nil {
-		sync := startDemoTuShareSync(ctx, a.Pool, a.TuShare.SubjectCodes(), a.Sync)
+		var choiceID string
+		if a.Brief != nil {
+			choiceID = a.Brief.ID()
+		}
+		sync := startDemoTuShareSync(ctx, a.Pool, a.TuShare.SubjectCodes(), choiceID, a.SyncTuShare)
 		defer sync.stop()
 		h = sync.readiness(h)
 	}

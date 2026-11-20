@@ -15,7 +15,7 @@ func TestDemoTuShareReadiness(t *testing.T) {
 	ctx := t.Context()
 	pool := dbtest.New(t)
 	fail := make(chan struct{})
-	sync := startDemoTuShareSync(ctx, pool, []string{"600000.SH", "000001.SZ"}, func(ctx context.Context) error {
+	sync := startDemoTuShareSync(ctx, pool, []string{"600000.SH", "000001.SZ"}, "", func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -66,12 +66,25 @@ func TestDemoTuShareReadiness(t *testing.T) {
 	// without a process restart. Subsequent refresh failures keep these rows.
 	record("000001.SZ", "tushare", "mkt.daily_bar", "PASS")
 	check("/readyz", 200, "")
+	// In combined mode, warm TuShare rows do not prove the configured SDK
+	// identity is enabled. Other provider rows may remain in the same database.
+	sync.choiceID = "configured-choice"
+	const choiceUnavailable = "{\"status\":\"not_ready\",\"reason\":\"choice_provider_unavailable\"}\n"
+	check("/readyz", 503, choiceUnavailable)
+	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,kind,enabled) VALUES ('configured-choice','Choice','vendor',false)`); err != nil {
+		t.Fatal(err)
+	}
+	check("/readyz", 503, choiceUnavailable)
+	if _, err := pool.Exec(ctx, `UPDATE providers SET enabled=true WHERE id='configured-choice'`); err != nil {
+		t.Fatal(err)
+	}
+	check("/readyz", 200, "")
 }
 
 func TestDemoTuShareStopWaitsForCollector(t *testing.T) {
 	cancelled := make(chan struct{})
 	release := make(chan struct{})
-	sync := startDemoTuShareSync(t.Context(), nil, nil, func(ctx context.Context) error {
+	sync := startDemoTuShareSync(t.Context(), nil, nil, "", func(ctx context.Context) error {
 		<-ctx.Done()
 		close(cancelled)
 		<-release

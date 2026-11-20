@@ -21,6 +21,7 @@ deploy() {
       *200) return 0 ;;
       '{"status":"not_ready","reason":"tushare_initial_sync"}'$'\n503') ;;
       '{"status":"not_ready","reason":"tushare_sync_failed"}'$'\n503') return 1 ;;
+      '{"status":"not_ready","reason":"choice_provider_unavailable"}'$'\n503') return 1 ;;
       *) (( SECONDS - started < 200 )) || return 1 ;;
     esac
     sleep 5
