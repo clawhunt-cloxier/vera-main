@@ -16,6 +16,14 @@ const entity = {
   classification: null,
   skills: [],
 };
+const stockSkill = {
+  id: 'stock_analysis',
+  title: '个股分析',
+  version: '1.0.1',
+  available: true,
+  subject_kinds: ['stock'],
+  params_schema: {},
+};
 const plan = {
   id: 'mock-plan',
   plan_hash: 'mock-hash',
@@ -340,7 +348,7 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
               display_name: '模拟验收',
               research_protocol: advertisedProtocol,
             };
-          else if (path === '/api/v1/skills') body = { items: [] };
+          else if (path === '/api/v1/skills') body = { items: [stockSkill] };
           else if (path === '/api/v1/entities') {
             assert.equal(accept, observationMedia);
             body = { items: [oldPlan.subject] };
@@ -434,5 +442,434 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
         await context.close();
       }
     );
+  }
+
+  await t.test('blocked annual research can preview capital flow for the same stock', async () => {
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      const button = page.getByRole('button', { name: '查看资金动向计划' });
+      const body = page.locator('main');
+      let entityCan = true,
+        registryCan = true,
+        previewCan = true,
+        originSkill = 'stock_analysis';
+      let previews = 0,
+        tasks = 0;
+      const me = { csrf_token: 'test', onboarded: true, synthetic: false, quota: {} };
+      const fixed = (id, flow) => ({
+        ...plan,
+        id,
+        skill_id: flow ? 'capital_flow' : originSkill,
+        skill_version: flow ? '1.0.1' : '1.0.2',
+        subject: {
+          ...entity,
+          skills: [{ skill_id: 'capital_flow', available: entityCan, reason: null }],
+        },
+        executable: flow && previewCan,
+        reason_code: flow && previewCan ? null : 'REQUIRED_SECTION_UNAVAILABLE',
+        snapshot_mode: 'fixed_legacy',
+        quote_requirement: null,
+        sections: [
+          {
+            id: 'S2',
+            title: flow ? '行情与交易' : '公司概况',
+            required: true,
+            availability: flow && previewCan ? 'available' : 'unavailable',
+            reason: flow
+              ? previewCan
+                ? null
+                : '缺少近期融资余额'
+              : '缺少最近年度财报可引用的主营业务原文',
+          },
+          { id: 'S5', title: '可选章节', required: false, availability: 'available', reason: null },
+        ],
+      });
+      await page.route(origin + '/app**', (route) =>
+        route.fulfill({ contentType: 'text/html', body: appHTML })
+      );
+      await page.route(origin + '/api/v1/**', async (route) => {
+        const req = route.request(),
+          path = new URL(req.url()).pathname.slice('/api/v1/'.length);
+        let result;
+        if (path === 'me') result = me;
+        else if (path === 'skills')
+          result = {
+            items: [
+              { ...stockSkill, id: 'capital_flow', title: '资金动向', available: registryCan },
+            ],
+          };
+        else if (path === 'research-plans' && req.method() === 'POST') {
+          previews++;
+          assert.equal(req.headers()['content-type'], 'application/json');
+          assert.deepEqual(req.postDataJSON(), {
+            skill_id: 'capital_flow',
+            subject_id: entity.id,
+            params: {},
+          });
+          result = { kind: 'plan', plan: fixed('alternative', true) };
+        } else if (path === 'research-plans/blocked') result = fixed('blocked', false);
+        else if (path === 'research-plans/alternative') result = fixed('alternative', true);
+        else if (path === 'research-tasks' && req.method() === 'POST') {
+          tasks++;
+          result = task;
+        } else throw new Error('Unexpected alternative plan request ' + path);
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify(result) });
+      });
+      for (const originType of ['stock_analysis', 'deep_research']) {
+        originSkill = originType;
+        await page.goto(origin + '/app/plan/blocked');
+        await button.waitFor();
+        assert.equal(await page.getByRole('button', { name: '提交任务' }).isDisabled(), true);
+        assert.match(await body.innerText(), /缺少最近年度财报可引用的主营业务原文/);
+        await page.getByRole('checkbox', { name: /S5/ }).uncheck();
+        assert.equal(previews, originType === 'stock_analysis' ? 0 : 1);
+        previewCan = originType === 'stock_analysis';
+        await button.click();
+        await page.waitForURL('**/app/plan/alternative');
+        await page.getByText('资金动向', { exact: true }).waitFor();
+        assert.equal(await page.getByRole('checkbox', { name: /S5/ }).isChecked(), true);
+        assert.equal(await page.getByRole('button', { name: '提交任务' }).isEnabled(), previewCan);
+        if (!previewCan) assert.match(await body.innerText(), /缺少近期融资余额/);
+        assert.equal(await button.count(), 0);
+        assert.equal(tasks, 0);
+      }
+      for (const [subjectAllowed, skillAllowed] of [
+        [false, true],
+        [true, false],
+      ]) {
+        entityCan = subjectAllowed;
+        registryCan = skillAllowed;
+        const registryResponse = subjectAllowed
+          ? page.waitForResponse((r) => r.url().endsWith('/api/v1/skills'))
+          : null;
+        await page.goto(origin + '/app/plan/blocked');
+        await page.getByText('必需章节缺少可用数据，本次计划无法提交。').waitFor();
+        if (registryResponse) await registryResponse;
+        assert.equal(await button.count(), 0);
+      }
+      assert.equal(previews, 2);
+    } finally {
+      await context.close();
+    }
+  });
+
+  await t.test(
+    'combined workspace creates plans with each source and reads evidence from both',
+    async () => {
+      const context = await browser.newContext();
+      try {
+        const page = await context.newPage();
+        page.setDefaultTimeout(6000);
+        const json = 'application/json';
+        const closing = ['stock_analysis', 'capital_flow', 'deep_research'].map((id, index) => ({
+          ...stockSkill,
+          id,
+          title: ['个股分析', '资金动向', '深度研究'][index],
+        }));
+        const paths = [
+          ['个股分析 TuShare 收盘研究', json, 'stock_analysis'],
+          ['资金动向 TuShare 收盘研究', json, 'capital_flow'],
+          ['深度研究 TuShare 收盘研究', json, 'deep_research'],
+          ['日成交简报（Choice + TuShare）', observationMedia, 'stock_analysis'],
+          ['Choice 行情快照', media, 'stock_analysis'],
+        ];
+        let expected = paths[0];
+        let snapshotEnabled = true;
+        let freeText = false;
+        let requests = 0;
+        const sources = ['Choice', 'TuShare'].map((provider) => ({
+          dataset_id: 'mkt.daily_bar',
+          provider,
+          updated_at: plan.as_of,
+        }));
+        const currentPlan = () => ({
+          ...plan,
+          skill_id: expected[2],
+          skill_version: expected[1] === observationMedia ? '1.1.0-demo.4' : plan.skill_version,
+          quote_requirement: expected[1] === media ? 'realtime_trade' : null,
+          snapshot_mode: expected[1] === json ? 'fixed_legacy' : 'collect_latest',
+        });
+        await page.route(origin + '/app**', (route) =>
+          route.fulfill({ contentType: 'text/html', body: appHTML })
+        );
+        await page.route(origin + '/api/v1/**', async (route) => {
+          const req = route.request();
+          const path = new URL(req.url()).pathname.slice('/api/v1/'.length);
+          const accept = req.headers().accept;
+          const historyMedia = snapshotEnabled ? media : observationMedia;
+          const responseType = accept.includes(',') ? historyMedia : accept;
+          let body;
+          if (path === 'me')
+            body = {
+              onboarded: true,
+              csrf_token: 'test-csrf',
+              research_protocol: snapshotEnabled ? 'v0.4' : 'observation.v1',
+              realtime_trade_available: snapshotEnabled,
+              closing_research_available: true,
+            };
+          else if (path === 'skills') body = { items: accept === json ? closing : [stockSkill] };
+          else if (path === 'watchlist')
+            body = { items: [{ id: 'mock-watch', entity, snapshot: null }] };
+          else if (path === 'entities') {
+            assert.equal(accept, expected[1]);
+            body = { items: [entity] };
+          } else if (path === 'research-plans') {
+            assert.equal(accept, expected[1]);
+            assert.equal(req.headers()['content-type'], expected[1]);
+            assert.deepEqual(req.postDataJSON(), {
+              ...(freeText
+                ? { text: '研究这只股票' }
+                : { skill_id: expected[2], subject_id: entity.id, params: {} }),
+              ...(expected[1] === media ? { quote_requirement: 'realtime_trade' } : {}),
+            });
+            requests++;
+            body = { kind: 'plan', plan: currentPlan() };
+          } else if (path === 'research-plans/mock-plan') body = currentPlan();
+          else if (path === 'research-tasks' && req.method() === 'POST') {
+            assert.equal(accept, expected[1]);
+            assert.equal(req.headers()['content-type'], expected[1]);
+            body = task;
+          } else if (path === 'research-tasks') body = { items: [] };
+          else if (path === 'research-tasks/mock-task') body = task;
+          else if (path === 'reports/mock-report/versions/1')
+            body = {
+              ...report,
+              sources,
+              source_freshness: [{ ...freshness, dataset_id: 'mkt.daily_bar', provider: 'Choice' }],
+              claims: [{ ...report.claims[0], evidence_refs: ['choice', 'tushare'] }],
+            };
+          else if (path.startsWith('evidence/')) {
+            const provider = path.endsWith('choice') ? 'Choice' : 'TuShare';
+            body = { ...evidence, id: provider, provider, excerpt: provider + ' 模拟证据' };
+          } else throw new Error('Unexpected combined request ' + path);
+          await route.fulfill({ contentType: responseType, body: JSON.stringify(body) });
+        });
+        for (const entry of paths) {
+          expected = entry;
+          await page.goto(origin + '/app');
+          await page.getByRole('link', { name: expected[0], exact: true }).click();
+          await page.getByRole('combobox', { name: '搜索研究对象' }).fill(entity.symbol);
+          await page.getByRole('option', { name: new RegExp(entity.name) }).click();
+          if (expected[1] === media)
+            await page.getByRole('radio', { name: '交易中实时成交行情' }).check();
+          await page.getByRole('button', { name: '发起研究' }).click();
+          if (expected[1] === observationMedia)
+            await page.getByText(/按冻结时点取用已发布的 TuShare 数据/).waitFor();
+          await page.getByRole('button', { name: '提交任务' }).click();
+          await page.getByRole('link', { name: '查看报告' }).waitFor();
+          if (expected[1] === observationMedia) {
+            await page.getByRole('link', { name: '查看报告' }).click();
+            await page.getByRole('heading', { name: report.title }).waitFor();
+            assert.match(await page.locator('#limits').innerText(), /Choice · mkt.daily_bar/);
+            assert.match(await page.locator('#limits').innerText(), /TuShare · mkt.daily_bar/);
+            await page.getByRole('button', { name: '查看证据 1' }).click();
+            for (const provider of ['Choice', 'TuShare'])
+              await page.getByText(provider + ' 模拟证据', { exact: true }).waitFor();
+            assert.equal(
+              await page.getByRole('link', { name: '下载 PDF' }).getAttribute('href'),
+              '/api/v1/reports/mock-report/versions/1/pdf'
+            );
+          }
+        }
+        expected = paths[3];
+        freeText = true;
+        await page.goto(origin + '/app');
+        await page.getByLabel('研究数据').selectOption('observation.v1');
+        await page.getByLabel('描述你想要的研究').fill('研究这只股票');
+        await page.getByRole('button', { name: '开始研究' }).click();
+        await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
+        freeText = false;
+        expected = paths[0];
+        await page.goto(origin + '/app/watchlist');
+        await page.getByRole('button', { name: '分析' }).click();
+        await page.getByLabel('研究数据').selectOption('legacy');
+        await page.getByRole('button', { name: '生成研究计划' }).click();
+        await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
+        assert.equal(requests, 7);
+        snapshotEnabled = false;
+        await page.goto(origin + '/app');
+        await page.getByRole('link', { name: paths[0][0] }).waitFor();
+        assert.equal(await page.getByRole('link', { name: 'Choice 行情快照' }).count(), 0);
+        await page.getByRole('link', { name: paths[3][0] }).waitFor();
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  for (const synthetic of [false, true]) {
+    await t.test(synthetic ? 'fixture industry comparison' : 'TuShare close research', async () => {
+      const context = await browser.newContext();
+      try {
+        const page = await context.newPage();
+        page.setDefaultTimeout(10000);
+        const errors = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        const ids = ['stock_analysis', 'capital_flow', 'deep_research'];
+        const titles = ['个股分析', '资金动向', '深度研究'];
+        const skills = ids.map((id, i) => ({
+          ...stockSkill,
+          id,
+          title: titles[i],
+          version: synthetic ? '1.0.0' : '1.0.1',
+          subject_kinds: synthetic && id !== 'stock_analysis' ? ['stock', 'industry'] : ['stock'],
+          params_schema:
+            id === 'deep_research'
+              ? {
+                  properties: {
+                    mode: {
+                      enum: synthetic ? ['company', 'industry', 'company_industry'] : ['company'],
+                    },
+                  },
+                }
+              : {},
+        }));
+        const refs = Array.from({ length: 30 }, (_, i) => 'source-' + i);
+        const requested = new Set();
+        let skill, submitted;
+        const fixedPlan = () => ({
+          ...plan,
+          skill_id: skill,
+          skill_version: skills[0].version,
+          snapshot_mode: 'fixed_legacy',
+          quote_requirement: undefined,
+        });
+        await page.route(origin + '/app**', (route) =>
+          route.fulfill({ contentType: 'text/html', body: appHTML })
+        );
+        await page.route(origin + '/api/v1/**', async (route) => {
+          const req = route.request();
+          const path = new URL(req.url()).pathname.replace('/api/v1/', '');
+          let data;
+          if (path === 'me')
+            data = { csrf_token: 'mock-csrf', onboarded: true, synthetic, quota: {} };
+          else if (path === 'skills') data = { items: skills };
+          else if (path === 'entities') data = { items: [entity] };
+          else if (
+            path === 'research-plans' ||
+            (path === 'research-tasks' && req.method() === 'POST')
+          ) {
+            assert.equal(req.headers().accept, 'application/json');
+            assert.equal(req.headers()['content-type'], 'application/json');
+            if (path === 'research-plans') {
+              submitted = req.postDataJSON();
+              skill = submitted.skill_id;
+              data = { kind: 'plan', plan: fixedPlan() };
+            } else {
+              assert.equal(req.postDataJSON().plan_hash, plan.plan_hash);
+              data = task;
+            }
+          } else if (path === 'research-tasks') data = { items: [] };
+          else if (path === 'research-plans/mock-plan') data = fixedPlan();
+          else if (path === 'research-tasks/mock-task')
+            data = { ...task, skill_id: skill, snapshot_mode: 'fixed_legacy' };
+          else if (path === 'reports/mock-report/versions/1')
+            data = {
+              ...report,
+              synthetic,
+              skill_id: skill,
+              skill_version: skills[0].version,
+              title: '模拟公司财务分析',
+              snapshot_mode: 'fixed_legacy',
+              source_freshness: undefined,
+              sections: [
+                {
+                  ...report.sections[0],
+                  title: '财务及估值',
+                  tables: [
+                    { title: '营业收入', columns: ['期间', '亿元'], rows: [['2025', '10.0']] },
+                  ],
+                  charts: [{ series_id: 'chart-a', title: '收入趋势' }],
+                },
+              ],
+              claims: [{ ...report.claims[0], evidence_refs: refs, calculation_refs: ['calc-a'] }],
+            };
+          else if (path === 'reports/mock-report/versions/1/series/chart-a')
+            data = {
+              kind: 'line',
+              unit: '亿元',
+              series: [{ name: '收盘资料', points: [['2025', '10.0']] }],
+            };
+          else if (path.startsWith('evidence/')) {
+            const id = path.slice('evidence/'.length);
+            requested.add(id);
+            data = {
+              ...evidence,
+              id,
+              dataset_id: 'doc.periodic_text',
+              provider: '模拟 TuShare 上游',
+              title: id,
+              locator: '模拟年报第 10 页',
+              excerpt: '模拟原文 ' + id,
+            };
+          } else if (path === 'calculations/calc-a')
+            data = {
+              formula_id: 'F01',
+              formula_version: '1.0',
+              result: '10.0',
+              unit: '亿元',
+              applicability: 'APPLICABLE',
+              inputs: [],
+            };
+          else throw new Error('Unexpected close research request ' + path);
+          await route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
+        });
+        for (const expected of synthetic ? ['deep_research'] : ids) {
+          await page.goto(origin + '/app');
+          for (const title of titles)
+            await page.getByRole('link', { name: title, exact: true }).waitFor();
+          assert.equal(await page.getByRole('link', { name: 'Choice 日成交简报' }).count(), 0);
+          if (!synthetic) await page.getByText(/行情采用收盘数据/).waitFor();
+          await page
+            .getByRole('link', { name: titles[ids.indexOf(expected)], exact: true })
+            .click();
+          await page.getByRole('combobox', { name: '搜索研究对象' }).fill(entity.symbol);
+          await page.getByRole('option', { name: new RegExp(entity.name) }).click();
+          if (expected === 'deep_research') {
+            const modes = page.getByLabel('模式');
+            assert.deepEqual(
+              await modes.locator('option').allTextContents(),
+              synthetic ? ['公司深度研究', '公司 + 所在行业对比'] : ['公司深度研究']
+            );
+            if (synthetic) await modes.selectOption('company_industry');
+          }
+          await page.getByRole('button', { name: '发起研究' }).click();
+          await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
+          assert.deepEqual(submitted, {
+            skill_id: expected,
+            subject_id: entity.id,
+            params: synthetic ? { mode: 'company_industry' } : {},
+          });
+        }
+        if (!synthetic) {
+          await page.getByRole('button', { name: '提交任务' }).click();
+          await page.getByRole('link', { name: '查看报告' }).click();
+          await page.getByRole('heading', { name: '模拟公司财务分析' }).waitFor();
+          assert.equal(
+            await page.getByRole('table', { name: '营业收入' }).locator('td').innerText(),
+            '10.0'
+          );
+          await page.locator('.chart-box svg').waitFor();
+          await page.getByRole('button', { name: '查看证据 1', exact: true }).click();
+          await page.getByText('F01', { exact: true }).waitFor();
+          await page.getByText('模拟原文 source-11', { exact: true }).waitFor();
+          assert.deepEqual([...requested].sort(), refs.slice(0, 12).sort());
+          await page.getByRole('button', { name: '下一页' }).click();
+          await page.getByText('模拟原文 source-23', { exact: true }).waitFor();
+          assert.deepEqual([...requested].sort(), refs.slice(0, 24).sort());
+          assert.equal(
+            await page.getByRole('link', { name: '下载 PDF' }).getAttribute('href'),
+            '/api/v1/reports/mock-report/versions/1/pdf'
+          );
+          await page.goto(origin + '/app/quick/daily-observation');
+          await page.getByText('当前部署未开放这项研究。').waitFor();
+          assert.equal(await page.getByRole('button', { name: '发起研究' }).isDisabled(), true);
+        }
+        assert.deepEqual(errors, []);
+      } finally {
+        await context.close();
+      }
+    });
   }
 });

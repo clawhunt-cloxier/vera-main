@@ -34,7 +34,7 @@ RUN cd backend && CGO_ENABLED=1 go test ./internal/dataservice/emquant -run 'Tes
 # Stage 3: Final minimal image
 # debian-slim, not alpine: embedded PostgreSQL ships glibc binaries.
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata curl libstdc++6 libgcc-s1 && rm -rf /var/lib/apt/lists/* && \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata curl libstdc++6 libgcc-s1 poppler-utils util-linux && rm -rf /var/lib/apt/lists/* && \
     groupadd -g 10001 vera && useradd -u 10001 -g vera -m -d /home/vera vera && \
     mkdir -p /data && chown vera:vera /data
 # Relative defaults (../contracts, ../deploy/config, ../tests/fixtures) resolve from /app/backend.

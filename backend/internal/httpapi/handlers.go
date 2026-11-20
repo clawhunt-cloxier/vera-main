@@ -31,15 +31,20 @@ func (s *Server) meBody(r *http.Request) (Me, error) {
 	_ = s.Pool.QueryRow(r.Context(), `SELECT display_name FROM users WHERE id=$1`, p.UserID).Scan(&name)
 	me := Me{UserID: p.UserID, WorkspaceID: p.WorkspaceID, CSRF: p.CSRF, Persona: p.Persona, Onboarded: p.WorkspaceID != nil,
 		Synthetic: s.Synthetic, DisplayName: name}
-	quote, err := s.quoteCapabilities(r.Context())
-	if err != nil {
-		return me, err
+	if s.FullVendorResearch {
+		me.ClosingResearchAvailable = s.closeGrant(r)(noop) == nil
 	}
-	if quote.Latest {
-		me.ResearchProtocol = "v0.4"
-		me.RealtimeTradeAvailable = quote.Realtime
-	} else if s.Engine.Brief != nil {
-		me.ResearchProtocol = "observation.v1"
+	if !s.combined() || s.choiceGrant(r)(noop) == nil {
+		quote, err := s.quoteCapabilities(r.Context())
+		if err != nil {
+			return me, err
+		}
+		if quote.Latest {
+			me.ResearchProtocol = "v0.4"
+			me.RealtimeTradeAvailable = quote.Realtime
+		} else if s.Engine.Brief != nil {
+			me.ResearchProtocol = "observation.v1"
+		}
 	}
 	if ws != uuid.Nil {
 		q, err := s.Engine.Quota(r.Context(), ws)
@@ -104,29 +109,30 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	// Try local store first (previously cached vendor results and demo data)
-	ents, err := s.Store.Search(r.Context(), q, kind, 20)
+	choice := s.choiceRequest(r)
+	ents, err := s.catalogFor(r).Search(r.Context(), q, kind, 20)
 	if err != nil {
 		return err
 	}
 	queryCode := strings.ToUpper(q)
 	for _, e := range ents {
-		if s.Engine.Brief != nil && (kind == "" || kind == "stock") {
+		if choice && (kind == "" || kind == "stock") {
 			// The local index is fuzzy. A near match must not mask a new
 			// qualified code; a bare code needs all vendor market candidates.
 			if isStockCode(q) || (emquantBriefCodeLike(queryCode) && (e.Kind != "stock" || e.Code != queryCode)) {
 				continue
 			}
 		}
-		items = append(items, toEntity(e, s.Engine.Skills))
+		items = append(items, toEntity(e, s.skillsFor(r)))
 	}
 
 	// If local search found nothing and we have a real vendor, query Choice in real-time
-	if len(items) == 0 && s.Engine.Brief != nil {
+	if len(items) == 0 && choice {
 		if vendorEnts, err := s.searchVendorStocks(r, q, kind); err != nil {
 			return errs.Unavailable("STOCK_SEARCH_UNAVAILABLE", "证券搜索暂时不可用，请稍后重试")
 		} else {
 			for _, e := range vendorEnts {
-				items = append(items, toEntity(e, s.Engine.Skills))
+				items = append(items, toEntity(e, s.skillsFor(r)))
 			}
 		}
 	}
@@ -232,7 +238,7 @@ func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataserv
 			if label == "" {
 				label = code
 			}
-			e, err := s.Store.UpsertSearchEntity(r.Context(), "stock", code, label, nil)
+			e, err := s.catalogFor(r).UpsertSearchEntity(r.Context(), "stock", code, label, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -274,12 +280,10 @@ func emquantBriefCodeLike(code string) bool {
 func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 	paused := harness.KillSwitch(r.Context(), s.Pool)
 	items := []Skill{}
+	registry := s.skillsFor(r)
 	for _, id := range skillOrder {
-		sk := s.Engine.Skills[id]
-		if id == "stock_analysis" && realtimeVersion(r) && s.Engine.RealtimeEnabled() {
-			sk = harness.RealtimeBriefSkill()
-		}
-		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (s.Engine.Brief == nil || id == "stock_analysis")})
+		sk := registry[id]
+		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (!s.choiceRequest(r) || id == "stock_analysis")})
 	}
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
 	return nil
@@ -288,7 +292,7 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 // ---- plans ----
 
 func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
-	if s.Engine.Brief != nil && !realtimeVersion(r) && !observationVersion(r) {
+	if s.Engine.Brief != nil && !s.FullVendorResearch && !realtimeVersion(r) && !observationVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "真实简报需要新版客户端")
 	}
 	var in struct {
@@ -320,16 +324,19 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 			return errs.BadRequest("INVALID_BODY", "请输入 2–500 字")
 		}
 		var err error
-		if realtimeVersion(r) {
+		switch {
+		case realtimeVersion(r):
 			res, err = s.Engine.ParseRealtimePlan(r.Context(), ws, t, requirement)
-			if err != nil {
-				return err
-			}
-		} else if res, err = s.Engine.ParsePlan(r.Context(), ws, t); err != nil {
+		case observationVersion(r):
+			res, err = s.Engine.ParseObservationPlan(r.Context(), ws, t)
+		default:
+			res, err = s.Engine.ParsePlan(r.Context(), ws, t)
+		}
+		if err != nil {
 			return err
 		}
 	case in.Text == nil && in.SubjectID != nil && in.SkillID != "" && len(in.Params) > 0 && string(in.Params) != "null":
-		ents, err := s.Store.Entities(r.Context(), []uuid.UUID{*in.SubjectID})
+		ents, err := s.catalogFor(r).Entities(r.Context(), []uuid.UUID{*in.SubjectID})
 		if err != nil {
 			return err
 		}
@@ -342,9 +349,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 			return errs.BadRequest("INVALID_BODY", "params 必须是对象")
 		}
 		var p *harness.Plan
-		if realtimeVersion(r) {
+		switch {
+		case realtimeVersion(r):
 			p, err = s.Engine.BuildRealtimePlan(r.Context(), ws, in.SkillID, sub, params, requirement)
-		} else {
+		case observationVersion(r):
+			p, err = s.Engine.BuildObservationPlan(r.Context(), ws, in.SkillID, sub, params)
+		default:
 			p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
 		}
 		if err != nil {
@@ -363,7 +373,7 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		out.Plan = &pl
 	}
 	for _, c := range res.Candidates {
-		out.Candidates = append(out.Candidates, Candidate{SkillID: c.SkillID, Subject: toEntity(c.Subject, s.Engine.Skills), Label: c.Label})
+		out.Candidates = append(out.Candidates, Candidate{SkillID: c.SkillID, Subject: toEntity(c.Subject, s.skillsFor(r)), Label: c.Label})
 	}
 	httpx.JSON(w, r, 200, out)
 	return nil
@@ -378,6 +388,9 @@ func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) error {
 	p, err := s.Engine.LoadPlan(r.Context(), ws, id)
 	if err != nil {
 		return err
+	}
+	if !slices.Contains(s.historyVersions(), p.SkillVersion) {
+		return errs.NotFound()
 	}
 	if p.QuoteRequirement != nil && !realtimeVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要 0.4 客户端")
@@ -407,6 +420,9 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) error {
 	plan, err := s.Engine.LoadPlan(r.Context(), ws, in.PlanID)
 	if err != nil {
 		return err
+	}
+	if !slices.Contains(s.historyVersions(), plan.SkillVersion) {
+		return errs.NotFound()
 	}
 	if !planConfirmationVersion(plan.SnapshotMode, plan.QuoteRequirement, representation(r)) {
 		return errs.Conflict("PLAN_VERSION_MISMATCH", "确认协议必须与创建计划的协议一致")
@@ -493,7 +509,7 @@ func (s *Server) task(r *http.Request, ws, id uuid.UUID) (Task, error) {
 	var tr taskRow
 	err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		var err error
-		tr, err = scanTask(tx.QueryRow(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE t.id=$1`, id))
+		tr, err = scanTask(tx.QueryRow(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE t.id=$1 AND t.skill_version=ANY($2::text[])`, id, s.historyVersions()))
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -600,7 +616,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		rs, err := tx.Query(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE ($1::timestamptz IS NULL OR (t.created_at, t.id) < ($1, $2))
 			AND ($3 = '' OR t.skill_id=$3) AND ($4 = '' OR t.status=$4) AND ($5::uuid IS NULL OR t.subject_id=$5)
-			ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, at, cid, skill, status, subj, n+1)
+			AND t.skill_version=ANY($7::text[]) ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, at, cid, skill, status, subj, n+1, s.listVersions(r))
 		if err != nil {
 			return err
 		}
@@ -643,10 +659,20 @@ func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	_, ws := principal(r)
+	if err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
+		var exists bool
+		err := tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM research_tasks WHERE id=$1 AND skill_version=ANY($2::text[]))`, id, s.historyVersions()).Scan(&exists)
+		if err == nil && !exists {
+			return errs.NotFound()
+		}
+		return err
+	}); err != nil {
+		return err
+	}
 	if _, _, err := s.Engine.CancelTask(r.Context(), ws, id, in.Expected); err != nil {
 		return err
 	}
-	if s.Engine.Brief != nil {
+	if s.Engine.Brief != nil || s.FullVendorResearch {
 		// No vendor-derived fields are needed to acknowledge this command.
 		w.WriteHeader(http.StatusNoContent)
 		return nil
@@ -705,7 +731,8 @@ func (s *Server) reportSummaries(r *http.Request, ws uuid.UUID, where string, ar
 	}
 	var rows []row
 	err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		rs, err := tx.Query(r.Context(), `SELECT report_id, version, title, skill_id, subject_id, result_kind, delivered_at FROM report_versions WHERE `+where, args...)
+		scope := fmt.Sprintf(`EXISTS (SELECT 1 FROM research_tasks t WHERE t.id=v.task_id AND t.workspace_id=v.workspace_id AND t.skill_version=ANY($%d::text[]))`, len(args)+1)
+		rs, err := tx.Query(r.Context(), `SELECT report_id, version, title, skill_id, subject_id, result_kind, delivered_at FROM report_versions v WHERE `+scope+` AND `+where, append(args, s.listVersions(r))...)
 		if err != nil {
 			return err
 		}
@@ -754,7 +781,7 @@ func (s *Server) loadDoc(r *http.Request) (uuid.UUID, harness.Document, []byte, 
 	_, ws := principal(r)
 	var body, series []byte
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT document, series FROM report_versions WHERE report_id=$1 AND version=$2`, id, v).Scan(&body, &series)
+		return tx.QueryRow(r.Context(), `SELECT v.document, v.series FROM report_versions v JOIN research_tasks t ON t.id=v.task_id AND t.workspace_id=v.workspace_id WHERE v.report_id=$1 AND v.version=$2 AND t.skill_version=ANY($3::text[])`, id, v, s.historyVersions()).Scan(&body, &series)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, doc, nil, errs.NotFound()
@@ -765,7 +792,7 @@ func (s *Server) loadDoc(r *http.Request) (uuid.UUID, harness.Document, []byte, 
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return uuid.Nil, doc, nil, err
 	}
-	if doc.SkillVersion == emquant.ObservationBriefVersion {
+	if doc.SkillVersion == emquant.ObservationBriefVersion || doc.SkillVersion == harness.MixedObservationVersion {
 		for _, section := range doc.Sections {
 			for i := range section.Tables {
 				if err := formatObservationTable(&section.Tables[i]); err != nil {
@@ -878,35 +905,45 @@ func (s *Server) feedback(w http.ResponseWriter, r *http.Request) error {
 // ---- evidence & calculations: visible only when used by a task of this workspace ----
 
 func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
-	if handled, err := s.briefEvidence(w, r); handled || err != nil {
-		return err
-	}
 	id, err := pathID(r, "id")
 	if err != nil {
 		return err
 	}
 	_, ws := principal(r)
-	var ok bool
+	// A published TuShare record may also be present in a standalone close
+	// task. That task grants its own path, independently of Choice.
+	var version string
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
-			WHERE $1 = ANY(sn.record_ids))`, id).Scan(&ok)
+		return tx.QueryRow(r.Context(), `SELECT t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
+			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]) AND t.skill_version=ANY($3::text[]) LIMIT 1`, id, s.historyVersions(),
+			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion}).Scan(&version)
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		if s.Engine.Brief != nil {
+			if handled, err := s.briefEvidence(w, r); handled || err != nil {
+				return err
+			}
+		}
+		return errs.NotFound()
+	}
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return errs.NotFound()
+	grant, err := s.versionGrant(r, version)
+	if err != nil {
+		return err
 	}
+	// Query before taking the write-time grant to keep the transaction short.
 	recs, err := s.Store.Get(r.Context(), []uuid.UUID{id})
 	if err != nil {
 		return err
 	}
 	rec, found := recs[id]
-	if !found {
+	if !found || rec.ProviderID != s.historyRecordProvider() {
 		return errs.NotFound()
 	}
-	httpx.JSON(w, r, 200, s.evidence(r, rec))
-	return nil
+	ev := s.evidence(r, rec)
+	return grant(func() error { httpx.JSON(w, r, 200, ev); return nil })
 }
 
 func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidence {
@@ -940,6 +977,9 @@ func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidenc
 			ev.Label = it.Label + "（" + str("scope") + "，" + str("report_type") + "）"
 		}
 		v, u := str("value"), "元"
+		if str("item_code") == "IS.basic_eps" || str("item_code") == "IS.diluted_eps" {
+			u = "元/股"
+		}
 		ev.Value, ev.Unit = &v, &u
 		loc := "公告 " + str("filing_id") + fmt.Sprintf("，修订版本 %d", rec.Version)
 		ev.Locator = &loc
@@ -983,7 +1023,7 @@ func (s *Server) getCalculation(w http.ResponseWriter, r *http.Request) error {
 	var c Calculation
 	var inputs []byte
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT id, formula_id, formula_version, inputs, result::text, unit, applicability, reason FROM calculations WHERE id=$1`, id).
+		return tx.QueryRow(r.Context(), `SELECT c.id, c.formula_id, c.formula_version, c.inputs, c.result::text, c.unit, c.applicability, c.reason FROM calculations c JOIN research_tasks t ON t.id=c.task_id AND t.workspace_id=c.workspace_id WHERE c.id=$1 AND t.skill_version=ANY($2::text[])`, id, s.historyVersions()).
 			Scan(&c.ID, &c.FormulaID, &c.FormulaVersion, &inputs, &c.Result, &c.Unit, &c.Applicability, &c.Reason)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

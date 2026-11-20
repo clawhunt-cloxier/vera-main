@@ -120,7 +120,7 @@ func setupEngine(t *testing.T, configure func(*harness.Engine)) *env {
 	t.Cleanup(srv.Close)
 	idp, _ := devoidc.New(srv.URL+"/dev-oidc", "vera-web", "dev-secret", srv.URL+"/auth/callback")
 	id := identity.New(pool, identity.Options{Registration: true, Issuer: idp.Issuer, ClientID: "vera-web", ClientSecret: "dev-secret", PublicURL: srv.URL})
-	s := &Server{Pool: pool, ID: id, Store: st, Engine: eng, Watch: &watchlist.Service{Pool: pool, Store: st, Now: p.Now}, Synthetic: true,
+	s := &Server{Pool: pool, ID: id, Store: st, Engine: eng, Watch: &watchlist.Service{Pool: pool, Store: st, Now: p.Now, ProviderID: p.ID()}, Synthetic: true,
 		Mounts: map[string]http.Handler{"/dev-oidc/": http.StripPrefix("/dev-oidc", idp.Handler())}}
 	mux.Handle("/", s.Handler())
 	return &env{srv, pool, eng}
@@ -403,6 +403,56 @@ func TestAPIFlow(t *testing.T) {
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM feedback WHERE workspace_id=$1`, ws).Scan(&aliceRows)
 	if aliceRows != 1 {
 		t.Fatalf("feedback rows in alice's workspace: %d", aliceRows)
+	}
+	// A single workspace can retain records from several deployments. Exercise
+	// the public read contract with synthetic history carrying a different
+	// source's skill version. Foreign rows are filtered before pagination.
+	if _, err := e.pool.Exec(ctx, `UPDATE research_tasks SET skill_version=$2 WHERE id=$1`, task.ID, harness.CloseResearchVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE research_plans SET skill_version=$2 WHERE id=$1`, pr.Plan.ID, harness.CloseResearchVersion); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{rp, rp + "/pdf", rp + "/series/" + seriesID, "/api/v1/calculations/" + calcID,
+		"/api/v1/evidence/" + rep.Claims[0].Ev[0].String(), "/api/v1/research-plans/" + pr.Plan.ID.String(), "/api/v1/research-tasks/" + task.ID.String()} {
+		c.json("GET", p, nil, http.StatusNotFound, nil)
+	}
+	c.json("POST", rp+"/feedback", map[string]any{"kind": "useful"}, http.StatusNotFound, nil)
+	for _, p := range []string{"/api/v1/reports?page_size=1", "/api/v1/research-tasks?page_size=1"} {
+		var list struct {
+			Items []any   `json:"items"`
+			Next  *string `json:"next_cursor"`
+		}
+		c.json("GET", p, nil, http.StatusOK, &list)
+		if len(list.Items) != 0 || list.Next != nil {
+			t.Fatalf("%s should contain only current-source history", p)
+		}
+	}
+	var watch struct {
+		Items []WatchItem `json:"items"`
+	}
+	c.json("GET", "/api/v1/watchlist", nil, 200, &watch)
+	if len(watch.Items) != 1 || watch.Items[0].LastReport != nil || watch.Items[0].Snapshot == nil {
+		t.Fatal("expected only current-source watch snapshot")
+	}
+	// Add a distinct same-day source snapshot alongside the fixture record.
+	// Switching the reader's source selects its price and leaves the user's note.
+	if _, err := e.pool.Exec(ctx, `INSERT INTO providers(id,name,kind) VALUES('sample-close','Sample close source','vendor')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO watchlist_snapshots(workspace_id,item_id,provider_id,trade_date,metrics,triggered)
+		SELECT workspace_id,item_id,'sample-close',trade_date,jsonb_set(metrics,'{close}','"4.20"'),'{}' FROM watchlist_snapshots WHERE item_id=$1 AND provider_id='fixture'`, wi.ID); err != nil {
+		t.Fatal(err)
+	}
+	reader := &watchlist.Service{Pool: e.pool, Store: e.engine.Store, Now: e.engine.Now, ProviderID: "sample-close"}
+	item, err := reader.Get(ctx, ws, wi.ID)
+	if err != nil || item.Snapshot == nil || item.Snapshot.Close != "4.20" || item.Note != "x" {
+		t.Fatalf("source-specific watch snapshot: %+v %v", item, err)
+	}
+	reader.ProviderID = "unassigned"
+	item, err = reader.Get(ctx, ws, wi.ID)
+	if err != nil || item.Snapshot != nil || item.Note != "x" {
+		t.Fatalf("watch item with no assigned snapshot: %+v %v", item, err)
 	}
 	c.json("DELETE", "/api/v1/watchlist/"+wi.ID.String(), nil, 204, nil)
 

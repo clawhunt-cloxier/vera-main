@@ -33,6 +33,7 @@ type Engine struct {
 	RealtimeSource *BriefQuoteSource
 	Pool           *pgxpool.Pool
 	Store          *dataservice.Store
+	ChoiceCatalog  *dataservice.Store
 	Gateway        *model.Gateway
 	Policy         *policy.Policy
 	Skills         map[string]*Skill
@@ -43,6 +44,9 @@ type Engine struct {
 	Prompts        string // prompt set version, frozen into reports
 	// RealResearch is VERA_REAL_RESEARCH_ENABLED: required before plans and tasks run on real data or real models.
 	RealResearch bool
+	// WithCloseResearchUse holds current TuShare usage rights for the callback.
+	WithCloseResearchUse func(context.Context, func() error) error
+	CloseResearchCutoff  func(context.Context) (time.Time, error)
 }
 
 const PromptVersion = "1.1.0"
@@ -98,16 +102,23 @@ func planHash(skill, version string, subject uuid.UUID, p Params, asOf time.Time
 
 // BuildPlan computes availability and persists the plan for the workspace.
 func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, subject dataservice.EntityRow, raw map[string]any) (*Plan, error) {
-	if !e.Synthetic && !e.RealResearch {
+	if e.realResearchDisabled() {
 		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
-	if e.Brief != nil && skillID != "stock_analysis" {
+	if e.Brief != nil && !e.hasCloseSkills() && skillID != "stock_analysis" {
 		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "真实数据模式当前仅提供成交数据简报")
 	}
 	sk, ok := e.Skills[skillID]
 	if !ok {
 		return nil, errs.Unprocessable("UNKNOWN_SKILL", "不支持的研究技能")
 	}
+	if IsCloseResearchVersion(sk.Version) && e.Store != nil && !e.Store.RegisteredResearchSubject(subject.Code) {
+		return nil, errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "本技能仅支持已登记的 A 股个股")
+	}
+	return e.buildSkillPlan(ctx, ws, sk, subject, raw)
+}
+
+func (e *Engine) buildSkillPlan(ctx context.Context, ws uuid.UUID, sk *Skill, subject dataservice.EntityRow, raw map[string]any) (*Plan, error) {
 	if !slices.Contains(sk.Subjects, subject.Kind) {
 		return nil, errs.Unprocessable("SUBJECT_NOT_SUPPORTED", sk.Title+"不支持该研究对象类型")
 	}
@@ -118,7 +129,21 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 	if err != nil {
 		return nil, err
 	}
-	asOf := e.Now()
+	var asOf time.Time
+	if IsCloseResearchVersion(sk.Version) || sk.Version == MixedObservationVersion {
+		if e.CloseResearchCutoff == nil {
+			return nil, errs.Unavailable("PUBLICATION_CUTOFF_UNAVAILABLE", "数据发布截止时点不可用")
+		}
+		asOf, err = e.CloseResearchCutoff(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if asOf.IsZero() {
+			return nil, errs.Unavailable("PUBLICATION_CUTOFF_UNAVAILABLE", "缺少数据发布截止时点")
+		}
+	} else {
+		asOf = e.Now()
+	}
 	av, notes, err := sk.Plan(ctx, e, subject, &p, asOf)
 	if err != nil {
 		return nil, err
@@ -147,7 +172,7 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 	plan.QuotaCost = 1
 	plan.Hash = planHash(sk.ID, sk.Version, subject.ID, p, asOf, plan.Sections)
 	plan.SnapshotMode = "fixed_legacy"
-	if sk.Version == emquant.ObservationBriefVersion {
+	if sk.Version == emquant.ObservationBriefVersion || sk.Version == MixedObservationVersion {
 		plan.SnapshotMode = "collect_latest"
 	}
 	params, _ := json.Marshal(p)
@@ -282,7 +307,7 @@ func KillSwitch(ctx context.Context, q interface {
 
 // CreateTask confirms a plan: verifies hash/expiry, reserves quota and enqueues the run in one transaction.
 func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID, hash string, disabled []string) (uuid.UUID, error) {
-	if !e.Synthetic && !e.RealResearch {
+	if e.realResearchDisabled() {
 		return uuid.Nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
 	plan, err := e.LoadPlan(ctx, ws, planID)
@@ -656,6 +681,9 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	if t.Epoch != epoch || IsTerminal(t.Status) || t.Status == "CANCEL_REQUESTED" {
 		return nil
 	}
+	if IsCloseResearchVersion(t.Version) && !e.RealResearch {
+		return e.finish(ctx, t, "BLOCKED", "REAL_RESEARCH_DISABLED", "真实研究尚未开启")
+	}
 	if !e.supportsSnapshotMode(t.SnapshotMode, t.Version) {
 		return ErrSnapshotModeUnsupported
 	}
@@ -670,8 +698,12 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	switch t.Version {
 	case RealtimeBriefVersion:
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
-	case emquant.ObservationBriefVersion:
+	case emquant.ObservationBriefVersion, MixedObservationVersion:
 		err = e.observationPipeline(runCtx, ctx, t, sk)
+	case CloseResearchVersion, CloseCompanyVersion:
+		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
+			err = e.pipeline(runCtx, ctx, t, sk)
+		}
 	default:
 		err = e.pipeline(runCtx, ctx, t, sk)
 	}
@@ -749,6 +781,9 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 	})
 	if err != nil {
 		return err
+	}
+	if IsCloseResearchVersion(t.Version) {
+		t.Snapshot = &co.Snapshot
 	}
 	sheet, err := step(ctx, e, t, "compute", func() (*facts.Sheet, error) {
 		b, err := e.bundleFromSnapshot(ctx, subject, co, t.AsOf)

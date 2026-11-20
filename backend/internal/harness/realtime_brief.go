@@ -62,8 +62,8 @@ func (e *Engine) withRealtimeSnapshot(ctx context.Context, t *taskRow, use datas
 }
 
 func (e *Engine) completeRealtime(ctx context.Context, t *taskRow, req model.Request) (json.RawMessage, model.Meta, error) {
-	if err := e.withRealtimeSnapshot(ctx, t, dataservice.SourceModel, func(pgx.Tx, emquant.QuoteView) error { return nil }); err != nil {
-		return nil, model.Meta{}, err
+	req.WithReuse = func(callCtx context.Context, cached func(pgx.Tx) error) error {
+		return e.withRealtimeSnapshot(callCtx, t, dataservice.SourceModel, func(tx pgx.Tx, _ emquant.QuoteView) error { return cached(tx) })
 	}
 	req.WithSend = func(callCtx context.Context, send func() (model.Raw, error)) (model.Raw, error) {
 		if err := e.stillCurrent(callCtx, t); err != nil {

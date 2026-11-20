@@ -1,0 +1,66 @@
+# TuShare Pro 收盘研究
+
+工作台可对已登记的 A 股公司运行个股分析、个股资金动向和公司深度研究。资金动向版本为 `1.0.1`，个股分析和公司深研为 `1.0.2`，按更正后的公告版本选择分部数据。研究计划冻结数据库的可用截止时间，行情取最近已收盘交易日，财报同时受实际披露时间和本地入库时间约束。需要更新时，由运维发起同步。模型只使用计划中已有的证据和计算结果。
+
+同站启用 `VERA_DATA_PROVIDER=emquant+tushare` 后，可从工作台选择收盘研究、日成交简报或按账户开放的 Choice 行情快照。对于已登记且具备收盘数据及两家用途授权的证券，日成交简报将 Choice 成交量、成交额和换手率与 TuShare 不复权收盘价放入同一份报告。计划列出具体版本供用户确认。已确认的双来源简报绑定两组证据，重试复用该快照。财务和资金研究继续使用 TuShare，Choice 行情快照执行各自的时点和许可校验。[双厂商部署](DEPLOYMENT.md)
+
+## 接口与覆盖
+
+| 研究需要 | 实际调用 | 交付条件 |
+| --- | --- | --- |
+| 个股、基准和行业表现 | `stock_basic`、`trade_cal`、`daily`、`adj_factor`、`daily_basic`、`suspend_d`、`index_daily`、`index_member_all`、`sw_daily` | 约五年历史，日成交量由手转股、成交额由千元转元。以沪深 300 和有效申万二级行业为基准，收益使用可比日期。 |
+| 估值与同行 | `daily_basic`、`index_member_all` 及同行财报 | 仅选择同期有市值的同行，最多八家。缺少五家有效同行时披露比较限制。 |
+| 财务、业务和风险 | `income`、`balancesheet`、`cashflow`、`fina_mainbz`、`anns_d` 及登记来源的年报 PDF | 连续两个可比年度的合并财报与对应公告。不同分部维度分别计算。正文按 PDF 页码和段落定位。无法定位对应披露版本时省略有关事实。 |
+| 资金与股东 | `margin_secs`、`margin_detail`、`moneyflow`、`block_trade`、`stk_holdernumber` | 两融资格、融资余额和同日流通市值分别核对。资金分档为厂商加工口径。缺少必需的杠杆资金数据可导致资金报告无法执行。 |
+| 近期事件 | `anns_d`、`major_news` | 新闻仅关联标题包含该证券名称的报道，注明媒体。当期没有授权新闻时，以近期公告支持剩余内容。 |
+
+接口定义可公开查阅。用户登录后可查看自己的 Token、积分和独立订阅。请按部署账号实际返回验收，特别核对公告和新闻。参见 [官方 HTTP 说明](https://tushare.pro/document/1?doc_id=130)、[积分与接口](https://tushare.pro/document/1?doc_id=108)、[独立权限](https://tushare.pro/document/1?doc_id=290)、[日线](https://tushare.pro/document/2?doc_id=27)、[合并利润表](https://tushare.pro/document/2?doc_id=33)、[公告](https://tushare.pro/document/2?doc_id=176)。
+
+对照早期 MVP，资金报告「交易所席位与大宗交易」目前展示大宗成交。要补龙虎榜，需逐交易日登记覆盖情况，并区分单日榜、连续多日榜、同一席位的买卖双榜，才能计算窗口内上榜日数和席位金额。官网按单日提供两侧前五席位明细。[TuShare 龙虎榜明细](https://tushare.pro/document/2?doc_id=107)
+
+股东与公司事项目前有股东户数。年度实际现金分红还需要覆盖中期和期末各次实施公告，核实含税金额和参与分配的股本。贵州茅台 2024 年报中期分红已经实施，期末分红当时仍是预案。直接采用年报预案或仅取期末记录会影响财年合计。[TuShare 分红字段](https://tushare.pro/document/2?doc_id=103) · [贵州茅台 2024 年报](https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF)
+
+资金报告的季度持仓章节仍有缺口。陆股通持股需同时记录季末持股数和实际披露日。港交所自 2024-08-19 起在每季第五个北向交易日公布上季末持股。公募持仓还需识别同一组合的不同份额、区分前十大持仓和全部持仓，并核对当季股本分母。TuShare 的 `fund_portfolio` 按基金披露持有股份及公告日，仅将这些行相加不能得到已验证的全市场合计。[港交所查询说明](https://www3.hkexnews.hk/sdw/mutualmarket/SH.htm) · [TuShare 公募持仓字段](https://tushare.pro/document/2?doc_id=121)
+
+新闻接口按时间窗返回全市场记录，采集器随后按公司名称筛选。若共用限频与重试后仍受限，本批省略新闻，记录近 30 天的新闻覆盖不完整，已独立取得的行情和资金数据仍可发布。新闻缺口不能解释为公司没有相关新闻。
+
+## 配置与运行
+
+1. 在部署的密钥管理或权限为 0600 的环境文件中配置 `TUSHARE_TOKEN`。API、worker、同步和管理进程使用同一数据库和同一配置。生产环境还需已有的 OIDC 与真实模型配置。变量名见 [部署模板](../deploy/.env.example)。
+2. 设置 `VERA_DATA_PROVIDER=tushare`、`TUSHARE_SUBJECTS=600519.SH`（示例，可用逗号登记多只），配置 `TUSHARE_S3_ENDPOINT`、`TUSHARE_S3_REGION`、`TUSHARE_S3_ACCESS_KEY`、`TUSHARE_S3_SECRET_KEY` 与 `TUSHARE_S3_BUCKET`。使用独立测试数据库或已有真实数据环境。已有模拟实体与真实实体证券代码冲突时，发布会失败并保留原数据。
+3. 确认许可覆盖本部署的存储、展示及模型处理用途后，设置 `TUSHARE_ALLOW_MODEL_PROCESSING=true` 与 `VERA_REAL_RESEARCH_ENABLED=true` 并重启相关进程。可在授权尚待确认时单独采集归档。模型用途默认关闭。
+4. 应用宿主需能通过 TLS 连接 `api.tushare.pro:443` 和公告文件的登记主机。运行镜像已包含 `pdftotext` 和 `prlimit`。请求身分凭证只发往官方 HTTPS 数据接口。公告下载使用独立请求。原始响应、脱敏请求清单和 PDF 按 SHA-256 归档，失败的同步可重试。
+
+在使用外置数据库的部署中执行以下命令。
+
+```sh
+vera admin provider test tushare
+vera admin provider test tushare --research
+vera sync
+vera admin provider list
+vera admin provider model-use tushare on
+```
+
+第一条只查配置中第一家公司的股票名录。同步会按标的采集及发布，并输出新增行数和缺数说明。一次同步覆盖标的、同行与对应披露。建议按账号配额安排收盘后的同步，`TUSHARE_MIN_INTERVAL` 的默认值为 500ms。同一数据库内的进程共享限频和冷却状态。部署或运维关闭用途后，后续同步不能自行恢复授权。使用 `vera admin provider model-use tushare off` 可在数据库即时撤销模型研究与相关展示。生产勿运行开发登录命令 `vera demo`。
+
+后台同步与手动同步共用厂商级采集锁。两个任务研究不同股票时也可能读取同一指数或同行。每批从第一次取数到发布完成均由同一数据库会话持锁。等待中的任务可取消，持锁会话断开后该批发布失败，已有记录保留。
+
+同步进程需要直连 PostgreSQL 或使用保留物理会话的连接池，以便在同一会话内发布。有效的空响应及其脱敏请求同样归档，供核对查询的股票和时段。
+
+<a id="account-acceptance"></a>
+
+## 用真实账号验收
+
+从已有 Choice 测试站切换时，先在 Choice 配置下部署支持两家厂商的镜像并确认就绪，保存这次镜像 SHA、原有密钥配置版本和数据库备份。Compose 从宿主机 `/opt/vera/.env` 读取运行配置（权限 0600）。仅切到 TuShare 单厂商时需要设置 `VERA_REQUIRE_CHOICE_QUOTE=false`。组合模式可保留既有 Choice 行情就绪策略。对象存储可复用现有桶，需为 `TUSHARE_S3_*` 对应身份授予桶内 `tushare/` 前缀的写入与读取权限。重复归档会读回原文核对哈希。
+
+在 `/opt/vera` 使用已验证的同一镜像运行 `VERA_IMAGE="$(cat .current_image)" docker compose up -d vera`，使容器加载新配置。回退时先恢复原 Choice 密钥配置版本，再用切换前记录的镜像重建容器并核对 `/readyz`。CD 自动回滚只恢复镜像，厂商配置由运维恢复。保留数据库和归档对象，以便读取历史报告及证据。
+
+测试站的 Compose 默认运行 `vera demo`。启动后它会在后台同步，首次同步期间 `/readyz` 返回 `tushare_initial_sync`。每个登记标的已有归档日线后服务可就绪。若首次同步失败，可在运行中的测试容器重试。以下命令使用内嵌测试数据库的默认端口与开发登录配置。
+
+```sh
+docker compose exec -T vera sh -c 'export DATABASE_URL="${DATABASE_URL:-postgres://vera:vera-demo@127.0.0.1:${VERA_DEMO_PG_PORT:-55432}/vera?sslmode=disable}" VERA_DEV_OIDC=true; exec /app/backend/vera sync'
+```
+
+选择一家有五年日线、至少两个连续可比年报、有效两融披露以及足够申万二级同行的非金融 A 股公司。先查同步日志和厂商限制，再从工作台搜索标的，分别提交三份报告。记录报告版本与截止时间，核对复权曲线、最新两融日、年报页码、同比计算输入和分部口径，打开证据并导出 PDF。无权或无覆盖时，记录受限章节或无法执行的原因。由模拟模型生成的报告带模拟标识，真实数据交付验收使用配置好的真实模型。
+
+本轮范围是可追溯的公司收盘研究。盘中报价、行业或全市场汇总、跨厂商自动择源和热备仍是后续工作。公募及互联互通持仓、机构观点、业绩说明会纪要等还需单独的数据接入。目标报告的对照基线见 [早期 MVP](../README-MVP.md)。

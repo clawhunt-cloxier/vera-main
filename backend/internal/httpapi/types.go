@@ -63,16 +63,17 @@ func toEntity(e dataservice.EntityRow, skills map[string]*harness.Skill) Entity 
 type Quota = harness.Quota
 
 type Me struct {
-	RealtimeTradeAvailable bool       `json:"realtime_trade_available,omitempty"`
-	ResearchProtocol       string     `json:"research_protocol,omitempty"`
-	UserID                 uuid.UUID  `json:"user_id"`
-	WorkspaceID            *uuid.UUID `json:"workspace_id"`
-	CSRF                   string     `json:"csrf_token"`
-	Persona                string     `json:"persona"`
-	Quota                  Quota      `json:"quota"`
-	Onboarded              bool       `json:"onboarded"`
-	Synthetic              bool       `json:"synthetic"`
-	DisplayName            string     `json:"display_name"`
+	ClosingResearchAvailable bool       `json:"closing_research_available,omitempty"`
+	RealtimeTradeAvailable   bool       `json:"realtime_trade_available,omitempty"`
+	ResearchProtocol         string     `json:"research_protocol,omitempty"`
+	UserID                   uuid.UUID  `json:"user_id"`
+	WorkspaceID              *uuid.UUID `json:"workspace_id"`
+	CSRF                     string     `json:"csrf_token"`
+	Persona                  string     `json:"persona"`
+	Quota                    Quota      `json:"quota"`
+	Onboarded                bool       `json:"onboarded"`
+	Synthetic                bool       `json:"synthetic"`
+	DisplayName              string     `json:"display_name"`
 }
 
 type Skill struct {

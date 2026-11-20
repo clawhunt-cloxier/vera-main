@@ -16,6 +16,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/fixture"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/tushare"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/httpapi"
@@ -28,14 +29,18 @@ import (
 )
 
 type App struct {
-	Cfg      *config.Config
-	Pool     *pgxpool.Pool
-	Store    *dataservice.Store
-	Provider dataservice.Provider
-	Engine   *harness.Engine
-	Watch    *watchlist.Service
-	Brief    *emquant.BriefService
-	Policy   *policy.Policy
+	Cfg   *config.Config
+	Pool  *pgxpool.Pool
+	Store *dataservice.Store
+	// Primary supplies the closing research clock/basis and watchlist series.
+	// Choice observation requests always go through Brief and ChoiceCatalog.
+	Primary       dataservice.Provider
+	ChoiceCatalog *dataservice.Store
+	Engine        *harness.Engine
+	Watch         *watchlist.Service
+	Brief         *emquant.BriefService
+	TuShare       *tushare.Provider
+	Policy        *policy.Policy
 }
 
 // Provider returns the configured data provider. Vendor adapters register here once their SDK/contract is provided.
@@ -84,14 +89,30 @@ func (a *App) build(ctx context.Context) error {
 	} else {
 		a.Store = dataservice.NewVendorStore(a.Pool, cat)
 	}
-	if c.DataProvider == "emquant" {
+	if c.ChoiceConfigured() {
 		a.Brief, err = emquant.OpenBriefFromEnv(ctx, a.Pool, cat, os.Getenv)
 		if err != nil {
 			return err
 		}
-		a.Provider = a.Brief
-	} else if a.Provider, err = newProvider(c); err != nil {
-		return err
+		a.ChoiceCatalog = a.Store
+		a.Primary = a.Brief
+	}
+	if c.TuShareConfigured() {
+		if a.TuShare, err = tushare.Open(a.Pool, os.Getenv); err != nil {
+			return err
+		}
+		if a.Brief != nil && a.Brief.ID() == a.TuShare.ID() {
+			return fmt.Errorf("configured providers must have distinct identities")
+		}
+		// The canonical research store serves TuShare closing observations.
+		// Choice retains its registered SDK collector and bound archive reader.
+		a.Primary = a.TuShare
+		a.Store = dataservice.NewResearchStore(a.Pool, cat, a.TuShare.ID(), a.TuShare.SubjectCodes(), a.TuShare.AllowModelProcessing())
+	}
+	if a.Primary == nil {
+		if a.Primary, err = newProvider(c); err != nil {
+			return err
+		}
 	}
 	if a.Policy, err = policy.Load(c.PolicyPath); err != nil {
 		return err
@@ -137,26 +158,74 @@ func (a *App) build(ctx context.Context) error {
 		limit = a.Policy.Quota.PlatformDailyCostLimitUSD
 	}
 	gw := model.NewGateway(a.Pool, profiles, adapters, prices, schemas, a.Policy, limit)
-	a.Engine = &harness.Engine{Pool: a.Pool, Store: a.Store, Gateway: gw, Policy: a.Policy, Skills: harness.Skills(), Now: a.Provider.Now,
-		Synthetic: c.Synthetic(), Basis: a.Provider.Basis(), Prompts: harness.PromptVersion, RealResearch: c.RealResearch, Brief: a.Brief}
+	a.Engine = &harness.Engine{Pool: a.Pool, Store: a.Store, ChoiceCatalog: a.ChoiceCatalog, Gateway: gw, Policy: a.Policy, Skills: harness.Skills(), Now: a.Primary.Now,
+		Synthetic: c.Synthetic(), Basis: a.Primary.Basis(), Prompts: harness.PromptVersion, RealResearch: c.RealResearch, Brief: a.Brief}
 	if a.Brief != nil {
 		a.Engine.Skills["stock_analysis"] = harness.ObservationBriefSkill()
 		// Choice grant and mapping identities are resolved per requested security
 		// at collection time; deployment config names only the runtime product.
 		a.Engine.RealtimeSource = &harness.BriefQuoteSource{ProviderID: a.Brief.ProviderID, Product: a.Brief.Product}
 	}
-	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Provider.Now}
+	if a.TuShare != nil {
+		a.Engine.Skills = harness.TuShareSkills()
+		a.Engine.WithCloseResearchUse = a.Store.WithResearchUse
+		a.Engine.CloseResearchCutoff = a.Store.PublicationCutoff
+	}
+	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Primary.Now, ProviderID: a.Primary.ID()}
 	return nil
 }
 
 // Sync loads provider data into the store (idempotent).
 func (a *App) Sync(ctx context.Context) error {
+	if a.Brief != nil {
+		if err := a.RegisterChoice(ctx); err != nil || a.TuShare == nil {
+			return err
+		}
+	}
+	if a.TuShare != nil {
+		return a.SyncTuShare(ctx)
+	}
 	start := time.Now()
-	n, err := a.Store.Sync(ctx, a.Provider)
+	n, err := a.Store.Sync(ctx, a.Primary)
 	if err == nil {
-		slog.Info("data sync finished", "provider", a.Provider.ID(), "inserted", n, "took", time.Since(start).Round(time.Millisecond))
+		slog.Info("data sync finished", "provider", a.Primary.ID(), "inserted", n, "took", time.Since(start).Round(time.Millisecond))
 	}
 	return err
+}
+
+// RegisterChoice publishes the SDK provider identity before observation work is served.
+func (a *App) RegisterChoice(ctx context.Context) error {
+	if _, err := a.ChoiceCatalog.Sync(ctx, a.Brief); err != nil {
+		return fmt.Errorf("register Choice observation provider: %w", err)
+	}
+	return nil
+}
+
+// SyncTuShare publishes a complete, source-scoped observation per registered subject.
+func (a *App) SyncTuShare(ctx context.Context) error {
+	for _, code := range a.TuShare.SubjectCodes() {
+		var notes []string
+		n, err := a.Store.SyncObserved(ctx, a.TuShare.ID(), func(ctx context.Context) (dataservice.Provider, error) {
+			batch, limitations, err := a.TuShare.Collect(ctx, code, a.TuShare.Now())
+			notes = limitations
+			return batch, err
+		})
+		if err != nil {
+			return fmt.Errorf("TuShare %s: %w", code, err)
+		}
+		slog.InfoContext(ctx, "TuShare observation published", "subject", code, "inserted", n, "limitations", notes)
+	}
+	return nil
+}
+
+func (a *App) ProviderByID(id string) dataservice.Provider {
+	if a.Brief != nil && id == a.Brief.ID() {
+		return a.Brief
+	}
+	if a.Primary != nil && id == a.Primary.ID() {
+		return a.Primary
+	}
+	return nil
 }
 
 // HTTP builds the API handler (plus dev OIDC and static web when configured).
@@ -183,7 +252,7 @@ func (a *App) HTTP() (http.Handler, error) {
 		mounts["/"] = spa(c.WebDir)
 	}
 	s := &httpapi.Server{Pool: a.Pool, ID: identity.New(a.Pool, opt), Store: a.Store, Engine: a.Engine, Watch: a.Watch, Synthetic: a.Engine.Synthetic, RequireChoiceQuote: c.RequireChoiceQuote,
-		Mounts: mounts}
+		Mounts: mounts, FullVendorResearch: a.TuShare != nil}
 	return s.Handler(), nil
 }
 

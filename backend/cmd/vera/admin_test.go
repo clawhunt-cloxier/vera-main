@@ -34,7 +34,7 @@ func newAdmin(t *testing.T) *adminRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &adminRig{t: t, pool: pool, a: &app.App{Pool: pool, Store: dataservice.NewStore(pool, cat), Provider: p}}
+	return &adminRig{t: t, pool: pool, a: &app.App{Pool: pool, Store: dataservice.NewStore(pool, cat), Primary: p}}
 }
 
 func (r *adminRig) run(args ...string) (string, error) {
@@ -135,7 +135,7 @@ func TestAdminUsers(t *testing.T) {
 func TestAdminDataSyncFiltersAndProviderTest(t *testing.T) {
 	r := newAdmin(t)
 	ctx := context.Background()
-	recs, _ := r.a.Provider.Records(ctx)
+	recs, _ := r.a.Primary.Records(ctx)
 	ds := recs[0].DatasetID
 	if _, err := r.run("data", "sync", "--dataset", "no.such.dataset"); err == nil {
 		t.Fatal("unknown dataset accepted")
@@ -156,11 +156,17 @@ func TestAdminDataSyncFiltersAndProviderTest(t *testing.T) {
 	if res, d := r.lastAudit("data.sync"); res != "success" || !strings.Contains(d, `"inserted"`) {
 		t.Fatalf("sync audit %s %s", res, d)
 	}
-	if out, err := r.run("provider", "test", r.a.Provider.ID()); err != nil || !strings.Contains(out, "可用") {
+	if out, err := r.run("provider", "test", r.a.Primary.ID()); err != nil || !strings.Contains(out, "登记能力") {
 		t.Fatalf("provider test: %v %s", err, out)
 	}
 	if _, err := r.run("provider", "test", "other"); err == nil {
 		t.Fatal("testing an unconfigured provider succeeded")
+	}
+	if _, err := r.run("provider", "test", "tushare", "--research"); err == nil {
+		t.Fatal("TuShare research probes ran in fixture mode")
+	}
+	if _, err := r.run("provider", "test", r.a.Primary.ID(), "--wrong"); err == nil {
+		t.Fatal("invalid probe mode was ignored")
 	}
 }
 

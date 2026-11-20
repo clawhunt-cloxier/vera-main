@@ -41,12 +41,25 @@ func newBundle(asOf time.Time, subject dataservice.EntityRow, ents map[uuid.UUID
 		b.byKey[k] = append(b.byKey[k], r)
 	}
 	for _, r := range b.global["ref.trading_calendar"] {
-		if v, _ := r.Payload["is_open"].(bool); v {
+		if v, _ := r.Payload["is_open"].(bool); v && str(r, "trade_date") <= asOf.In(cst).Format("2006-01-02") {
 			b.Days = append(b.Days, str(r, "trade_date"))
 		}
 	}
 	slices.Sort(b.Days)
+	b.Days = slices.Compact(b.Days)
 	return b
+}
+
+func activeIndustry(rs []dataservice.StoredRecord, at time.Time) (dataservice.StoredRecord, bool) {
+	day := at.In(cst).Format("2006-01-02")
+	var current dataservice.StoredRecord
+	for _, r := range rs {
+		from, until := str(r, "valid_from"), str(r, "valid_to")
+		if from != "" && from <= day && (until == "" || until >= day) && from > str(current, "valid_from") {
+			current = r
+		}
+	}
+	return current, current.ID != uuid.Nil
 }
 
 func (b *Bundle) Rows(ds string, e uuid.UUID) []dataservice.StoredRecord { return b.byKey[key(ds, e)] }

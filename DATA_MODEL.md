@@ -23,9 +23,9 @@
 | claims | task+epoch+section+claim_ref 唯一；kind、text、refs、numbers、verdict、removed_reason | harness |
 | report_versions | report_id+version 唯一；task_id 唯一；冻结的渲染 JSON 引用与哈希、snapshot_hash、plan_hash、skill/rule/prompt 版本 | reports |
 | publications | task_id+epoch 唯一；report_version、delivered_at | reports |
-| watchlist_items | workspace+entity 唯一；tags、note、added_at、added_price、version | watchlist |
+| watchlist_items | workspace+entity 唯一；tags、note、added_at、added_price、added_price_provider_id、version | watchlist |
 | watchlist_alerts | item+kind 唯一；threshold、enabled、last_triggered_trade_date | watchlist |
-| watchlist_snapshots | workspace+item+trade_date 唯一；指标值、triggered | watchlist |
+| watchlist_snapshots | item+provider_id+trade_date 唯一；指标值、triggered。来源为空的历史快照保留到期，读取时仅返回当前厂商已归属的行 | watchlist |
 | feedback | report+version+user+idempotency_key 唯一；kind、claim_ref、comment | feedback |
 | idempotency_keys | workspace+方法+规范化路由+key 唯一；request_hash、response_ref、expires_at | platform |
 

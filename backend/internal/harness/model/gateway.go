@@ -52,7 +52,9 @@ func LoadSchemas(dir string) (Schemas, error) {
 
 // Request is one logical model call from a harness step.
 type Request struct {
-	WithSend  func(context.Context, func() (Raw, error)) (Raw, error) // holds source rights only during the actual adapter call
+	WithSend func(context.Context, func() (Raw, error)) (Raw, error) // holds source rights only during the actual adapter call
+	// WithReuse reads the cached result in the transaction holding the current source permissions.
+	WithReuse func(context.Context, func(pgx.Tx) error) error
 	Workspace uuid.UUID
 	Task      *uuid.UUID
 	StepKey   string
@@ -161,7 +163,22 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 	schema := g.Schemas[r.Schema]
 	msgs := r.Messages
 	r.MaxOutput = prof.EffectiveMaxOutput(r.MaxOutput)
-	if out, meta, ok := g.reuse(ctx, r, RequestHash(prof, msgs, r.MaxOutput, r.Schema), schema); ok {
+	hash := RequestHash(prof, msgs, r.MaxOutput, r.Schema)
+	var out json.RawMessage
+	var meta Meta
+	var reused bool
+	if r.WithReuse != nil {
+		err := r.WithReuse(ctx, func(tx pgx.Tx) error {
+			out, meta, reused = g.reuse(ctx, tx, r, hash, schema)
+			return nil
+		})
+		if err != nil {
+			return nil, Meta{}, err
+		}
+	} else {
+		out, meta, reused = g.reuse(ctx, g.Pool, r, hash, schema)
+	}
+	if reused {
 		return out, meta, nil
 	}
 	transient, repairs := g.Policy.ModelCall.TransientRetries, g.Policy.ModelCall.FormatRepairs
@@ -262,13 +279,17 @@ func validate(raw Raw, schema *jsonschema.Schema) (json.RawMessage, error) {
 }
 
 // reuse returns an already-succeeded call for the same task step and request (River redelivery, worker restart).
-func (g *Gateway) reuse(ctx context.Context, r Request, hash string, schema *jsonschema.Schema) (json.RawMessage, Meta, bool) {
+type cachedQuery interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func (g *Gateway) reuse(ctx context.Context, q cachedQuery, r Request, hash string, schema *jsonschema.Schema) (json.RawMessage, Meta, bool) {
 	if r.Task == nil {
 		return nil, Meta{}, false
 	}
 	var raw Raw
 	var m Meta
-	err := g.Pool.QueryRow(ctx, `SELECT id, adapter, coalesce(observed_model,''), response FROM model_calls
+	err := q.QueryRow(ctx, `SELECT id, adapter, coalesce(observed_model,''), response FROM model_calls
 		WHERE task_id=$1 AND step_key=$2 AND request_hash=$3 AND status='SUCCEEDED' ORDER BY attempt DESC LIMIT 1`,
 		*r.Task, r.StepKey, hash).Scan(&m.CallID, &m.Adapter, &m.ObservedModel, &raw)
 	if err != nil {

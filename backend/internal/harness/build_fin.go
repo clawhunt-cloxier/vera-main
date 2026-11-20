@@ -30,9 +30,20 @@ func (b *builder) name(e uuid.UUID) string {
 }
 
 func (b *builder) source(r dataservice.StoredRecord) {
-	at := r.AvailableAt.Format("2006-01-02T15:04:05Z07:00")
+	at := r.AvailableAt.UTC().Format("2006-01-02T15:04:05Z07:00")
 	if cur := b.S.Sources[r.DatasetID]; at > cur {
 		b.S.Sources[r.DatasetID] = at
+	}
+	if r.ProviderID != "" {
+		if b.S.SourceProviders == nil {
+			b.S.SourceProviders = map[string]map[string]string{}
+		}
+		if b.S.SourceProviders[r.DatasetID] == nil {
+			b.S.SourceProviders[r.DatasetID] = map[string]string{}
+		}
+		if cur := b.S.SourceProviders[r.DatasetID][r.ProviderID]; at > cur {
+			b.S.SourceProviders[r.DatasetID][r.ProviderID] = at
+		}
 	}
 }
 
@@ -53,9 +64,16 @@ func (b *builder) fin(e uuid.UUID) finIndex {
 	ix := finIndex{byPeriod: map[string]map[string]dataservice.StoredRecord{}}
 	rs := b.B.Rows("fin.statement", e)
 	b.sources(rs)
+	docs := periodicDocuments(b.B.Rows("doc.announcement", e))
 	for _, r := range rs {
 		if str(r, "scope") != "consolidated" {
 			continue
+		}
+		if !b.B.Subject.Synthetic {
+			document := str(docs[str(r, "report_period")], "announcement_id")
+			if document == "" || document != str(r, "filing_id") {
+				continue
+			}
 		}
 		k := str(r, "report_period") + "|" + str(r, "report_type")
 		if ix.byPeriod[k] == nil {
@@ -124,7 +142,7 @@ var itemLabel = map[string]string{
 }
 
 func (b *builder) restated(r dataservice.StoredRecord, f *facts.Fact) {
-	if r.Version > 1 {
+	if num(r, "revision") > 0 {
 		f.Flag("restated")
 		b.S.Limit(fmt.Sprintf("%s %s 数据经会计更正，按更正后版本使用。", b.B.Entities[*r.EntityID].Name, f.Period))
 	}
@@ -139,7 +157,8 @@ func (b *builder) financials(e uuid.UUID, years int, tableSection string) bool {
 		return false
 	}
 	subj := b.name(e)
-	cur, prev := fys[len(fys)-1], fys[len(fys)-2]
+	cur := fys[len(fys)-1]
+	prev := priorYear(cur)
 	pl, ppl := periodLabel(cur), periodLabel(prev)
 	add := func(group, item, period string) (*facts.Fact, facts.Input, bool) {
 		in, r, ok := ix.get(period, item)
@@ -175,11 +194,17 @@ func (b *builder) financials(e uuid.UUID, years int, tableSection string) bool {
 		}
 	}
 	margin := func(period string) (facts.Calc, facts.Calc) {
-		rev, _, _ := ix.get(period, "IS.revenue")
-		cost, _, _ := ix.get(period, "IS.operating_cost")
-		np, _, _ := ix.get(period, "IS.net_profit_parent")
-		gm := facts.GrossMargin(rev, cost)
-		nm := facts.Ratio("F19.net_margin", np, rev, "营业收入不为正")
+		rev, _, hasRevenue := ix.get(period, "IS.revenue")
+		cost, _, hasCost := ix.get(period, "IS.operating_cost")
+		np, _, hasProfit := ix.get(period, "IS.net_profit_parent")
+		gm := missingRatio("F03.gross_margin", "缺少营业收入或营业成本")
+		nm := missingRatio("F19.net_margin", "缺少营业收入或归母净利润")
+		if hasRevenue && hasCost {
+			gm = facts.GrossMargin(rev, cost)
+		}
+		if hasRevenue && hasProfit {
+			nm = facts.Ratio("F19.net_margin", np, rev, "营业收入不为正")
+		}
 		return gm, nm
 	}
 	gm, nm := margin(cur)
@@ -196,8 +221,9 @@ func (b *builder) financials(e uuid.UUID, years int, tableSection string) bool {
 		}
 	}
 	if ta, _, ok := ix.get(cur, "BS.total_assets"); ok {
-		tl, _, _ := ix.get(cur, "BS.total_liabilities")
-		b.S.Computed("fin.annual", subj, "资产负债率", pl, facts.Ratio("F07.debt_ratio", tl, ta, "总资产不为正"), key("dr"))
+		if tl, _, present := ix.get(cur, "BS.total_liabilities"); present {
+			b.S.Computed("fin.annual", subj, "资产负债率", pl, facts.Ratio("F07.debt_ratio", tl, ta, "总资产不为正"), key("dr"))
+		}
 	}
 	// interim
 	if q := ix.latestInterim(); q != "" {
@@ -228,8 +254,9 @@ func (b *builder) financials(e uuid.UUID, years int, tableSection string) bool {
 		}
 	}
 	if gw, _, ok := ix.get(cur, "BS.goodwill"); ok {
-		eq, _, _ := ix.get(cur, "BS.equity_parent")
-		b.S.Computed("fin.quality", subj, "商誉 / 归母净资产", pl, facts.Ratio("F11.goodwill_to_equity", gw, eq, "归母净资产不为正"), key("gw"))
+		if eq, _, present := ix.get(cur, "BS.equity_parent"); present {
+			b.S.Computed("fin.quality", subj, "商誉 / 归母净资产", pl, facts.Ratio("F11.goodwill_to_equity", gw, eq, "归母净资产不为正"), key("gw"))
+		}
 	}
 	var debt []facts.Input
 	for _, item := range []string{"BS.short_term_borrowing", "BS.long_term_borrowing", "BS.bonds_payable", "BS.current_portion_noncurrent_liab"} {
@@ -237,13 +264,17 @@ func (b *builder) financials(e uuid.UUID, years int, tableSection string) bool {
 			debt = append(debt, in)
 		}
 	}
-	if len(debt) > 0 {
+	if len(debt) == 4 {
 		b.S.Computed("fin.quality", subj, "有息负债合计", pl, facts.Sum("F26.interest_bearing_debt", "CNY", debt), key("ibd"))
 	}
 	if tableSection != "" {
 		b.finTable(ix, fys, years, tableSection, subj)
 	}
 	return true
+}
+
+func missingRatio(id, reason string) facts.Calc {
+	return facts.Calc{FormulaID: id, FormulaVer: facts.FormulaVersion, Unit: "ratio", Applicability: facts.MissingInput, Reason: reason}
 }
 
 func (b *builder) finTable(ix finIndex, fys []string, years int, section, subj string) {

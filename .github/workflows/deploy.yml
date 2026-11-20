@@ -32,7 +32,8 @@ jobs:
   deploy:
     name: Build image and deploy
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Verify may need 30 min. Allow a build, first TuShare collection and a rollback.
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write

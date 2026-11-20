@@ -139,20 +139,30 @@ func adjustWindow(listed int, p *Params, options []int, notes *[]string) {
 
 // selectPeers picks up to 8 industry peers closest in total market value (rule-based, never model-chosen).
 func selectPeers(ctx context.Context, e *Engine, subject dataservice.EntityRow, members []uuid.UUID, asOf time.Time) ([]uuid.UUID, error) {
+	if len(members) == 0 {
+		return nil, nil
+	}
 	from := asOf.AddDate(0, 0, -14)
 	recs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{"mkt.valuation_daily"}, EntityIDs: members, From: &from, AsOf: asOf})
 	if err != nil {
 		return nil, err
 	}
+	latestDate := ""
+	for _, r := range recs {
+		if r.EntityID != nil && *r.EntityID == subject.ID && str(r, "trade_date") > latestDate {
+			latestDate = str(r, "trade_date")
+		}
+	}
 	latest := map[uuid.UUID]dataservice.StoredRecord{}
 	for _, r := range recs {
-		latest[*r.EntityID] = r
+		if mv, ok := dec(r, "total_mv"); ok && mv.IsPositive() && r.EntityID != nil && str(r, "trade_date") == latestDate {
+			latest[*r.EntityID] = r
+		}
 	}
-	me, ok := latest[subject.ID]
+	mv, ok := dec(latest[subject.ID], "total_mv")
 	if !ok {
 		return nil, nil
 	}
-	mv, _ := dec(me, "total_mv")
 	var peers []uuid.UUID
 	for id := range latest {
 		if id != subject.ID {
@@ -162,7 +172,10 @@ func selectPeers(ctx context.Context, e *Engine, subject dataservice.EntityRow, 
 	slices.SortFunc(peers, func(a, b uuid.UUID) int {
 		va, _ := dec(latest[a], "total_mv")
 		vb, _ := dec(latest[b], "total_mv")
-		return va.Sub(mv).Abs().Cmp(vb.Sub(mv).Abs())
+		if d := va.Sub(mv).Abs().Cmp(vb.Sub(mv).Abs()); d != 0 {
+			return d
+		}
+		return strings.Compare(a.String(), b.String())
 	})
 	if len(peers) > 8 {
 		peers = peers[:8]
@@ -170,15 +183,26 @@ func selectPeers(ctx context.Context, e *Engine, subject dataservice.EntityRow, 
 	return peers, nil
 }
 
-func industryOf(ctx context.Context, e *Engine, subject dataservice.EntityRow) (dataservice.EntityRow, error) {
+func industryOf(ctx context.Context, e *Engine, subject dataservice.EntityRow, asOf time.Time) (dataservice.EntityRow, error) {
 	code, _ := subject.Attrs["industry_code"].(string)
+	if !subject.Synthetic {
+		rs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{"ref.industry"}, EntityIDs: []uuid.UUID{subject.ID}, AsOf: asOf})
+		if err != nil {
+			return dataservice.EntityRow{}, err
+		}
+		r, ok := activeIndustry(rs, asOf)
+		if !ok {
+			return dataservice.EntityRow{}, errs.Unprocessable("INDUSTRY_UNAVAILABLE", "缺少截至研究时点有效的申万行业分类")
+		}
+		code = str(r, "level2_code")
+	}
 	return e.Store.EntityByCode(ctx, code)
 }
 
 var stockData = []string{"ref.security", "ref.industry", "fin.statement", "fin.segment", "doc.periodic_text", "doc.announcement", "news.item",
 	"mkt.daily_bar", "mkt.valuation_daily", "flow.margin", "flow.dragon_tiger", "flow.block_trade", "flow.connect_holding", "fund.holding",
 	"flow.order_size", "corp.holder", "corp.insider_trade", "corp.pledge", "corp.unlock", "corp.dividend"}
-var peerData = []string{"ref.security", "ref.industry", "fin.statement", "mkt.valuation_daily"}
+var peerData = []string{"ref.security", "ref.industry", "fin.statement", "doc.announcement", "mkt.valuation_daily"}
 var memberData = []string{"ref.security", "ref.industry", "fin.statement", "mkt.daily_bar", "mkt.valuation_daily", "flow.margin",
 	"flow.dragon_tiger", "flow.block_trade", "fund.holding", "flow.order_size", "corp.insider_trade"}
 var globalData = []string{"ref.trading_calendar", "mkt.index_bar", "flow.connect_turnover"}
@@ -309,7 +333,7 @@ func stockAnalysis() *Skill {
 			return a, notes, nil
 		},
 		Collect: func(ctx context.Context, e *Engine, s dataservice.EntityRow, p Params, asOf time.Time) (*Bundle, error) {
-			ind, err := industryOf(ctx, e, s)
+			ind, err := industryOf(ctx, e, s, asOf)
 			if err != nil {
 				return nil, err
 			}
@@ -529,7 +553,7 @@ func capitalFlow() *Skill {
 				b.groupHoldings(label, "market", b.B.Members, "flow.hold")
 				b.groupVendor(label, "market", b.B.Members, p.Window, "flow.vendor")
 				if len(b.B.Global("flow.connect_turnover")) == 0 {
-					b.S.Limit("演示数据不含陆股通每日成交总额；2024 年 8 月起个股陆股通持股改为按季度披露。")
+					b.S.Limit("缺少陆股通每日成交总额。")
 				}
 			}
 		},
@@ -620,7 +644,7 @@ func deepResearch() *Skill {
 			if p.Mode != "company" {
 				code := s.Code
 				if s.Kind == "stock" {
-					ind, err := industryOf(ctx, e, s)
+					ind, err := industryOf(ctx, e, s, asOf)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -690,7 +714,7 @@ func deepResearch() *Skill {
 			var members, peers []uuid.UUID
 			indCode := s.Code
 			if s.Kind == "stock" {
-				ind, err := industryOf(ctx, e, s)
+				ind, err := industryOf(ctx, e, s, asOf)
 				if err != nil {
 					return nil, err
 				}
@@ -713,7 +737,7 @@ func deepResearch() *Skill {
 					groups[pe] = union(groups[pe], peerData)
 				}
 				for _, m := range members {
-					groups[m] = union(groups[m], []string{"fin.statement", "ref.industry"})
+					groups[m] = union(groups[m], []string{"fin.statement", "doc.announcement", "ref.industry"})
 				}
 				groups[s.ID] = union(groups[s.ID], stockData)
 			}

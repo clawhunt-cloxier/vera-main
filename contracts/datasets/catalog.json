@@ -566,6 +566,13 @@
           "unit": "ratio",
           "required": false,
           "description": "披露的分部毛利率"
+        },
+        {
+          "name": "filing_id",
+          "type": "string",
+          "unit": "none",
+          "required": false,
+          "description": "对应年度公告的 announcement_id。真实分部研究只接受与最新已披露年报版本一致的记录"
         }
       ]
     },

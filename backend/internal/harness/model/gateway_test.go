@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
@@ -92,6 +93,11 @@ func TestGatewayOpenAIRetryRepairReuseBudget(t *testing.T) {
 	after := hits.Load()
 	if _, m, err := g.Complete(context.Background(), req2); err != nil || !m.Reused || hits.Load() != after {
 		t.Fatalf("reuse failed: %+v %v hits %d→%d", m, err, before, hits.Load())
+	}
+	denied := errors.New("cached research use revoked")
+	req2.WithReuse = func(context.Context, func(pgx.Tx) error) error { return denied }
+	if _, _, err := g.Complete(t.Context(), req2); !errors.Is(err, denied) || hits.Load() != after {
+		t.Fatalf("cache lookup bypassed current rights: %v", err)
 	}
 	// Budget: max model calls exhausted.
 	req3 := req

@@ -9,3 +9,11 @@
 - 来源：对象存储内容寻址归档、许可登记、任务绑定清单；重试复用原清单。模型和展示分别重新授权；取消、过期、归档损坏、许可撤销阻止继续使用。
 
 验收样例：真实成交观察生成 limited；跨 workspace 读取拒绝；许可撤销拒绝；重复确认/执行只交付一次；对象损坏、缺必需数据和无效模型输出不交付。自动化入口：`go test ./internal/app -run TestObservationBriefDelivery`；真实环境显式 `VERA_LIVE_BRIEF=1` 运行 `TestLiveObservationBrief`，需真实 SDK、持久 S3、许可与模型配置，消耗真实额度，结果不入 Git。
+
+## 双来源日成交简报
+
+`stock_analysis / 1.1.0-demo.4` 在双源部署下用于已登记的单只 A 股。计划使用 TuShare 发布时钟确定数据截止时间。用户确认后采集 Choice 成交数据，按同一证券身份绑定两份 Choice 原始归档和一条已发布的 TuShare 收盘记录。清单记录收盘记录 ID 与内容哈希，重试按同一清单读取。
+
+S2 必须引用 Choice 成交数据，S3 必须引用 TuShare 的交易日期和不复权收盘价，两段均通过事实核验后交付 limited。报告以各自交易日期和系统取得或可用时间区分两家来源。若创建计划时无法取得当前证券的收盘数据，可提供明确标识的 Choice 日成交简报。已确认的双来源任务必须按原版本执行。
+
+自动化评测 `TestObservationBriefDelivery/mixed_closing_snapshot` 使用模拟供应商数据和模拟模型。样例包括同名数据集的不同厂商、其他证券有数据但目标证券无覆盖、计划与交付间出现新版本、冻结后重试、取消、任一来源停用后读取和历史版本隔离。真实账号的报告另行验收。见[双来源评测样例](../../tests/fixtures/mixed-observation-cases.json)。

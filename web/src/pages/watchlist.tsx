@@ -3,16 +3,19 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
   api,
+  combinedResearch,
   get,
   newKey,
   post,
   type PlanResult,
   type QuoteRequirement,
+  type ResearchProtocol,
   type WatchItem,
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
 import { QuoteRequirementField } from '../components/QuoteRequirementField';
+import { ResearchSourceField } from '../components/ResearchSourceField';
 import { Dialog, Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
 
 const ruleLabel: Record<string, string> = {
@@ -25,7 +28,10 @@ const ruleLabel: Record<string, string> = {
 
 export function Watchlist() {
   const me = useMe();
-  const realtime = me.data?.research_protocol === 'v0.4';
+  const combined = combinedResearch(me.data);
+  const [source, setSource] = useState<ResearchProtocol>('legacy');
+  const protocol = combined ? source : (me.data?.research_protocol ?? 'legacy');
+  const realtime = protocol === 'v0.4';
   const items = useQuery({
     queryKey: ['watchlist'],
     queryFn: () => get<{ items: WatchItem[] }>('/api/v1/watchlist'),
@@ -56,7 +62,7 @@ export function Watchlist() {
           params: {},
           ...(realtime ? { quote_requirement: quoteRequirement } : {}),
         },
-        { idem: newKey(), protocol: realtime ? 'v0.4' : undefined }
+        { idem: newKey(), protocol }
       );
       if (r.kind === 'plan' && r.plan) {
         nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
@@ -131,7 +137,8 @@ export function Watchlist() {
                       className="ghost small"
                       disabled={!me.data || analyze.isPending}
                       onClick={() => {
-                        if (realtime) {
+                        if (combined || realtime) {
+                          setSource('legacy');
                           setQuoteRequirement('latest_available');
                           setResearchItem(it);
                           analyze.reset();
@@ -160,11 +167,23 @@ export function Watchlist() {
               analyze.mutate(researchItem.entity.id);
             }}
           >
-            <QuoteRequirementField
-              value={quoteRequirement}
-              onChange={setQuoteRequirement}
-              allowRealtime={allowRealtime}
-            />
+            {combined && (
+              <ResearchSourceField
+                value={source}
+                onChange={(value) => {
+                  setSource(value);
+                  analyze.reset();
+                }}
+                snapshot={me.data?.research_protocol === 'v0.4'}
+              />
+            )}
+            {realtime && (
+              <QuoteRequirementField
+                value={quoteRequirement}
+                onChange={setQuoteRequirement}
+                allowRealtime={allowRealtime}
+              />
+            )}
             <button type="submit" disabled={!quoteRequirement || analyze.isPending}>
               {analyze.isPending ? '准备中…' : '生成研究计划'}
             </button>

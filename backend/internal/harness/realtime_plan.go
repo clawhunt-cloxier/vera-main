@@ -27,6 +27,9 @@ func (e *Engine) RealtimeEnabled() bool {
 // SkillVersion resolves persisted versions without changing the legacy
 // observation entry point or silently upgrading a confirmed task.
 func (e *Engine) SkillVersion(id, version string) *Skill {
+	if id == "stock_analysis" && version == MixedObservationVersion && e.Brief != nil && e.hasCloseSkills() {
+		return MixedObservationSkill()
+	}
 	if id == "stock_analysis" && version == RealtimeBriefVersion && e.RealtimeEnabled() {
 		return RealtimeBriefSkill()
 	}
@@ -41,9 +44,9 @@ func (e *Engine) SkillVersion(id, version string) *Skill {
 
 func (e *Engine) supportsSnapshotMode(mode, version string) bool {
 	if mode == "fixed_legacy" {
-		return version != RealtimeBriefVersion && version != emquant.ObservationBriefVersion
+		return version != RealtimeBriefVersion && version != emquant.ObservationBriefVersion && version != MixedObservationVersion
 	}
-	return mode == "collect_latest" && ((version == emquant.ObservationBriefVersion && e.Brief != nil) || (version == RealtimeBriefVersion && e.RealtimeEnabled()))
+	return mode == "collect_latest" && ((version == emquant.ObservationBriefVersion && e.Brief != nil) || (version == RealtimeBriefVersion && e.RealtimeEnabled()) || (version == MixedObservationVersion && e.Brief != nil && e.hasCloseSkills()))
 }
 
 func requireBriefSource(ctx context.Context, tx pgx.Tx, source BriefQuoteSource, code, requirement string) error {
