@@ -616,8 +616,14 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
             });
             requests++;
             body = { kind: 'plan', plan: currentPlan() };
-          } else if (path === 'research-plans/mock-plan') body = currentPlan();
-          else if (path === 'research-tasks' && req.method() === 'POST') {
+          } else if (path === 'research-plans/mock-plan') {
+            assert.equal(responseType, media);
+            body = {
+              ...currentPlan(),
+              snapshot_mode: 'fixed_legacy',
+              quote_requirement: 'latest_available',
+            };
+          } else if (path === 'research-tasks' && req.method() === 'POST') {
             assert.equal(accept, json);
             assert.equal(req.headers()['content-type'], json);
             assert.deepEqual(req.postDataJSON().disabled_sections, []);
@@ -672,6 +678,10 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           await page.getByRole('option', { name: new RegExp(entity.name) }).click();
           await page.getByRole('button', { name: '发起研究' }).click();
           await page.getByText('1 个受限', { exact: true }).waitFor();
+          if (entry.id === 'stock_analysis') {
+            await page.reload();
+            await page.getByText('1 个受限', { exact: true }).waitFor();
+          }
           assert.equal(await page.getByRole('checkbox', { name: /财务数据/ }).isEnabled(), true);
           assert.equal(await page.getByRole('checkbox', { name: /其他披露/ }).isDisabled(), true);
           await assertNeutralAndFits();
