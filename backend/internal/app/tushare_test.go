@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/httpapi"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/config"
@@ -166,6 +167,13 @@ func TestTuShareThreeReportDelivery(t *testing.T) {
 		lastTask = task.ID
 		var report httpapi.Report
 		decode(request("GET", lastReport, "", 200), &report)
+		expectedVersion := harness.CloseDisclosureVersion
+		if skill == "deep_research" {
+			expectedVersion = harness.CloseCompanyVersion
+		}
+		if plan.Plan.SkillVersion != expectedVersion || report.SkillVersion != expectedVersion {
+			t.Fatalf("%s plan=%s report=%s want %s", skill, plan.Plan.SkillVersion, report.SkillVersion, expectedVersion)
+		}
 		want := "limited"
 		if skill == "stock_analysis" {
 			want = "full"
@@ -196,6 +204,35 @@ func TestTuShareThreeReportDelivery(t *testing.T) {
 		}
 		charts := 0
 		for _, section := range report.Sections {
+			// A real reader can resolve the newly supported disclosures directly
+			// from their section tables, even if the writer picked other facts.
+			var requiredDatasets []string
+			switch {
+			case skill == "capital_flow" && section.ID == "S4", skill == "stock_analysis" && section.ID == "S7":
+				requiredDatasets = []string{"flow.dragon_tiger_day", "flow.dragon_tiger"}
+			case skill == "capital_flow" && section.ID == "S5":
+				requiredDatasets = []string{"fund.disclosed_position"}
+			case skill == "stock_analysis" && section.ID == "S8":
+				requiredDatasets = []string{"corp.dividend"}
+			}
+			if len(requiredDatasets) > 0 {
+				seen := map[string]bool{}
+				for _, table := range section.Tables {
+					if len(table.Rows) == 0 || len(table.Evidence) == 0 {
+						continue
+					}
+					var row httpapi.Evidence
+					decode(request("GET", "/api/v1/evidence/"+table.Evidence[0].String(), "", 200), &row)
+					if row.Provider == "TuShare Pro" && row.ContentHash != "" && row.Locator != nil && *row.Locator != "" {
+						seen[row.DatasetID] = true
+					}
+				}
+				for _, dataset := range requiredDatasets {
+					if !seen[dataset] {
+						t.Fatalf("%s %s has no reachable table evidence for %s", skill, section.ID, dataset)
+					}
+				}
+			}
 			for _, chart := range section.Charts {
 				series := request("GET", lastReport+"/series/"+chart.SeriesID, "", 200)
 				if !bytes.Contains(series, []byte(`"points"`)) {

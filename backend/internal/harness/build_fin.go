@@ -14,9 +14,12 @@ import (
 
 // builder wraps the sheet and bundle with helpers shared by all skills.
 type builder struct {
-	S     *facts.Sheet
-	B     *Bundle
-	basis map[string]string // provider basis by dataset
+	S                      *facts.Sheet
+	B                      *Bundle
+	basis                  map[string]string // provider basis by dataset
+	disclosedSeats         bool              // read per-day, revision-bound TuShare seat disclosures
+	paidDividendEvents     bool              // read paid dividend events in the stock analysis
+	disclosedFundPositions bool              // read individual disclosed fund positions in capital flow
 }
 
 func input(r dataservice.StoredRecord, f, unit string) (facts.Input, bool) {

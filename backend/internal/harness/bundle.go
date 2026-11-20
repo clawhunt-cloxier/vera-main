@@ -153,6 +153,7 @@ func (l Loader) Members(ctx context.Context, industryCode string, asOf time.Time
 func (l Loader) Load(ctx context.Context, asOf time.Time, groups map[uuid.UUID][]string, global []string) ([]dataservice.StoredRecord, error) {
 	byDatasets := map[string][]uuid.UUID{}
 	for e, dss := range groups {
+		dss = slices.Clone(dss) // shared skill dataset definitions are immutable
 		slices.Sort(dss)
 		k := ""
 		for _, d := range dss {

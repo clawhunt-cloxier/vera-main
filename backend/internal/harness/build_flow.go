@@ -93,6 +93,11 @@ func (b *builder) margin(e uuid.UUID, n int, group, section string) bool {
 
 // seats builds dragon-tiger and block-trade facts over the window.
 func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
+	if b.disclosedSeats {
+		disclosures := b.B.seatDisclosures(e, n)
+		b.addDisclosedSeats(disclosures, e, n, group, section)
+		return b.blockTrades(e, n, group) || len(disclosures.days) > 0
+	}
 	days := b.B.Window(n)
 	wl := windowLabel(n, days)
 	subj := b.name(e)
@@ -101,7 +106,14 @@ func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
 	var dtDays []string
 	var instBuy, instSell []facts.Input
 	t := facts.Table{Title: subj + " 龙虎榜上榜记录", Columns: []string{"交易日", "上榜原因", "席位", "席位类型", "买入额（万元）", "卖出额（万元）"}}
-	dr := b.B.Rows("flow.dragon_tiger", e)
+	// These versions predate TuShare's per-day seat editions. Only the new
+	// reader can reconcile top_inst against its corresponding top_list.
+	var dr []dataservice.StoredRecord
+	for _, r := range b.B.Rows("flow.dragon_tiger", e) {
+		if r.ProviderID != "tushare" {
+			dr = append(dr, r)
+		}
+	}
 	b.sources(dr)
 	for _, r := range dr {
 		if !inWindow(r, "trade_date", days) {
@@ -136,8 +148,19 @@ func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
 		}
 		b.S.Tables[section] = append(b.S.Tables[section], t)
 	}
+	return b.blockTrades(e, n, group) || found
+}
+
+func (b *builder) blockTrades(e uuid.UUID, n int, group string) bool {
+	days := b.B.Window(n)
+	wl := windowLabel(n, days)
+	subj := b.name(e)
+	k := func(s string) string { return b.B.Entities[e].Code + "|seats|" + s }
+	found := false
 	bt := b.B.Rows("flow.block_trade", e)
-	b.sources(bt)
+	if !b.disclosedSeats {
+		b.sources(bt)
+	}
 	bars := map[string]dataservice.StoredRecord{}
 	for _, r := range b.B.Rows("mkt.daily_bar", e) {
 		bars[str(r, "trade_date")] = r
@@ -145,6 +168,15 @@ func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
 	var amts []facts.Input
 	var lastBT *dataservice.StoredRecord
 	for i, r := range bt {
+		if b.disclosedSeats {
+			if _, ok := slices.BinarySearch(days, str(r, "trade_date")); !ok {
+				continue
+			}
+			if _, ok := dec(r, "amount"); !ok {
+				continue
+			}
+			b.source(r)
+		}
 		if !inWindow(r, "trade_date", days) {
 			continue
 		}
@@ -183,7 +215,7 @@ func idsOf(in []facts.Input) []uuid.UUID {
 func (b *builder) holdings(e uuid.UUID, group string) bool {
 	subj := b.name(e)
 	k := func(s string) string { return b.B.Entities[e].Code + "|hold|" + s }
-	found := false
+	found := b.disclosedFundPositions && b.fundPositionFacts(e, group)
 	if rs := b.B.Rows("flow.connect_holding", e); len(rs) >= 2 {
 		b.sources(rs)
 		found = true
@@ -314,8 +346,17 @@ func (b *builder) corp(e uuid.UUID, group string) bool {
 		sh, _ := input(r, "shares", "shares")
 		b.S.Value(group, subj, "限售股解禁股数（"+str(r, "holder_type")+"）", d, facts.KindReported, "公司公告", "shares", sh.Value, r.ID).Flag("scheduled")
 	}
-	if ds := b.B.Rows("corp.dividend", e); len(ds) > 0 {
-		r := ds[len(ds)-1]
+	if b.paidDividendEvents && b.paidDividends(e, group) {
+		found = true
+	}
+	// Older providers can supply an explicit fiscal-year aggregate. An
+	// individual implemented distribution belongs only in the event table.
+	ds := b.B.Rows("corp.dividend", e)
+	for i := len(ds) - 1; i >= 0; i-- {
+		r := ds[i]
+		if str(r, "report_period") != "" {
+			continue
+		}
 		b.source(r)
 		found = true
 		if c, ok := input(r, "cash_per_10_shares", "CNY"); ok {
@@ -324,6 +365,7 @@ func (b *builder) corp(e uuid.UUID, group string) bool {
 		if t, ok := input(r, "total_cash", "CNY"); ok {
 			b.S.Value(group, subj, "现金分红总额", str(r, "fiscal_year")+" 年度", facts.KindReported, "", "CNY", t.Value, r.ID)
 		}
+		break
 	}
 	return found
 }

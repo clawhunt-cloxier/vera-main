@@ -39,7 +39,7 @@ func collectMarket(ctx context.Context, src Source, code string, end time.Time) 
 		local = local.AddDate(0, 0, -1)
 	}
 	c := marketCollector{Source: src, ctx: ctx, code: code, from: local.AddDate(-5, 0, -7).Format(marketDay), until: local.Format(marketDay)}
-	for _, step := range []func() error{c.calendar, c.stockHistory, c.directory, c.flows} {
+	for _, step := range []func() error{c.calendar, c.stockHistory, c.directory, c.flows, c.dividends, c.dragonTiger, c.fundPositions} {
 		if err := step(); err != nil {
 			return Batch{}, err
 		}

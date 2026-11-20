@@ -1,0 +1,122 @@
+{
+  "skill_id": "capital_flow",
+  "skill_version": "1.0.3",
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "two_rankings_one_listing",
+      "days": ["2026-10-26","2026-10-27"],
+      "records": [
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-26","edition_id":"current","listed":false,"seats_complete":true,"reason_count":0,"reason_text":""}},
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-27","edition_id":"current","listed":true,"seats_complete":true,"reason_count":1,"reason_text":"单日价格偏离"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-27","edition_id":"current","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"buy","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-27","edition_id":"current","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"sell","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.block_trade","payload":{"trade_date":"2026-10-27","amount":"36000","price":"10"}}
+      ],
+      "availability": "available",
+      "listed": 1,
+      "listing_rows": 1,
+      "seat_rows": 2,
+      "amounts": ["270000","190000"]
+    },
+    {
+      "id": "listing_without_seat_permission",
+      "days": ["2026-10-26","2026-10-27"],
+      "records": [
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-27","edition_id":"current","listed":true,"seats_complete":false,"reason_count":1,"reason_text":"单日价格偏离"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-27","edition_id":"obsolete","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"buy","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}}
+      ],
+      "availability": "limited",
+      "listed": 1,
+      "partial": true,
+      "listing_rows": 1
+    },
+    {
+      "id": "old_seat_after_correction",
+      "days": ["2026-10-26"],
+      "records": [
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-26","edition_id":"current","listed":false,"seats_complete":true,"reason_count":0,"reason_text":""}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-26","edition_id":"obsolete","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"buy","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.block_trade","payload":{"trade_date":"2026-10-26","amount":"36000","price":"10"}}
+      ],
+      "availability": "available",
+      "listed": 0
+    },
+    {
+      "id": "omitted_amount_preserved",
+      "days": ["2026-10-26"],
+      "records": [
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-26","edition_id":"current","listed":true,"seats_complete":true,"reason_count":1,"reason_text":"单日价格偏离"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-26","edition_id":"current","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"buy","rank":1,"seat_name":"机构专用","seat_type":"institution","sell_amount":"0"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-26","edition_id":"current","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"sell","rank":1,"seat_name":"机构专用","seat_type":"institution","sell_amount":"190000"}}
+      ],
+      "availability": "limited",
+      "listed": 1,
+      "listing_rows": 1,
+      "seat_rows": 2,
+      "amounts": ["190000"]
+    },
+    {
+      "id": "several_reasons_and_overlapping_periods",
+      "days": ["2026-10-26","2026-10-27"],
+      "records": [
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-26","edition_id":"current","listed":true,"seats_complete":true,"reason_count":2,"reason_text":"单日价格偏离\n连续三个交易日"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-26","edition_id":"current","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"buy","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-26","edition_id":"current","reason_code":"b","reason_text":"连续三个交易日","period_scope":"multi_day","side":"buy","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-27","edition_id":"current","listed":true,"seats_complete":true,"reason_count":1,"reason_text":"连续三个交易日"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-27","edition_id":"current","reason_code":"a","reason_text":"连续三个交易日","period_scope":"multi_day","side":"sell","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.block_trade","payload":{"trade_date":"2026-10-27","amount":"36000","price":"10"}}
+      ],
+      "availability": "available",
+      "listed": 2,
+      "listing_rows": 2,
+      "seat_rows": 3
+    },
+    {
+      "id": "out_of_window_disclosures_and_blocks",
+      "days": ["2026-10-27","2026-10-29"],
+      "records": [
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-26","edition_id":"current","listed":true,"seats_complete":true,"reason_count":1,"reason_text":"单日价格偏离"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-26","edition_id":"current","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"buy","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.block_trade","payload":{"trade_date":"2026-10-26","amount":"36000","price":"10"}},
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-28","edition_id":"current","listed":true,"seats_complete":true,"reason_count":1,"reason_text":"单日价格偏离"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-28","edition_id":"current","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"buy","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.block_trade","payload":{"trade_date":"2026-10-28","amount":"36000","price":"10"}}
+      ],
+      "availability": "unavailable"
+    },
+    {
+      "id": "partial_checked_negative",
+      "days": ["2026-10-26","2026-10-27"],
+      "records": [
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-27","edition_id":"current","listed":false,"seats_complete":true,"reason_count":0,"reason_text":""}}
+      ],
+      "availability": "limited",
+      "listed": 0,
+      "partial": true
+    },
+    {
+      "id": "only_block_trades",
+      "days": ["2026-10-26","2026-10-27"],
+      "records": [
+        {"dataset":"flow.block_trade","payload":{"trade_date":"2026-10-27","amount":"36000","price":"10"}}
+      ],
+      "availability": "limited"
+    },
+    {
+      "id": "stale_and_current_edition",
+      "days": ["2026-10-27"],
+      "records": [
+        {"dataset":"flow.dragon_tiger_day","payload":{"trade_date":"2026-10-27","edition_id":"current","listed":true,"seats_complete":true,"reason_count":1,"reason_text":"单日价格偏离"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-27","edition_id":"obsolete","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"sell","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"9"}},
+        {"dataset":"flow.dragon_tiger","payload":{"trade_date":"2026-10-27","edition_id":"current","reason_code":"a","reason_text":"单日价格偏离","period_scope":"single_day","side":"sell","rank":1,"seat_name":"机构专用","seat_type":"institution","buy_amount":"270000","sell_amount":"190000"}},
+        {"dataset":"flow.block_trade","payload":{"trade_date":"2026-10-27","amount":"36000","price":"10"}}
+      ],
+      "availability": "available",
+      "listed": 1,
+      "listing_rows": 1,
+      "seat_rows": 1,
+      "amounts": ["190000"]
+    }
+  ]
+}

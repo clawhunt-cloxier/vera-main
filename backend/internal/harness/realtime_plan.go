@@ -36,6 +36,11 @@ func (e *Engine) SkillVersion(id, version string) *Skill {
 	if sk := e.Skills[id]; sk != nil && sk.Version == version {
 		return sk
 	}
+	if sk := e.Skills[id]; sk != nil && sk.Version == CloseDisclosureVersion {
+		if (id == "capital_flow" && version == CloseResearchVersion) || (id == "stock_analysis" && version == CloseCompanyVersion) {
+			return tuShareSkills(false)[id]
+		}
+	}
 	if id == "stock_analysis" && version == emquant.ObservationBriefVersion && e.Brief != nil {
 		return ObservationBriefSkill()
 	}

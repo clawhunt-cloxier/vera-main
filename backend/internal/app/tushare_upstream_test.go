@@ -82,11 +82,37 @@ func (s *tsTestUpstream) marketRows(codes []string, end time.Time) {
 		s.add("margin_secs", tsTestRow{"ts_code": tsTestSubject, "trade_date": day, "exchange": "SSE"})
 		s.add("margin_detail", tsTestRow{"ts_code": tsTestSubject, "trade_date": day, "rzye": 5000000 + n*53, "rzmre": 20000 + n, "rzche": 19500 + n%25, "rqyl": 4500, "rqye": 60450})
 		s.add("moneyflow", tsTestRow{"ts_code": tsTestSubject, "trade_date": day, "buy_sm_amount": 12.1, "sell_sm_amount": 15.22, "buy_md_amount": 55.6, "sell_md_amount": 40.29, "buy_lg_amount": 125.5, "sell_lg_amount": 122.7, "buy_elg_amount": 278, "sell_elg_amount": 260.9})
+		const reason = "日涨幅偏离值达到7%的证券"
+		s.add("top_list", tsTestRow{"ts_code": codes[1], "trade_date": day, "reason": reason})
+		if n%6 == 0 {
+			s.add("top_list", tsTestRow{"ts_code": tsTestSubject, "trade_date": day, "reason": reason})
+			for _, side := range []string{"0", "1"} {
+				for rank := range 5 {
+					seat := "机构专用"
+					if rank != 0 {
+						seat = fmt.Sprintf("合成交易营业部%d", rank)
+					}
+					s.add("top_inst", tsTestRow{"ts_code": tsTestSubject, "trade_date": day, "reason": reason, "exalter": seat, "side": side, "buy": 30000 - rank*4000, "sell": 27000 - rank*5000})
+				}
+			}
+		}
 		if n%12 == 0 {
 			s.add("block_trade", tsTestRow{"ts_code": tsTestSubject, "trade_date": day, "price": 20.5, "vol": 5, "amount": 102.5, "buyer": "合成买方营业部", "seller": "合成卖方营业部"})
 		}
 	}
 	s.rows["suspend_d"] = []tsTestRow{}
+	for _, period := range []string{"0331", "0630", "0930", "1231"} {
+		for _, y := range []int{end.Year() - 1, end.Year()} {
+			q, _ := time.Parse("20060102", fmt.Sprintf("%d%s", y, period))
+			pub := q.AddDate(0, 0, 22)
+			if pub.After(end) {
+				continue
+			}
+			s.add("fund_portfolio", tsTestRow{"ts_code": "999001.OF", "end_date": q.Format("20060102"), "symbol": tsTestSubject, "ann_date": pub.Format("20060102"), "amount": 12345})
+		}
+	}
+	y := end.Year() - 2
+	s.add("dividend", tsTestRow{"ts_code": tsTestSubject, "end_date": fmt.Sprintf("%d1231", y), "imp_ann_date": fmt.Sprintf("%d0510", y+1), "record_date": fmt.Sprintf("%d0518", y+1), "pay_date": fmt.Sprintf("%d0520", y+1), "div_proc": "实施", "base_share": 12345.67, "cash_div_tax": 1.23})
 	when := end.AddDate(0, 0, -3).Format("2006-01-02 15:04:05")
 	s.add("major_news", tsTestRow{"pub_time": when, "title": tsTestName(0) + "披露生产经营进展", "src": "合成媒体", "content": "公司披露了报告期内生产线的运行情况。"})
 }

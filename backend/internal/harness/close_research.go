@@ -18,9 +18,10 @@ import (
 // close/disclosure data. Real-time and fixture plans retain their own versions.
 const CloseResearchVersion = "1.0.1"
 const CloseCompanyVersion = "1.0.2"
+const CloseDisclosureVersion = "1.0.3" // stock_analysis and capital_flow
 
 func IsCloseResearchVersion(version string) bool {
-	return version == CloseResearchVersion || version == CloseCompanyVersion
+	return version == CloseResearchVersion || version == CloseCompanyVersion || version == CloseDisclosureVersion
 }
 
 func (e *Engine) realResearchDisabled() bool {
@@ -41,11 +42,49 @@ func (e *Engine) withCloseRights(ctx context.Context, fn func() error) error {
 }
 
 func TuShareSkills() map[string]*Skill {
+	return tuShareSkills(true)
+}
+
+func tuShareSkills(disclosures bool) map[string]*Skill {
 	registry := Skills()
 	for id, sk := range registry {
 		sk.Version = CloseResearchVersion
 		if id == "stock_analysis" || id == "deep_research" {
 			sk.Version = CloseCompanyVersion
+		}
+		useDisclosures := disclosures && (id == "stock_analysis" || id == "capital_flow")
+		if useDisclosures {
+			sk.Version = CloseDisclosureVersion
+			collect := sk.Collect
+			sk.Collect = func(ctx context.Context, e *Engine, s dataservice.EntityRow, p Params, at time.Time) (*Bundle, error) {
+				b, err := collect(ctx, e, s, p, at)
+				if err != nil {
+					return nil, err
+				}
+				extra := []string{seatDayDataset}
+				if id == "stock_analysis" {
+					extra = append(extra, "corp.dividend_implementation")
+				} else {
+					extra = append(extra, "fund.disclosed_position")
+				}
+				rs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: extra, EntityIDs: []uuid.UUID{s.ID}, AsOf: at})
+				if err != nil {
+					return nil, err
+				}
+				for _, r := range rs {
+					k := key(r.DatasetID, s.ID)
+					b.byKey[k] = append(b.byKey[k], r)
+					b.IDs = append(b.IDs, r.ID)
+				}
+				return b, nil
+			}
+			compute := sk.Compute
+			sk.Compute = func(b *builder, p Params) {
+				b.disclosedSeats = true
+				b.paidDividendEvents = id == "stock_analysis"
+				b.disclosedFundPositions = id == "capital_flow"
+				compute(b, p)
+			}
 		}
 		sk.Subjects = []string{"stock"}
 		validate := sk.Validate
@@ -65,7 +104,7 @@ func TuShareSkills() map[string]*Skill {
 			if err != nil {
 				return nil, nil, err
 			}
-			err = checkCloseCoverage(ctx, e, id, s, *p, asOf, av)
+			err = checkCloseCoverage(ctx, e, id, s, *p, asOf, av, useDisclosures)
 			return av, append(notes, "行情使用截至研究时点已入库的收盘数据，财报及公告使用同一时点已披露且已入库的版本。"), err
 		}
 	}
@@ -74,8 +113,11 @@ func TuShareSkills() map[string]*Skill {
 	return registry
 }
 
-func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject dataservice.EntityRow, p Params, at time.Time, av map[string]Availability) error {
+func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject dataservice.EntityRow, p Params, at time.Time, av map[string]Availability, disclosures bool) error {
 	ds := []string{"ref.industry", "fin.statement", "doc.periodic_text", "news.item", "doc.announcement", "flow.margin", "mkt.daily_bar", "mkt.valuation_daily"}
+	if disclosures {
+		ds = append(ds, seatDayDataset, "flow.dragon_tiger", "flow.block_trade", "fund.disclosed_position")
+	}
 	if id == "deep_research" {
 		ds = append(ds, "fin.segment")
 	}
@@ -110,7 +152,16 @@ func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject datas
 	if !hasIndustry && id != "capital_flow" {
 		av["S2"] = unavailable("缺少截至研究时点有效的申万行业分类")
 	}
+	if disclosures && id == "stock_analysis" && av["S7"].State == "unavailable" && len(b.seatDisclosures(subject.ID, p.Window).days) > 0 {
+		av["S7"] = limited("资金面数据仅覆盖窗口内已查询的龙虎榜披露")
+	}
 	if id == "capital_flow" {
+		if disclosures {
+			av["S4"] = b.seatDisclosures(subject.ID, p.Window).availability()
+			if len(fundPositionSample(b, subject.ID)) > 0 && av["S5"].State == "unavailable" {
+				av["S5"] = limited(fundPositionLimit)
+			}
+		}
 		days := b.Window(p.Window)
 		count := 0
 		for _, r := range b.Rows("flow.margin", subject.ID) {
