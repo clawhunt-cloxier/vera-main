@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/check"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 )
@@ -23,6 +24,30 @@ func clip(s string, n int) string {
 var sectionNames = map[string]string{"business_overview": "主营业务", "mdna": "经营情况讨论与分析", "risk_factors": "风险因素",
 	"core_competence": "核心竞争力", "outlook_plan": "未来发展规划", "other": "其他"}
 
+// New annual announcements can supersede an archived PDF, including when
+// parsing the replacement failed. Select from disclosure metadata first.
+func annualDocuments(rows []dataservice.StoredRecord) map[string]dataservice.StoredRecord {
+	byPeriod := map[string]dataservice.StoredRecord{}
+	for _, r := range rows {
+		if str(r, "category") != "periodic_report" || r.Period == nil || r.PublishedAt == nil {
+			continue
+		}
+		p := r.Period.Format("2006-01-02")
+		if !strings.HasSuffix(p, "-12-31") {
+			continue
+		}
+		old, ok := byPeriod[p]
+		if !ok || r.PublishedAt.After(*old.PublishedAt) {
+			byPeriod[p] = r
+		} else if r.PublishedAt.Equal(*old.PublishedAt) && str(old, "announcement_id") != str(r, "announcement_id") {
+			// Multiple different versions with indistinguishable disclosure times.
+			old.Payload = nil
+			byPeriod[p] = old
+		}
+	}
+	return byPeriod
+}
+
 // periodicText adds paragraphs of the latest annual report (and older outlook paragraphs when history > 1).
 // Paragraphs that look like instructions are flagged suspicious and never offered to models.
 func (b *builder) periodicText(e uuid.UUID, sections []string, maxPer, clipLen, history int) int {
@@ -32,9 +57,16 @@ func (b *builder) periodicText(e uuid.UUID, sections []string, maxPer, clipLen, 
 	}
 	b.sources(rs)
 	var periods []string
-	for _, r := range rs {
-		if p := str(r, "report_period"); strings.HasSuffix(p, "-12-31") && !slices.Contains(periods, p) {
-			periods = append(periods, p)
+	docs := annualDocuments(b.B.Rows("doc.announcement", e))
+	if !b.B.Subject.Synthetic {
+		for period := range docs {
+			periods = append(periods, period)
+		}
+	} else {
+		for _, r := range rs {
+			if p := str(r, "report_period"); strings.HasSuffix(p, "-12-31") && !slices.Contains(periods, p) {
+				periods = append(periods, p)
+			}
 		}
 	}
 	slices.Sort(periods)
@@ -48,6 +80,9 @@ func (b *builder) periodicText(e uuid.UUID, sections []string, maxPer, clipLen, 
 		p := str(r, "report_period")
 		sec := str(r, "section")
 		if !slices.Contains(periods, p) || !slices.Contains(sections, sec) {
+			continue
+		}
+		if !b.B.Subject.Synthetic && (str(docs[p], "announcement_id") == "" || str(docs[p], "announcement_id") != str(r, "announcement_id")) {
 			continue
 		}
 		if sec == "outlook_plan" && p != periods[len(periods)-1] && history == 1 {
@@ -81,11 +116,11 @@ func (b *builder) news(e uuid.UUID, group string) int {
 		rs := b.B.Rows(ds, e)
 		for i := len(rs) - 1; i >= 0 && n < 5; i-- {
 			r := rs[i]
-			if r.AvailableAt.Before(from) {
+			if r.PublishedAt == nil || r.PublishedAt.Before(from) || r.PublishedAt.After(b.B.AsOf) {
 				continue
 			}
 			b.source(r)
-			when := r.AvailableAt.In(b.B.AsOf.Location()).Format("2006-01-02")
+			when := r.PublishedAt.In(cst).Format("2006-01-02")
 			var text, label, basis string
 			if ds == "news.item" {
 				text = str(r, "title") + "。" + str(r, "body")
@@ -109,7 +144,6 @@ func (b *builder) news(e uuid.UUID, group string) int {
 
 // profile adds classification and listing facts.
 func (b *builder) profile(e uuid.UUID, group string) {
-	en := b.B.Entities[e]
 	subj := b.name(e)
 	if rs := b.B.Rows("ref.security", e); len(rs) > 0 {
 		r := rs[len(rs)-1]
@@ -119,13 +153,11 @@ func (b *builder) profile(e uuid.UUID, group string) {
 			b.S.Value(group, subj, "总股本", "截至 "+b.B.AsOf.Format("2006-01-02"), facts.KindReported, "", "shares", ts.Value, r.ID)
 		}
 	}
-	if rs := b.B.Rows("ref.industry", e); len(rs) > 0 {
-		r := rs[len(rs)-1]
-		b.sources(rs)
+	if r, ok := activeIndustry(b.B.Rows("ref.industry", e), b.B.AsOf); ok {
+		b.source(r)
 		b.S.Note(group, subj, "所属行业（"+str(r, "taxonomy")+"）", "截至 "+b.B.AsOf.Format("2006-01-02"), facts.KindReported,
 			str(r, "level1_name")+" > "+str(r, "level2_name"), r.ID)
 	}
-	_ = en
 }
 
 // segments adds latest-year segment revenue, share and gross margin.
@@ -141,13 +173,22 @@ func (b *builder) segments(e uuid.UUID, group, section string) bool {
 			latest = p
 		}
 	}
+	if latest == "" {
+		return false
+	}
 	subj := b.name(e)
-	var revs []facts.Input
+	revs := map[string][]facts.Input{}
+	incomplete := map[string]bool{}
 	var cur []int
 	for i, r := range rs {
 		if str(r, "report_period") == latest {
-			in, _ := input(r, "revenue", "CNY")
-			revs = append(revs, in)
+			dim := str(r, "dimension")
+			in, ok := input(r, "revenue", "CNY")
+			if !ok {
+				incomplete[dim] = true
+				continue
+			}
+			revs[dim] = append(revs[dim], in)
 			cur = append(cur, i)
 		}
 	}
@@ -156,12 +197,17 @@ func (b *builder) segments(e uuid.UUID, group, section string) bool {
 	for _, i := range cur {
 		r := rs[i]
 		name := str(r, "segment_name")
+		dim := str(r, "dimension")
+		dimLabel := map[string]string{"product": "产品", "industry": "行业", "region": "地区"}[dim]
 		in, _ := input(r, "revenue", "CNY")
 		b.S.Value(group, subj, name+"收入", pl, facts.KindReported, "公司定期报告分部信息", "CNY", in.Value, r.ID)
-		b.S.Computed(group, subj, name+"收入占比", pl, facts.Derived("F08.segment_share", "ratio", append([]facts.Input{in}, revs...),
+		b.S.Computed(group, subj, name+"占已披露"+dimLabel+"分项收入比例", pl, facts.Derived("F08.segment_share", "ratio", append([]facts.Input{in}, revs[dim]...),
 			func() (*decimal.Decimal, string) {
 				t := decimal.Zero
-				for _, x := range revs {
+				if incomplete[dim] {
+					return nil, "本维度存在缺失的分部收入"
+				}
+				for _, x := range revs[dim] {
 					t = t.Add(x.Value)
 				}
 				if !t.IsPositive() {
@@ -169,16 +215,16 @@ func (b *builder) segments(e uuid.UUID, group, section string) bool {
 				}
 				v := in.Value.Div(t)
 				return &v, ""
-			}), fmt.Sprintf("%s|seg|%s", b.B.Entities[e].Code, name))
+			}), fmt.Sprintf("%s|seg|%s|%s", b.B.Entities[e].Code, dim, name))
 		gm := "—"
 		if v, ok := dec(r, "gross_margin"); ok {
 			b.S.Value(group, subj, name+"毛利率", pl, facts.KindReported, "公司定期报告分部信息", "ratio", v, r.ID)
 			gm = v.Mul(decimal.NewFromInt(100)).StringFixed(2) + "%"
 		}
-		t.Rows = append(t.Rows, []*string{facts.Ptr(str(r, "dimension")), facts.Ptr(name),
+		t.Rows = append(t.Rows, []*string{facts.Ptr(dimLabel), facts.Ptr(name),
 			facts.Ptr(in.Value.Div(decimal.NewFromInt(100_000_000)).StringFixed(2)), facts.Ptr(gm)})
 		t.Evidence = append(t.Evidence, r.ID)
 	}
 	b.S.Tables[section] = append(b.S.Tables[section], t)
-	return true
+	return len(cur) > 0
 }

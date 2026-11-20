@@ -59,6 +59,27 @@ func ObservationBriefSkill() *Skill {
 // complete rechecks the frozen inputs and holds current license locks for each
 // model use, including cached step retries and summary/verifier calls.
 func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (json.RawMessage, model.Meta, error) {
+	if t.Version == CloseResearchVersion {
+		if t.Snapshot == nil || *t.Snapshot == "" {
+			return nil, model.Meta{}, errors.New("harness: missing close research snapshot")
+		}
+		if err := e.withCloseRights(ctx, func() error { return nil }); err != nil {
+			return nil, model.Meta{}, err
+		}
+		req.WithSend = func(callCtx context.Context, send func() (model.Raw, error)) (model.Raw, error) {
+			if err := e.stillCurrent(callCtx, t); err != nil {
+				return model.Raw{}, err
+			}
+			var raw model.Raw
+			err := e.withCloseRights(callCtx, func() error {
+				var err error
+				raw, err = send()
+				return err
+			})
+			return raw, err
+		}
+		return e.Gateway.Complete(ctx, req)
+	}
 	if t.Version == RealtimeBriefVersion {
 		return e.completeRealtime(ctx, t, req)
 	}
@@ -232,6 +253,9 @@ func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Pla
 }
 
 func (e *Engine) deliverTransaction(ctx context.Context, t *taskRow, fn func(pgx.Tx) error) error {
+	if t.Version == CloseResearchVersion {
+		return e.withCloseRights(ctx, func() error { return db.InWorkspace(ctx, e.Pool, t.Workspace, fn) })
+	}
 	if t.Version == RealtimeBriefVersion {
 		return e.withRealtimeSnapshot(ctx, t, dataservice.SourceDisplay, func(tx pgx.Tx, _ emquant.QuoteView) error {
 			if _, err := tx.Exec(ctx, "SET LOCAL ROLE vera_app"); err != nil {

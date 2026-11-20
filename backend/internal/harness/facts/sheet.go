@@ -79,6 +79,9 @@ type Sheet struct {
 	Unavailable map[string]string  `json:"unavailable"` // section id → reason found while computing
 	Suspicious  int                `json:"suspicious"`
 	Sources     map[string]string  `json:"sources"` // dataset id → latest available_at
+	// Frozen rows observed by builders. Real reports identify each dataset's
+	// actual contributor, even when other vendors are enabled in the catalog.
+	SourceProviders map[string]map[string]string `json:"source_providers,omitempty"` // dataset → provider → latest available_at
 }
 
 func NewSheet(task uuid.UUID, epoch int64) *Sheet {

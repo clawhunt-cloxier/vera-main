@@ -38,10 +38,8 @@ func (b *builder) margin(e uuid.UUID, n int, group, section string) bool {
 			buy = append(buy, facts.Point{Date: d, Missing: true})
 			continue
 		}
-		v, _ := dec(r, "financing_balance")
-		bv, _ := dec(r, "financing_buy")
-		bal = append(bal, facts.Point{Date: d, EvidenceID: r.ID, Value: v})
-		buy = append(buy, facts.Point{Date: d, EvidenceID: r.ID, Value: bv})
+		bal = append(bal, numericPoint(r, d, "financing_balance"))
+		buy = append(buy, numericPoint(r, d, "financing_buy"))
 	}
 	var valid []facts.Point
 	for _, p := range bal {
@@ -54,7 +52,7 @@ func (b *builder) margin(e uuid.UUID, n int, group, section string) bool {
 	}
 	first, last := valid[0], valid[len(valid)-1]
 	b.S.Value(group, subj, "融资余额", last.Date, facts.KindMarket, "交易所披露", "CNY", last.Value, last.EvidenceID)
-	b.S.Computed(group, subj, "融资余额变化", wl, facts.BalanceChange(facts.Input{EvidenceID: first.EvidenceID, Value: first.Value, Unit: "CNY"},
+	b.S.Computed(group, subj, "融资余额变化", first.Date+" 至 "+last.Date, facts.BalanceChange(facts.Input{EvidenceID: first.EvidenceID, Value: first.Value, Unit: "CNY"},
 		facts.Input{EvidenceID: last.EvidenceID, Value: last.Value, Unit: "CNY"}), k("chg"))
 	b.S.Computed(group, subj, "融资买入额合计", wl, facts.SumWindow("F21.sum_over_window", buy, len(days), "CNY", false), k("buy"))
 	cd := facts.ConsecutiveDays(bal)
@@ -70,8 +68,7 @@ func (b *builder) margin(e uuid.UUID, n int, group, section string) bool {
 		f := b.S.Computed(group, subj, "融资余额"+word, "截至 "+last.Date, c, k("streak"))
 		f.Change = false
 	}
-	if vr := b.B.Rows("mkt.valuation_daily", e); len(vr) > 0 {
-		lv := vr[len(vr)-1]
+	if lv, ok := onTradingDay(b.B.Rows("mkt.valuation_daily", e), last.Date); ok {
 		if fmv, ok := input(lv, "float_mv", "CNY"); ok {
 			b.S.Computed(group, subj, "融资余额占流通市值比例", last.Date, facts.Ratio("F20.margin_to_float_cap",
 				facts.Input{EvidenceID: last.EvidenceID, Value: last.Value, Unit: "CNY"}, fmv, "流通市值不为正"), k("ratio"))
@@ -152,7 +149,10 @@ func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
 			continue
 		}
 		found = true
-		a, _ := input(r, "amount", "CNY")
+		a, ok := input(r, "amount", "CNY")
+		if !ok {
+			continue
+		}
 		amts = append(amts, a)
 		lastBT = &bt[i]
 	}
@@ -160,10 +160,12 @@ func (b *builder) seats(e uuid.UUID, n int, group, section string) bool {
 		b.S.Value(group, subj, "大宗交易笔数", wl, facts.KindMarket, "交易所披露", "count:笔", decimal.NewFromInt(int64(len(amts))), idsOf(amts)...)
 		b.S.Computed(group, subj, "大宗交易成交额合计", wl, facts.Sum("F27.event_sum", "CNY", amts), k("bt"))
 		if bar, ok := bars[str(*lastBT, "trade_date")]; ok {
-			p, _ := input(*lastBT, "price", "CNY")
-			c, _ := input(bar, "close", "CNY")
-			f := b.S.Computed(group, subj, "最近一笔大宗交易成交价相对当日收盘价", str(*lastBT, "trade_date"), facts.BlockPremium(p, c), k("prem"))
-			f.Change = true
+			p, okP := input(*lastBT, "price", "CNY")
+			c, okC := input(bar, "close", "CNY")
+			if okP && okC {
+				f := b.S.Computed(group, subj, "最近交易日的一笔大宗交易成交价相对当日收盘价", str(*lastBT, "trade_date"), facts.BlockPremium(p, c), k("prem"))
+				f.Change = true
+			}
 		}
 	}
 	return found
@@ -246,8 +248,7 @@ func (b *builder) vendorFlow(e uuid.UUID, n int, group string) bool {
 				pts = append(pts, facts.Point{Date: d, Missing: true})
 				continue
 			}
-			v, _ := dec(r, fld.f)
-			pts = append(pts, facts.Point{Date: d, EvidenceID: r.ID, Value: v})
+			pts = append(pts, numericPoint(r, d, fld.f))
 		}
 		c := facts.SumWindow("F21.sum_over_window", pts, len(days), "CNY", false)
 		f := b.S.Computed(group, subj, "厂商口径"+fld.label+"累计", wl, c, b.B.Entities[e].Code+"|vendor|"+fld.f).Vendor(basis)
@@ -317,10 +318,12 @@ func (b *builder) corp(e uuid.UUID, group string) bool {
 		r := ds[len(ds)-1]
 		b.source(r)
 		found = true
-		c, _ := input(r, "cash_per_10_shares", "CNY")
-		b.S.Value(group, subj, "每 10 股派现（含税）", str(r, "fiscal_year")+" 年度", facts.KindReported, "", "price", c.Value, r.ID)
-		t, _ := input(r, "total_cash", "CNY")
-		b.S.Value(group, subj, "现金分红总额", str(r, "fiscal_year")+" 年度", facts.KindReported, "", "CNY", t.Value, r.ID)
+		if c, ok := input(r, "cash_per_10_shares", "CNY"); ok {
+			b.S.Value(group, subj, "每 10 股派现（含税）", str(r, "fiscal_year")+" 年度", facts.KindReported, "", "price", c.Value, r.ID)
+		}
+		if t, ok := input(r, "total_cash", "CNY"); ok {
+			b.S.Value(group, subj, "现金分红总额", str(r, "fiscal_year")+" 年度", facts.KindReported, "", "CNY", t.Value, r.ID)
+		}
 	}
 	return found
 }
@@ -329,6 +332,9 @@ func (b *builder) corp(e uuid.UUID, group string) bool {
 func (b *builder) groupInsider(label string, members []uuid.UUID, n int, group string) bool {
 	days := b.B.Window(n)
 	wl := windowLabel(n, days)
+	if len(days) == 0 {
+		return false
+	}
 	from := days[0]
 	var ev []uuid.UUID
 	firms := map[uuid.UUID]bool{}

@@ -67,6 +67,9 @@ func defaultSkill(kind string) string {
 // ParsePlan turns one sentence into a plan. Rules first; the router model only extracts verbatim mentions,
 // which are resolved by the entity catalog (never model-provided codes).
 func (e *Engine) ParsePlan(ctx context.Context, ws uuid.UUID, text string) (*ParseResult, error) {
+	if e.realResearchDisabled() {
+		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
+	}
 	text = strings.TrimSpace(text)
 	if adviceRe.MatchString(text) {
 		return unsupported("Vera 不提供买卖、仓位或目标价建议，可以为你整理该公司的事实与条件化情景。"), nil

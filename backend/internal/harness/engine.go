@@ -43,6 +43,8 @@ type Engine struct {
 	Prompts        string // prompt set version, frozen into reports
 	// RealResearch is VERA_REAL_RESEARCH_ENABLED: required before plans and tasks run on real data or real models.
 	RealResearch bool
+	// WithCloseResearchUse holds current TuShare usage rights for the callback.
+	WithCloseResearchUse func(context.Context, func() error) error
 }
 
 const PromptVersion = "1.1.0"
@@ -98,7 +100,7 @@ func planHash(skill, version string, subject uuid.UUID, p Params, asOf time.Time
 
 // BuildPlan computes availability and persists the plan for the workspace.
 func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, subject dataservice.EntityRow, raw map[string]any) (*Plan, error) {
-	if !e.Synthetic && !e.RealResearch {
+	if e.realResearchDisabled() {
 		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
 	if e.Brief != nil && skillID != "stock_analysis" {
@@ -282,7 +284,7 @@ func KillSwitch(ctx context.Context, q interface {
 
 // CreateTask confirms a plan: verifies hash/expiry, reserves quota and enqueues the run in one transaction.
 func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID, hash string, disabled []string) (uuid.UUID, error) {
-	if !e.Synthetic && !e.RealResearch {
+	if e.realResearchDisabled() {
 		return uuid.Nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
 	plan, err := e.LoadPlan(ctx, ws, planID)
@@ -656,6 +658,9 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	if t.Epoch != epoch || IsTerminal(t.Status) || t.Status == "CANCEL_REQUESTED" {
 		return nil
 	}
+	if t.Version == CloseResearchVersion && !e.RealResearch {
+		return e.finish(ctx, t, "BLOCKED", "REAL_RESEARCH_DISABLED", "真实研究尚未开启")
+	}
 	if !e.supportsSnapshotMode(t.SnapshotMode, t.Version) {
 		return ErrSnapshotModeUnsupported
 	}
@@ -672,6 +677,10 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
 	case emquant.ObservationBriefVersion:
 		err = e.observationPipeline(runCtx, ctx, t, sk)
+	case CloseResearchVersion:
+		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
+			err = e.pipeline(runCtx, ctx, t, sk)
+		}
 	default:
 		err = e.pipeline(runCtx, ctx, t, sk)
 	}
@@ -749,6 +758,9 @@ func (e *Engine) pipeline(ctx, parent context.Context, t *taskRow, sk *Skill) er
 	})
 	if err != nil {
 		return err
+	}
+	if t.Version == CloseResearchVersion {
+		t.Snapshot = &co.Snapshot
 	}
 	sheet, err := step(ctx, e, t, "compute", func() (*facts.Sheet, error) {
 		b, err := e.bundleFromSnapshot(ctx, subject, co, t.AsOf)

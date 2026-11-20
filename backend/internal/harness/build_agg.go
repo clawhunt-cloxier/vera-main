@@ -73,13 +73,13 @@ func (b *builder) composition(ind dataservice.EntityRow, members []uuid.UUID, gr
 		if rs := b.B.Rows("ref.industry", m); len(rs) > 0 {
 			ev = append(ev, rs[len(rs)-1].ID)
 			b.sources(rs)
-			if vf := str(rs[len(rs)-1], "valid_from"); vf > b.B.Days[0] && vf <= day {
+			if vf := str(rs[len(rs)-1], "valid_from"); len(b.B.Days) > 0 && vf > b.B.Days[0] && vf <= day {
 				b.S.Note(group, subj, b.B.Entities[m].Name+"调入行业日期", vf, facts.KindReported, vf, rs[len(rs)-1].ID)
 				b.S.Limit(fmt.Sprintf("%s 于 %s 调入%s，行业聚合按 %s 的成分计算。", b.name(m), vf, ind.Name, day))
 			}
 		}
 	}
-	b.S.Value(group, subj, "成分股数量", "截至 "+day, facts.KindReported, "申万分类（演示）", "count:家", decimal.NewFromInt(int64(len(members))), ev...)
+	b.S.Value(group, subj, "成分股数量", "截至 "+day, facts.KindReported, "申万分类", "count:家", decimal.NewFromInt(int64(len(members))), ev...)
 	type mv struct {
 		id uuid.UUID
 		in facts.Input
@@ -280,16 +280,17 @@ func (b *builder) industryValuation(ind dataservice.EntityRow, members []uuid.UU
 		wl := windowLabel(n, days)
 		ip := b.indexPoints(idx, days)
 		ir := facts.PeriodReturn(ip, len(days))
+		benchmark, benchName := b.benchmark()
 		br := facts.PeriodReturn(b.indexPoints(benchmark, days), len(days))
 		b.S.Computed(group, subj, "行业指数区间涨跌幅", wl, ir, ind.Code+"|idxret")
-		b.S.Computed(group, "演示 300 指数", "基准指数区间涨跌幅", wl, br, ind.Code+"|bench")
-		b.S.Computed(group, subj, "行业指数相对演示 300 超额收益", wl, facts.Excess(ir, br), ind.Code+"|idxex")
+		b.S.Computed(group, benchName, "基准指数区间涨跌幅", wl, br, ind.Code+"|bench")
+		b.S.Computed(group, subj, "行业指数相对"+benchName+"超额收益", wl, matchedExcess(ip, b.indexPoints(benchmark, days)), ind.Code+"|idxex")
 		found = true
 		s := facts.Series{ID: "industry_index", Title: "行业指数与基准", Kind: "line", X: "trade_date", Unit: "点", Section: section}
 		for _, l := range []struct {
 			name string
 			pts  []facts.Point
-		}{{ind.Name, ip}, {"演示 300", b.indexPoints(benchmark, days)}} {
+		}{{ind.Name, ip}, {benchName, b.indexPoints(benchmark, days)}} {
 			line := facts.SeriesLine{Name: l.name}
 			for _, p := range l.pts {
 				x := p.Date
@@ -478,38 +479,41 @@ func (b *builder) position(subject uuid.UUID, ind dataservice.EntityRow, members
 	}
 	subj := b.name(subject)
 	me := mfs[idx]
-	rank := func(val func(memberFin) *decimal.Decimal, label string, ev uuid.UUID) {
+	rank := func(val func(memberFin) *decimal.Decimal, evidence func(memberFin) []uuid.UUID, label string) {
 		mv := val(me)
 		if mv == nil {
 			return
 		}
 		r, n := 1, 0
+		var refs []uuid.UUID
 		for _, m := range mfs {
 			v := val(m)
 			if v == nil {
 				continue
 			}
 			n++
+			refs = append(refs, evidence(m)...)
 			if v.GreaterThan(*mv) {
 				r++
 			}
 		}
-		b.S.Note(group, subj, label+"在"+ind.Name+"成分中的排位（由高到低）", periodLabel(fy), facts.KindComputed,
-			fmt.Sprintf("第 %d 位（共 %d 家）", r, n), ev)
+		b.S.Note(group, subj, label+"在"+ind.Name+"已采集可比样本中的排位（由高到低）", periodLabel(fy), facts.KindComputed,
+			fmt.Sprintf("第 %d 位（共 %d 家）", r, n), refs...)
 	}
-	rank(func(m memberFin) *decimal.Decimal { return &m.rev.Value }, "营业收入", me.rev.EvidenceID)
+	rank(func(m memberFin) *decimal.Decimal { return &m.rev.Value },
+		func(m memberFin) []uuid.UUID { return []uuid.UUID{m.rev.EvidenceID} }, "营业收入")
 	rank(func(m memberFin) *decimal.Decimal {
 		if m.np == nil {
 			return nil
 		}
 		return &m.np.Value
-	}, "归母净利润", me.rev.EvidenceID)
+	}, func(m memberFin) []uuid.UUID { return []uuid.UUID{m.np.EvidenceID} }, "归母净利润")
 	rank(func(m memberFin) *decimal.Decimal {
 		if !m.yoy.OK() {
 			return nil
 		}
 		return m.yoy.Result
-	}, "营业收入同比", me.rev.EvidenceID)
+	}, func(m memberFin) []uuid.UUID { return []uuid.UUID{m.rev.EvidenceID, m.prevRev.EvidenceID} }, "营业收入同比")
 	return true
 }
 
@@ -521,8 +525,9 @@ func (b *builder) marketOverview(n int, group, section string) bool {
 	}
 	prevDays := b.B.Days[len(b.B.Days)-2*n : len(b.B.Days)-n]
 	wl := windowLabel(n, days)
+	benchmark, benchName := b.benchmark()
 	ip := b.indexPoints(benchmark, days)
-	b.S.Computed(group, "演示 300 指数", "区间涨跌幅", wl, facts.PeriodReturn(ip, len(days)), "mkt|ret")
+	b.S.Computed(group, benchName, "区间涨跌幅", wl, facts.PeriodReturn(ip, len(days)), "mkt|ret")
 	amt := func(ds []string) []facts.Point {
 		by := map[string]dataservice.StoredRecord{}
 		for _, r := range b.B.Index(benchmark) {
@@ -542,12 +547,12 @@ func (b *builder) marketOverview(n int, group, section string) bool {
 	}
 	cur := facts.SumWindow("F17.avg_daily_amount", amt(days), len(days), "CNY", true)
 	prev := facts.SumWindow("F17.avg_daily_amount", amt(prevDays), len(prevDays), "CNY", true)
-	b.S.Computed(group, "演示 300 成分", "日均成交额", wl, cur, "mkt|amt")
+	b.S.Computed(group, benchName+"成分", "日均成交额", wl, cur, "mkt|amt")
 	if cur.OK() && prev.OK() {
 		yo := facts.YoY(facts.Input{Value: *cur.Result}, facts.Input{Value: *prev.Result})
 		yo.FormulaID = "F02.window_over_window"
 		yo.Inputs = append(slices.Clone(cur.Inputs), prev.Inputs...)
-		b.S.Computed(group, "演示 300 成分", "日均成交额较前一窗口变化率", wl+" 对比前 "+fmt.Sprint(n)+" 个交易日", yo, "mkt|amtchg")
+		b.S.Computed(group, benchName+"成分", "日均成交额较前一窗口变化率", wl+" 对比前 "+fmt.Sprint(n)+" 个交易日", yo, "mkt|amtchg")
 	}
 	if ct := b.B.Global("flow.connect_turnover"); len(ct) > 0 {
 		var pts []facts.Input
@@ -559,8 +564,8 @@ func (b *builder) marketOverview(n int, group, section string) bool {
 		}
 		b.S.Computed(group, "陆股通", "成交总额合计", wl, facts.Sum("F21.sum_over_window", "CNY", pts), "mkt|connect")
 	}
-	s := facts.Series{ID: "market_index", Title: "演示 300 指数", Kind: "line", X: "trade_date", Unit: "点", Section: section}
-	line := facts.SeriesLine{Name: "演示 300"}
+	s := facts.Series{ID: "market_index", Title: benchName, Kind: "line", X: "trade_date", Unit: "点", Section: section}
+	line := facts.SeriesLine{Name: benchName}
 	for _, p := range ip {
 		x := p.Date
 		if p.Missing {

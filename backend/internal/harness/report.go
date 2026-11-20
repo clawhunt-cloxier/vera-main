@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -317,7 +318,28 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 		doc.DataAsOf = "数据采集后的冻结时点：" + t.AsOf.In(cst).Format("2006-01-02 15:04:05") + "（北京时间；非实时）"
 	}
 	if doc.Synthetic {
-		doc.Limitations = append(doc.Limitations, "本报告使用虚构的演示数据或模拟模型生成，不对应任何真实公司或市场，仅用于演示。")
+		if subject.Synthetic {
+			doc.Limitations = append(doc.Limitations, "本报告使用虚构的演示数据，不对应任何真实公司或市场，仅用于演示。")
+		} else {
+			doc.Limitations = append(doc.Limitations, "本报告使用模拟模型，仅用于工程验证。")
+		}
+	}
+	if t.Version == CloseResearchVersion {
+		doc.DataAsOf = t.AsOf.In(cst).Format("2006-01-02 15:04") + "（北京时间；收盘及已披露数据）"
+		names := map[string]string{}
+		for _, dataset := range slices.Sorted(maps.Keys(sheet.SourceProviders)) {
+			for _, provider := range slices.Sorted(maps.Keys(sheet.SourceProviders[dataset])) {
+				if _, exists := names[provider]; !exists {
+					var name string
+					if err := e.Pool.QueryRow(ctx, `SELECT name FROM providers WHERE id=$1 AND enabled AND NOT synthetic`, provider).Scan(&name); err != nil {
+						return doc, err
+					}
+					names[provider] = name
+				}
+				doc.Sources = append(doc.Sources, DocSource{Provider: names[provider], DatasetID: dataset, UpdatedAt: sheet.SourceProviders[dataset][provider]})
+			}
+		}
+		return doc, nil
 	}
 	provs, err := e.providerNames(ctx)
 	if t.Version == emquant.ObservationBriefVersion && e.Brief != nil {
@@ -432,6 +454,9 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 			return err
 		}
 		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.SnapshotMode == "collect_latest" && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
+			return errStale
+		}
+		if t.Version == CloseResearchVersion && (t.Snapshot == nil || *t.Snapshot != *snapshot) {
 			return errStale
 		}
 		if t.Version == RealtimeBriefVersion && revision != t.Revision {
