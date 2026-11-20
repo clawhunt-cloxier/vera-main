@@ -85,6 +85,9 @@ func TestTuShareThreeReportDelivery(t *testing.T) {
 	if err := a.build(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if err := a.TuShare.Probe(ctx); err != nil || len(objects) != 0 {
+		t.Fatalf("read-only account probe: archived objects=%d, err=%v", len(objects), err)
+	}
 	if err := a.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +140,8 @@ func TestTuShareThreeReportDelivery(t *testing.T) {
 	if len(catalog.Items) != 1 {
 		t.Fatalf("search: %+v", catalog)
 	}
-	var lastReport string
+	var lastReport, lastEvidence, lastCalc string
+	var lastTask uuid.UUID
 	var calculationSeen bool
 	for _, skill := range []string{"stock_analysis", "capital_flow", "deep_research"} {
 		params := "{}"
@@ -159,6 +163,7 @@ func TestTuShareThreeReportDelivery(t *testing.T) {
 			t.Fatalf("%s %s: %v %v", skill, task.Status, task.ReasonCode, task.ReasonMessage)
 		}
 		lastReport = fmt.Sprintf("/api/v1/reports/%s/versions/%d", task.ReportRef.ID, task.ReportRef.Version)
+		lastTask = task.ID
 		var report httpapi.Report
 		decode(request("GET", lastReport, "", 200), &report)
 		want := "limited"
@@ -178,12 +183,14 @@ func TestTuShareThreeReportDelivery(t *testing.T) {
 			}
 			if !calculationSeen && len(claim.CalcRefs) > 0 {
 				var calc httpapi.Calculation
-				decode(request("GET", "/api/v1/calculations/"+claim.CalcRefs[0].String(), "", 200), &calc)
+				lastCalc = "/api/v1/calculations/" + claim.CalcRefs[0].String()
+				decode(request("GET", lastCalc, "", 200), &calc)
 				calculationSeen = len(calc.Inputs) > 0
 			}
 		}
 		var ev httpapi.Evidence
-		decode(request("GET", "/api/v1/evidence/"+evidence.String(), "", 200), &ev)
+		lastEvidence = "/api/v1/evidence/" + evidence.String()
+		decode(request("GET", lastEvidence, "", 200), &ev)
 		if ev.Provider != "TuShare Pro" || ev.ContentHash == "" {
 			t.Fatalf("missing TuShare evidence: %+v", ev)
 		}
@@ -222,9 +229,29 @@ func TestTuShareThreeReportDelivery(t *testing.T) {
 		t.Fatalf("repeat sync created revisions: %d -> %d", initial, after)
 	}
 	request("GET", lastReport, "", 200)
-	if _, err := pool.Exec(ctx, `UPDATE providers SET enabled=false WHERE id='tushare'`); err != nil {
+	// A worker replay uses the same persisted snapshot and report version.
+	if err := a.Engine.Run(ctx, ws, lastTask, 1); err != nil {
 		t.Fatal(err)
 	}
+	request("GET", lastReport, "", 200)
+	// Test both the local deployment ceiling and an independently revoked database grant.
+	t.Setenv("TUSHARE_ALLOW_MODEL_PROCESSING", "false")
+	restricted := &App{Cfg: c, Pool: pool}
+	if err := restricted.build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	original := handler
+	handler, err = restricted.HTTP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request("GET", lastReport+"/pdf", "", 503)
+	handler = original
+	if _, err := pool.Exec(ctx, `UPDATE providers SET allow_model_processing=false WHERE id='tushare'`); err != nil {
+		t.Fatal(err)
+	}
+	request("GET", lastEvidence, "", 503)
+	request("GET", lastCalc, "", 503)
 	request("GET", lastReport+"/pdf", "", 503)
 }
 
