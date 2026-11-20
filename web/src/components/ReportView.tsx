@@ -48,6 +48,8 @@ const publishedSources = new Set([
   'news.item',
 ]);
 
+const evidencePageSize = 12;
+
 function EvidencePanel({
   claim,
   showClaimText,
@@ -61,20 +63,31 @@ function EvidencePanel({
 }) {
   const [ev, setEv] = useState<Record<string, Evidence | 'err'>>({});
   const [calc, setCalc] = useState<Record<string, Calculation | 'err'>>({});
+  const [page, setPage] = useState(0);
+  const pageRefs = useMemo(
+    () => claim.evidence_refs.slice(page * evidencePageSize, (page + 1) * evidencePageSize),
+    [claim.evidence_refs, page]
+  );
   useEffect(() => {
-    claim.evidence_refs.forEach((id) =>
+    let active = true;
+    pageRefs.forEach((id) =>
       loaders.evidence(id).then(
-        (e) => setEv((m) => ({ ...m, [id]: e })),
-        () => setEv((m) => ({ ...m, [id]: 'err' }))
+        (e) => active && setEv((m) => ({ ...m, [id]: e })),
+        () => active && setEv((m) => ({ ...m, [id]: 'err' }))
       )
     );
+    return () => {
+      active = false;
+    };
+  }, [pageRefs, loaders.evidence]);
+  useEffect(() => {
     claim.calculation_refs.forEach((id) =>
       loaders.calculation(id).then(
         (c) => setCalc((m) => ({ ...m, [id]: c })),
         () => setCalc((m) => ({ ...m, [id]: 'err' }))
       )
     );
-  }, [claim, loaders]);
+  }, [claim.calculation_refs, loaders.calculation]);
   return (
     <aside className="evidence" aria-label="证据" data-testid="evidence-panel">
       <div className="dialog-head">
@@ -121,7 +134,7 @@ function EvidencePanel({
         );
       })}
       <h3>来源</h3>
-      {claim.evidence_refs.slice(0, 12).map((id) => {
+      {pageRefs.map((id) => {
         const e = ev[id];
         if (!e)
           return (
@@ -195,8 +208,23 @@ function EvidencePanel({
           </div>
         );
       })}
-      {claim.evidence_refs.length > 12 && (
-        <p className="muted">另有 {claim.evidence_refs.length - 12} 条证据（区间序列）。</p>
+      {claim.evidence_refs.length > evidencePageSize && (
+        <nav aria-label="来源翻页" className="actions">
+          <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>
+            上一页
+          </button>
+          <span>
+            第 {page * evidencePageSize + 1}–{page * evidencePageSize + pageRefs.length} 条，共{' '}
+            {claim.evidence_refs.length} 条
+          </span>
+          <button
+            type="button"
+            disabled={(page + 1) * evidencePageSize >= claim.evidence_refs.length}
+            onClick={() => setPage(page + 1)}
+          >
+            下一页
+          </button>
+        </nav>
       )}
     </aside>
   );
@@ -404,6 +432,7 @@ export function ReportView({
       </article>
       {open && (
         <EvidencePanel
+          key={open.ref}
           claim={open}
           showClaimText={
             report.skill_version !== '1.1.0-demo.2' || report.skill_id !== 'stock_analysis'

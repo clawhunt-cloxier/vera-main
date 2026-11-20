@@ -15,6 +15,7 @@ import {
   type PlanResult,
   type QuoteRequirement,
   type ResearchPlan,
+  type ResearchProtocol,
   type Skill,
   type SkillId,
   type Task,
@@ -24,12 +25,21 @@ import { EntitySearch } from '../components/EntitySearch';
 import { QuoteRequirementField } from '../components/QuoteRequirementField';
 import { Empty, ErrorBox, Loading, Skeleton, SyntheticBanner, Tag } from '../components/ui';
 
+function supportsMode(schema: unknown, mode: string): boolean {
+  const field = (obj: unknown, key: string): unknown =>
+    typeof obj === 'object' && obj !== null ? (obj as Record<string, unknown>)[key] : undefined;
+  const modes = field(field(field(schema, 'properties'), 'mode'), 'enum');
+  return Array.isArray(modes) && modes.includes(mode);
+}
+
 export function App() {
   const me = useMe();
-  const realtime = me.data?.research_protocol === 'v0.4';
+  const protocol: ResearchProtocol = me.data?.research_protocol ?? 'legacy';
+  const realtime = protocol === 'v0.4';
   const skills = useQuery({
-    queryKey: ['skills'],
-    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills'),
+    queryKey: ['skills', protocol],
+    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol }),
+    enabled: !!me.data,
     staleTime: 3600_000,
   });
   const tasks = useQuery({
@@ -49,7 +59,7 @@ export function App() {
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
         { text, ...(realtime ? { quote_requirement: quoteRequirement } : {}) },
-        { idem: newKey(), protocol: realtime ? 'v0.4' : undefined }
+        { idem: newKey(), protocol }
       );
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
       return r;
@@ -58,10 +68,14 @@ export function App() {
   });
   const synthetic = me.data?.synthetic ?? false;
   const observation = me.data?.research_protocol === 'observation.v1';
+  const enabledSkills = skills.data?.items.filter((sk) => sk.available) ?? [];
+  const stockOnly =
+    enabledSkills.length > 0 &&
+    enabledSkills.every((sk) => sk.subject_kinds.length === 1 && sk.subject_kinds[0] === 'stock');
   const placeholders = [
     '分析宁德时代最近的资金面',
     '深度研究贵州茅台',
-    '看看半导体行业最近的资金动向',
+    ...(stockOnly ? [] : ['看看半导体行业最近的资金动向']),
     '个股分析：比亚迪',
   ];
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
@@ -81,6 +95,11 @@ export function App() {
           {realtime && (
             <p className="notice">
               请选择行情要求。确认后采集并冻结一次数据快照，报告会分别显示行情实际时点与来源限制。
+            </p>
+          )}
+          {!synthetic && protocol === 'legacy' && stockOnly && (
+            <p className="notice">
+              可研究已登记的 A 股个股。行情采用收盘数据，财报与公告按计划截止时点取用。
             </p>
           )}
           <header className="app-head">
@@ -170,6 +189,7 @@ export function App() {
 
           <section className="skills">
             <h2>快速启动</h2>
+            {skills.error && <ErrorBox error={skills.error} />}
             <div className="grid">
               {realtime && (
                 <Link
@@ -278,29 +298,40 @@ export function App() {
 export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolean }) {
   const me = useMe();
   const realtime = !daily && me.data?.research_protocol === 'v0.4';
-  const protocol = daily ? 'observation.v1' : realtime ? 'v0.4' : undefined;
+  const protocol: ResearchProtocol = daily
+    ? 'observation.v1'
+    : (me.data?.research_protocol ?? 'legacy');
+  const dailyAvailable = !daily || !!me.data?.research_protocol;
   const s = useQuery({
     queryKey: ['skills', protocol],
     queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol }),
     staleTime: 3600_000,
+    enabled: !!me.data && dailyAvailable,
     select: (d) => d.items.find((x) => x.id === skill),
   });
   const [subject, setSubject] = useState<Entity | null>(null);
   const [mode, setMode] = useState('');
+  const stockOnly = s.data?.subject_kinds.length === 1 && s.data.subject_kinds[0] === 'stock';
+  const allowComparison =
+    skill === 'deep_research' &&
+    subject?.kind === 'stock' &&
+    supportsMode(s.data?.params_schema, 'company_industry');
+  const selectedMode = allowComparison && mode === 'company_industry' ? mode : '';
+  const available = dailyAvailable && !!s.data?.available;
   const [selection, setQuoteRequirement] = useState<QuoteRequirement>('latest_available');
   const allowRealtime = me.data?.realtime_trade_available === true;
   const quoteRequirement = allowRealtime ? selection : 'latest_available';
   const nav = useNavigate();
   const plan = useMutation({
     mutationFn: async () => {
-      if (!subject) return;
+      if (!subject || !available || !s.data?.subject_kinds.includes(subject.kind)) return;
       if (realtime && !quoteRequirement) throw new Error('请选择行情要求');
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
         {
           skill_id: skill,
           subject_id: subject.id,
-          params: mode && subject.kind === 'stock' ? { mode } : {},
+          params: selectedMode ? { mode: selectedMode } : {},
           ...(realtime ? { quote_requirement: quoteRequirement } : {}),
         },
         { idem: newKey(), protocol }
@@ -317,6 +348,9 @@ export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolea
       </p>
       <h1>{daily ? 'Choice 日成交简报' : s.data?.title}</h1>
       {s.error && <ErrorBox error={s.error} />}
+      {me.data && !s.isFetching && !s.error && !available && (
+        <p className="notice">当前部署未开放这项研究。</p>
+      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -325,16 +359,27 @@ export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolea
       >
         <label>
           研究对象
-          <EntitySearch kinds={s.data?.subject_kinds} onPick={setSubject} protocol={protocol} />
+          {available && (
+            <EntitySearch
+              kinds={s.data?.subject_kinds}
+              onPick={setSubject}
+              protocol={protocol}
+              placeholder={stockOnly ? '输入已登记的股票名称或代码' : undefined}
+            />
+          )}
         </label>
-        {skill === 'deep_research' && (
+        {skill === 'deep_research' && available && (
           <label>
             模式
-            <select value={mode} onChange={(e) => setMode(e.target.value)}>
-              <option value="">标准</option>
-              {subject?.kind === 'stock' && (
-                <option value="company_industry">公司 + 所在行业对比</option>
-              )}
+            <select value={selectedMode} onChange={(e) => setMode(e.target.value)}>
+              <option value="">
+                {stockOnly || subject?.kind === 'stock'
+                  ? '公司深度研究'
+                  : subject?.kind === 'industry'
+                    ? '行业深度研究'
+                    : '按研究对象确定'}
+              </option>
+              {allowComparison && <option value="company_industry">公司 + 所在行业对比</option>}
             </select>
           </label>
         )}
@@ -347,7 +392,13 @@ export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolea
         )}
         <button
           type="submit"
-          disabled={!me.data || !subject || plan.isPending || (realtime && !quoteRequirement)}
+          disabled={
+            !available ||
+            !subject ||
+            !s.data?.subject_kinds.includes(subject.kind) ||
+            plan.isPending ||
+            (realtime && !quoteRequirement)
+          }
         >
           {plan.isPending ? '准备中…' : '发起研究'}
         </button>

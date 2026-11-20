@@ -16,6 +16,14 @@ const entity = {
   classification: null,
   skills: [],
 };
+const stockSkill = {
+  id: 'stock_analysis',
+  title: '个股分析',
+  version: '1.0.1',
+  available: true,
+  subject_kinds: ['stock'],
+  params_schema: {},
+};
 const plan = {
   id: 'mock-plan',
   plan_hash: 'mock-hash',
@@ -340,7 +348,7 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
               display_name: '模拟验收',
               research_protocol: advertisedProtocol,
             };
-          else if (path === '/api/v1/skills') body = { items: [] };
+          else if (path === '/api/v1/skills') body = { items: [stockSkill] };
           else if (path === '/api/v1/entities') {
             assert.equal(accept, observationMedia);
             body = { items: [oldPlan.subject] };
@@ -434,5 +442,180 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
         await context.close();
       }
     );
+  }
+
+  for (const synthetic of [false, true]) {
+    await t.test(synthetic ? 'fixture industry comparison' : 'TuShare close research', async () => {
+      const context = await browser.newContext();
+      try {
+        const page = await context.newPage();
+        page.setDefaultTimeout(10000);
+        const errors = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        const ids = ['stock_analysis', 'capital_flow', 'deep_research'];
+        const titles = ['个股分析', '资金动向', '深度研究'];
+        const skills = ids.map((id, i) => ({
+          ...stockSkill,
+          id,
+          title: titles[i],
+          version: synthetic ? '1.0.0' : '1.0.1',
+          subject_kinds: synthetic && id !== 'stock_analysis' ? ['stock', 'industry'] : ['stock'],
+          params_schema:
+            id === 'deep_research'
+              ? {
+                  properties: {
+                    mode: {
+                      enum: synthetic ? ['company', 'industry', 'company_industry'] : ['company'],
+                    },
+                  },
+                }
+              : {},
+        }));
+        const refs = Array.from({ length: 30 }, (_, i) => 'source-' + i);
+        const requested = new Set();
+        let skill, submitted;
+        const fixedPlan = () => ({
+          ...plan,
+          skill_id: skill,
+          skill_version: skills[0].version,
+          snapshot_mode: 'fixed_legacy',
+          quote_requirement: undefined,
+        });
+        await page.route(origin + '/app**', (route) =>
+          route.fulfill({ contentType: 'text/html', body: appHTML })
+        );
+        await page.route(origin + '/api/v1/**', async (route) => {
+          const req = route.request();
+          const path = new URL(req.url()).pathname.replace('/api/v1/', '');
+          let data;
+          if (path === 'me')
+            data = { csrf_token: 'mock-csrf', onboarded: true, synthetic, quota: {} };
+          else if (path === 'skills') data = { items: skills };
+          else if (path === 'entities') data = { items: [entity] };
+          else if (
+            path === 'research-plans' ||
+            (path === 'research-tasks' && req.method() === 'POST')
+          ) {
+            assert.equal(req.headers().accept, 'application/json');
+            assert.equal(req.headers()['content-type'], 'application/json');
+            if (path === 'research-plans') {
+              submitted = req.postDataJSON();
+              skill = submitted.skill_id;
+              data = { kind: 'plan', plan: fixedPlan() };
+            } else {
+              assert.equal(req.postDataJSON().plan_hash, plan.plan_hash);
+              data = task;
+            }
+          } else if (path === 'research-tasks') data = { items: [] };
+          else if (path === 'research-plans/mock-plan') data = fixedPlan();
+          else if (path === 'research-tasks/mock-task')
+            data = { ...task, skill_id: skill, snapshot_mode: 'fixed_legacy' };
+          else if (path === 'reports/mock-report/versions/1')
+            data = {
+              ...report,
+              synthetic,
+              skill_id: skill,
+              skill_version: skills[0].version,
+              title: '模拟公司财务分析',
+              snapshot_mode: 'fixed_legacy',
+              source_freshness: undefined,
+              sections: [
+                {
+                  ...report.sections[0],
+                  title: '财务及估值',
+                  tables: [
+                    { title: '营业收入', columns: ['期间', '亿元'], rows: [['2025', '10.0']] },
+                  ],
+                  charts: [{ series_id: 'chart-a', title: '收入趋势' }],
+                },
+              ],
+              claims: [{ ...report.claims[0], evidence_refs: refs, calculation_refs: ['calc-a'] }],
+            };
+          else if (path === 'reports/mock-report/versions/1/series/chart-a')
+            data = {
+              kind: 'line',
+              unit: '亿元',
+              series: [{ name: '收盘资料', points: [['2025', '10.0']] }],
+            };
+          else if (path.startsWith('evidence/')) {
+            const id = path.slice('evidence/'.length);
+            requested.add(id);
+            data = {
+              ...evidence,
+              id,
+              dataset_id: 'doc.periodic_text',
+              provider: '模拟 TuShare 上游',
+              title: id,
+              locator: '模拟年报第 10 页',
+              excerpt: '模拟原文 ' + id,
+            };
+          } else if (path === 'calculations/calc-a')
+            data = {
+              formula_id: 'F01',
+              formula_version: '1.0',
+              result: '10.0',
+              unit: '亿元',
+              applicability: 'APPLICABLE',
+              inputs: [],
+            };
+          else throw new Error('Unexpected close research request ' + path);
+          await route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
+        });
+        for (const expected of synthetic ? ['deep_research'] : ids) {
+          await page.goto(origin + '/app');
+          for (const title of titles)
+            await page.getByRole('link', { name: title, exact: true }).waitFor();
+          assert.equal(await page.getByRole('link', { name: 'Choice 日成交简报' }).count(), 0);
+          if (!synthetic) await page.getByText(/行情采用收盘数据/).waitFor();
+          await page
+            .getByRole('link', { name: titles[ids.indexOf(expected)], exact: true })
+            .click();
+          await page.getByRole('combobox', { name: '搜索研究对象' }).fill(entity.symbol);
+          await page.getByRole('option', { name: new RegExp(entity.name) }).click();
+          if (expected === 'deep_research') {
+            const modes = page.getByLabel('模式');
+            assert.deepEqual(
+              await modes.locator('option').allTextContents(),
+              synthetic ? ['公司深度研究', '公司 + 所在行业对比'] : ['公司深度研究']
+            );
+            if (synthetic) await modes.selectOption('company_industry');
+          }
+          await page.getByRole('button', { name: '发起研究' }).click();
+          await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
+          assert.deepEqual(submitted, {
+            skill_id: expected,
+            subject_id: entity.id,
+            params: synthetic ? { mode: 'company_industry' } : {},
+          });
+        }
+        if (!synthetic) {
+          await page.getByRole('button', { name: '提交任务' }).click();
+          await page.getByRole('link', { name: '查看报告' }).click();
+          await page.getByRole('heading', { name: '模拟公司财务分析' }).waitFor();
+          assert.equal(
+            await page.getByRole('table', { name: '营业收入' }).locator('td').innerText(),
+            '10.0'
+          );
+          await page.locator('.chart-box svg').waitFor();
+          await page.getByRole('button', { name: '查看证据 1', exact: true }).click();
+          await page.getByText('F01', { exact: true }).waitFor();
+          await page.getByText('模拟原文 source-11', { exact: true }).waitFor();
+          assert.deepEqual([...requested].sort(), refs.slice(0, 12).sort());
+          await page.getByRole('button', { name: '下一页' }).click();
+          await page.getByText('模拟原文 source-23', { exact: true }).waitFor();
+          assert.deepEqual([...requested].sort(), refs.slice(0, 24).sort());
+          assert.equal(
+            await page.getByRole('link', { name: '下载 PDF' }).getAttribute('href'),
+            '/api/v1/reports/mock-report/versions/1/pdf'
+          );
+          await page.goto(origin + '/app/quick/daily-observation');
+          await page.getByText('当前部署未开放这项研究。').waitFor();
+          assert.equal(await page.getByRole('button', { name: '发起研究' }).isDisabled(), true);
+        }
+        assert.deepEqual(errors, []);
+      } finally {
+        await context.close();
+      }
+    });
   }
 });
