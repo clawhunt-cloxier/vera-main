@@ -17,7 +17,7 @@ ADR-0004 的 [盘中时点与来源样例](tests/fixtures/intraday-cases.json) �
 
 Verify 在 dev/main 的推送和以 dev/main 为目标的 PR 上运行。Branch policy 只检查 PR 来源分支，不证明业务正确。
 
-前端页面验收可运行 `cd web && npm ci && npx playwright install --with-deps chromium && npm run test:realtime-ui`。该命令需要下载 Playwright Chromium 及系统依赖；使用标注为模拟的 API 响应，在桌面和手机视口检查 0.4 选择、确认、冻结时间、证据展示，并回归旧 observation 计划、历史报告与取消流程，不调用真实数据厂商或模型。浏览器用例不替代真实行情时点与授权的端到端验收。
+前端页面验收可运行 `cd web && npm ci && npx playwright install --with-deps chromium && npm run test:realtime-ui`。该命令需要下载 Playwright Chromium 及系统依赖；使用标注为模拟的 API 响应，在桌面和手机视口检查 0.4 默认最近可用、确认、冻结时间和证据展示，并回归双来源报告、旧 observation 计划、历史报告与取消流程，不调用真实数据厂商或模型。浏览器用例不替代真实行情时点与授权的端到端验收。
 
 ### 真实部署的盘中浏览器验收（显式运行）
 

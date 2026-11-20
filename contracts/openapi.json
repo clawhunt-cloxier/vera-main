@@ -2361,7 +2361,7 @@
               "observation.v1",
               "v0.4"
             ],
-            "description": "当前部署支持的研究协议；v0.4 要求创建计划时明确 quote_requirement。"
+            "description": "当前部署支持的研究协议；v0.4 创建计划时省略 quote_requirement 会使用 latest_available。"
           },
           "closing_research_available": {
             "type": "boolean",
@@ -2369,7 +2369,7 @@
           },
           "realtime_trade_available": {
             "type": "boolean",
-            "description": "仅当全市场行情策略支持实时成交要求时为 true；缺省不开放此入口，实际证券的行情仍须在采集时核验。"
+            "description": "旧版 v0.4 客户端可用的严格实时能力标记；实际证券的行情仍须在采集时核验。"
           }
         },
         "required": [
@@ -3077,7 +3077,7 @@
               "realtime_trade",
               null
             ],
-            "description": "0.4 plans explicitly choose a quote requirement; legacy plans are null."
+            "description": "Quote requirement bound to the 0.4 plan hash; null for legacy and observation plans."
           }
         },
         "required": [
@@ -3702,7 +3702,7 @@
         ]
       },
       "CreatePlanV04": {
-        "description": "0.4 plan creation: the user explicitly chooses the quote requirement; free text remains untrusted.",
+        "description": "0.4 plan creation: new clients omit quote_requirement and the server binds latest_available; older explicit values remain readable for compatibility. Free text remains untrusted.",
         "oneOf": [
           {
             "type": "object",
@@ -3719,8 +3719,7 @@
               }
             },
             "required": [
-              "text",
-              "quote_requirement"
+              "text"
             ]
           },
           {
@@ -3744,8 +3743,7 @@
             "required": [
               "skill_id",
               "subject_id",
-              "params",
-              "quote_requirement"
+              "params"
             ]
           }
         ]

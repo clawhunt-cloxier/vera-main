@@ -87,11 +87,11 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 核实登记材料后，在同一容器用 `emquant init-quote --demo-db` 登记，再检查已登录会话的 `/api/v1/me` 是否声明 `research_protocol=v0.4`。镜像更新成功和 `/readyz` 返回 200 都不代表已完成登记。
 
-0.4 前端默认选择 `latest_available`，仅当策略支持时可显式改为 `realtime_trade`。选择实时成交时要求连续交易状态、已确认实时性质和满足阈值的事件时间；选择最近可用时保留实际延迟和交易状态，仍受登记的新鲜度阈值限制。采集失败、权限缺失或过期不会回退为 observation 或 fixture。回滚可关闭新计划入口，但须保留迁移和已经冻结的清单，并让支持该版本的 worker 处理在途任务。
+0.4 网页新研究不展示行情要求，服务端绑定 `latest_available`。最近可用行情保留实际延迟和交易状态，仍受登记的新鲜度阈值限制。旧 0.4 客户端显式提交 `realtime_trade` 时仍要求连续交易状态、已确认实时性质和满足阈值的事件时间。采集失败、权限缺失或过期不会回退为 observation 或 fixture。回滚可关闭新计划入口，但须保留迁移和已经冻结的清单，并让支持该版本的 worker 处理在途任务。
 
 实际发布与真实盘中验收状态以 [T027 交接](handoffs/2026-11-17-T027-codex.md) 为准。开发测试通过不能替代真实账号、映射依据和交易时段端到端验收。
 
-实时行情的许可和映射使用 `vera emquant init-quote` 登记。该命令登记覆盖全部 A 股的 Choice 数据治理记录，要求字段、时间/价格口径、延迟性质、新鲜度阈值和证据引用；记录由数据库生成并受审计保护。`EMQUANT_QUOTE_LATENCY_MODE=real_time` 还必须有经核实的状态字段，并至少映射一个 `continuous` 状态；无法证明时使用 `unknown`，前端只能选择 `latest_available`。命令只登记治理事实，不向 Choice 发起请求，也不授予不存在的厂商权限。
+实时行情的许可和映射使用 `vera emquant init-quote` 登记。该命令登记覆盖全部 A 股的 Choice 数据治理记录，要求字段、时间/价格口径、延迟性质、新鲜度阈值和证据引用；记录由数据库生成并受审计保护。`EMQUANT_QUOTE_LATENCY_MODE=real_time` 还必须有经核实的状态字段，并至少映射一个 `continuous` 状态；无法证明时使用 `unknown`。命令只登记治理事实，不向 Choice 发起请求，也不授予不存在的厂商权限。
 
 当前 MVP 先登记 `unknown` 延迟策略并运行 `latest_available`。每个请求的证券代码直接交给 Choice；Choice 返回失败、空结果或无法通过字段/时间/新鲜度校验时，任务明确报错或弃权。交易时段核对 Choice 终端的最新价、`TIME`、接收时间和连续交易状态后，若证据充分，再登记 `real_time`；旧策略不原地修改。
 

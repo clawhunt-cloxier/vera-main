@@ -17,12 +17,20 @@ assert 'snapshot_mode' in schemas['ResearchPlan']['properties']
 assert 'snapshot_mode' in draft_schemas['ResearchPlan']['required']
 assert 'quote_requirement' in schemas['ResearchPlan']['properties']
 assert 'quote_requirement' in draft_schemas['ResearchPlan']['required']
-plan_request_04 = Draft202012Validator(draft_schemas['CreatePlanV04'], format_checker=FormatChecker())
-assert not list(plan_request_04.iter_errors({'text': '研究该公司', 'quote_requirement': 'realtime_trade'}))
-assert not list(plan_request_04.iter_errors({'skill_id': 'stock_analysis', 'subject_id': '00000000-0000-4000-8000-000000000001', 'params': {}, 'quote_requirement': 'latest_available'}))
-assert list(plan_request_04.iter_errors({'text': '研究该公司'}))
-assert list(plan_request_04.iter_errors({'text': '研究该公司', 'quote_requirement': 'unknown'}))
-assert list(plan_request_04.iter_errors({'text': '研究该公司', 'quote_requirement': 'realtime_trade', 'workspace_id': 'forged'}))
+for spec in (schemas, draft_schemas):
+    plan_request_04 = Draft202012Validator(
+        {'$ref': '#/components/schemas/CreatePlanV04', 'components': {'schemas': spec}},
+        format_checker=FormatChecker(),
+    )
+    text_request = {'text': '研究该公司'}
+    structured_request = {'skill_id': 'stock_analysis', 'subject_id': '00000000-0000-4000-8000-000000000001', 'params': {}}
+    for request in (text_request, structured_request):
+        plan_request_04.validate(request)
+        for requirement in ('latest_available', 'realtime_trade'):
+            plan_request_04.validate({**request, 'quote_requirement': requirement})
+        for invalid in (None, '', 'unknown'):
+            assert list(plan_request_04.iter_errors({**request, 'quote_requirement': invalid}))
+        assert list(plan_request_04.iter_errors({**request, 'workspace_id': 'forged'}))
 plan_mode_04 = Draft202012Validator({'type': 'object', 'properties': {k: draft_schemas['ResearchPlan']['properties'][k] for k in ('snapshot_mode', 'quote_requirement')},
                                    'required': ['snapshot_mode', 'quote_requirement'], 'allOf': draft_schemas['ResearchPlan']['allOf']})
 assert not list(plan_mode_04.iter_errors({'snapshot_mode': 'collect_latest', 'quote_requirement': 'realtime_trade'}))

@@ -551,8 +551,10 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           ['个股分析 TuShare 收盘研究', json, 'stock_analysis'],
           ['资金动向 TuShare 收盘研究', json, 'capital_flow'],
           ['深度研究 TuShare 收盘研究', json, 'deep_research'],
-          ['Choice + TuShare 双来源行情研究', observationMedia, 'stock_analysis'],
-          ['Choice 最近可用行情', media, 'stock_analysis'],
+        ];
+        const sourcesOptions = [
+          ['observation.v1', observationMedia, 'stock_analysis'],
+          ['v0.4', media, 'stock_analysis'],
         ];
         let expected = paths[0];
         let snapshotEnabled = true;
@@ -626,7 +628,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           } else throw new Error('Unexpected combined request ' + path);
           await route.fulfill({ contentType: responseType, body: JSON.stringify(body) });
         });
-        for (const entry of paths.slice(0, 3)) {
+        for (const entry of paths) {
           expected = entry;
           await page.goto(origin + '/app');
           await page.getByRole('heading', { name: '发起研究', exact: true }).waitFor();
@@ -634,6 +636,19 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           await page.getByRole('combobox', { name: '搜索研究对象' }).fill(entity.symbol);
           await page.getByRole('option', { name: new RegExp(entity.name) }).click();
           await page.getByRole('button', { name: '发起研究' }).click();
+          await page.getByRole('button', { name: '提交任务' }).click();
+          await page.getByRole('link', { name: '查看报告' }).waitFor();
+        }
+        for (const entry of sourcesOptions) {
+          expected = entry;
+          freeText = true;
+          await page.goto(origin + '/app');
+          await page.getByLabel('研究数据').selectOption(entry[0]);
+          await page.getByLabel('描述你想要的研究').fill('研究这只股票');
+          assert.equal(await page.getByText('行情要求', { exact: true }).count(), 0);
+          await page.getByRole('button', { name: '开始研究' }).click();
+          await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
+          freeText = false;
           if (expected[1] === observationMedia)
             await page.getByText(/按冻结时点取用已发布的 TuShare 数据/).waitFor();
           await page.getByRole('button', { name: '提交任务' }).click();
@@ -651,18 +666,6 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
               '/api/v1/reports/mock-report/versions/1/pdf'
             );
           }
-        }
-        for (const entry of paths.slice(3)) {
-          expected = entry;
-          freeText = true;
-          await page.goto(origin + '/app');
-          await page
-            .getByLabel('研究数据')
-            .selectOption(expected[1] === observationMedia ? 'observation.v1' : 'v0.4');
-          await page.getByLabel('描述你想要的研究').fill('研究这只股票');
-          await page.getByRole('button', { name: '开始研究' }).click();
-          await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
-          freeText = false;
         }
         expected = paths[0];
         await page.goto(origin + '/app/watchlist');

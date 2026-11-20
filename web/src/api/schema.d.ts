@@ -498,13 +498,13 @@ export interface components {
             synthetic: boolean;
             display_name: string;
             /**
-             * @description 当前部署支持的研究协议；v0.4 要求创建计划时明确 quote_requirement。
+             * @description 当前部署支持的研究协议；v0.4 创建计划时省略 quote_requirement 会使用 latest_available。
              * @enum {string}
              */
             research_protocol?: "observation.v1" | "v0.4";
             /** @description 可用 application/json 请求基于已发布收盘数据的投研计划，可与 Choice 简报协议同时使用。各标的及章节按实际数据预检。 */
             closing_research_available?: boolean;
-            /** @description 仅当全市场行情策略支持实时成交要求时为 true；缺省不开放此入口，实际证券的行情仍须在采集时核验。 */
+            /** @description 旧版 v0.4 客户端可用的严格实时能力标记；实际证券的行情仍须在采集时核验。 */
             realtime_trade_available?: boolean;
         };
         Cancel: {
@@ -681,7 +681,7 @@ export interface components {
              */
             snapshot_mode?: "fixed_legacy" | "collect_latest";
             /**
-             * @description 0.4 plans explicitly choose a quote requirement; legacy plans are null.
+             * @description Quote requirement bound to the 0.4 plan hash; null for legacy and observation plans.
              * @enum {string|null}
              */
             quote_requirement?: "latest_available" | "realtime_trade" | null;
@@ -804,16 +804,16 @@ export interface components {
             /** @enum {unknown} */
             persona: "fund_manager" | "analyst" | "individual" | "unspecified";
         };
-        /** @description 0.4 plan creation: the user explicitly chooses the quote requirement; free text remains untrusted. */
+        /** @description 0.4 plan creation: new clients omit quote_requirement and the server binds latest_available; older explicit values remain readable for compatibility. Free text remains untrusted. */
         CreatePlanV04: {
             text: string;
-            quote_requirement: components["schemas"]["QuoteRequirement"];
+            quote_requirement?: components["schemas"]["QuoteRequirement"];
         } | {
             skill_id: components["schemas"]["SkillId"];
             /** Format: uuid */
             subject_id: string;
             params: Record<string, never>;
-            quote_requirement: components["schemas"]["QuoteRequirement"];
+            quote_requirement?: components["schemas"]["QuoteRequirement"];
         };
         /**
          * @description realtime_trade requires authorized fresh quotes during verified continuous trading; latest_available accepts a policy-marked delayed quote.

@@ -3198,7 +3198,7 @@
         ]
       },
       "CreatePlanV04": {
-        "description": "0.4 plan creation: the user explicitly chooses the quote requirement; free text remains untrusted.",
+        "description": "0.4 plan creation: new clients omit quote_requirement and the server binds latest_available; older explicit values remain readable for compatibility. Free text remains untrusted.",
         "oneOf": [
           {
             "type": "object",
@@ -3219,8 +3219,7 @@
               }
             },
             "required": [
-              "text",
-              "quote_requirement"
+              "text"
             ]
           },
           {
@@ -3253,8 +3252,7 @@
             "required": [
               "skill_id",
               "subject_id",
-              "params",
-              "quote_requirement"
+              "params"
             ]
           }
         ]
