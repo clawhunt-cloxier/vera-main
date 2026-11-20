@@ -66,7 +66,7 @@ func (c *marketCollector) rows(api string, params map[string]string, fields stri
 			}
 		}
 		if d := r.Values["trade_date"]; d != "" {
-			if _, e := time.Parse(marketDay, d); e != nil || d > c.until || params["start_date"] != "" && d < params["start_date"] {
+			if _, e := time.Parse(marketDay, d); e != nil || d > c.until || params["start_date"] != "" && d < params["start_date"] || params["end_date"] != "" && d > params["end_date"] {
 				return nil, marketBad(api, "trade_date")
 			}
 		}

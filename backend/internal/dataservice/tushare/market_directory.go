@@ -91,7 +91,9 @@ func (c *marketCollector) directory() error {
 	}
 	vals := map[string]Row{}
 	if day := c.latestVal.Values["trade_date"]; day != "" {
-		raw, err := c.rows("daily_basic", map[string]string{"trade_date": day}, marketValFields, 5000, false)
+		// Doc 32 permits up to 6000 stocks per request. Rows follows the
+		// next page when the server returns a full page or has_more.
+		raw, err := c.rows("daily_basic", map[string]string{"trade_date": day}, marketValFields, 6000, false)
 		if err != nil {
 			return err
 		}
@@ -108,19 +110,37 @@ func (c *marketCollector) directory() error {
 	selected := append([]string{c.code}, c.Peers...)
 	// The complete dated roster also supplies evidence of absence. Never infer
 	// negative eligibility when the endpoint is empty or unentitled.
-	marginRows, err := c.rows("margin_secs", map[string]string{"trade_date": c.day}, "trade_date ts_code exchange", 5000, true)
-	if err != nil {
-		return err
-	}
 	margin := map[string]Row{}
-	pages := map[string]Row{}
-	for _, r := range marginRows {
-		margin[r.Values["ts_code"]] = r
-		if _, ok := pages[r.RawRef]; !ok {
-			page := r
-			page.RawLocator = "response_ref#$.data.items"
-			pages[r.RawRef] = page
+	pagesByExchange := map[string]map[string]Row{}
+	for _, code := range selected {
+		_, suffix, _ := strings.Cut(code, ".")
+		exchange := map[string]string{"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}[suffix]
+		if exchange == "" {
+			return marketBad("index_member_all", "A-share code")
 		}
+		if _, done := pagesByExchange[suffix]; done {
+			continue
+		}
+		// Doc 326 accepts a single exchange and session. An otherwise valid
+		// roster from Shanghai is not evidence of Shenzhen eligibility.
+		rows, err := c.rows("margin_secs", map[string]string{"trade_date": c.day, "exchange": exchange}, "trade_date ts_code exchange", 6000, true)
+		if err != nil {
+			return err
+		}
+		pages := map[string]Row{}
+		for _, r := range rows {
+			security := r.Values["ts_code"]
+			if !strings.HasSuffix(security, "."+suffix) {
+				return marketBad("margin_secs", "security exchange")
+			}
+			margin[security] = r
+			if _, ok := pages[r.RawRef]; !ok {
+				page := r
+				page.RawLocator = "response_ref#$.data.items"
+				pages[r.RawRef] = page
+			}
+		}
+		pagesByExchange[suffix] = pages
 	}
 	var refs []dataservice.Record
 	var refKeys []string
@@ -128,7 +148,8 @@ func (c *marketCollector) directory() error {
 	c.Entities = append(c.Entities, dataservice.Entity{Kind: "industry", Code: ind, Name: subject.Values["l2_name"], Status: "active", Classification: "SW2021 L2", Aliases: []string{subject.Values["l2_name"]}, Attrs: map[string]any{"index_code": ind, "level1_name": subject.Values["l1_name"]}})
 	for _, code := range selected {
 		m := current[code]
-		entity, rec, err := c.security(code, m, vals[code], margin[code], pages, joins)
+		_, suffix, _ := strings.Cut(code, ".")
+		entity, rec, err := c.security(code, m, vals[code], margin[code], pagesByExchange[suffix], joins)
 		if err != nil {
 			return err
 		}

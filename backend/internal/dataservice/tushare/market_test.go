@@ -214,3 +214,36 @@ func TestMarketRightsAndConflicts(t *testing.T) {
 		})
 	}
 }
+
+func TestMarginRosterIsExchangeScoped(t *testing.T) {
+	src := marketTestData()
+	for api, rows := range src.data {
+		for _, r := range rows {
+			if r["ts_code"] == "600001.SH" {
+				r["ts_code"] = "000001.SZ"
+				if api == "stock_basic" {
+					r["exchange"] = "SZSE"
+				}
+			}
+		}
+	}
+	b, err := collectMarket(t.Context(), src, "600000.SH", time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(b.Peers, "000001.SZ") {
+		t.Fatal("missing Shenzhen peer")
+	}
+	for _, e := range b.Entities {
+		if e.Code == "000001.SZ" {
+			if _, known := e.Attrs["margin_eligible"]; known {
+				t.Fatal("inferred Shenzhen eligibility from Shanghai roster")
+			}
+		}
+	}
+	for _, r := range b.Records {
+		if r.DatasetID == "corp.holder" && (r.PublishedAt == nil || r.PublishedAt.Nanosecond() != 999999000) {
+			t.Fatal("publication must round-trip through PostgreSQL exactly")
+		}
+	}
+}

@@ -84,7 +84,9 @@ func (c *marketCollector) holderCounts(window map[string]string) error {
 		}
 		d, _ := marketDate(period)
 		pub, _ := time.ParseInLocation(marketDay, r.Values["ann_date"], marketZone)
-		pub = pub.AddDate(0, 0, 1).Add(-time.Nanosecond)
+		// PostgreSQL stores timestamps to microseconds. Using its exact
+		// precision keeps repeated observations of the same filing identical.
+		pub = pub.AddDate(0, 0, 1).Add(-time.Microsecond)
 		// Date-only publication is conservative even if the vendor exposes a
 		// same-day row before the end of that day.
 		if r.ReceivedAt.Before(pub) {
