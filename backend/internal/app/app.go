@@ -102,7 +102,7 @@ func (a *App) build(ctx context.Context) error {
 			return err
 		}
 		if a.Brief != nil && a.Brief.ID() == a.TuShare.ID() {
-			return fmt.Errorf("Choice and TuShare require distinct provider identities")
+			return fmt.Errorf("configured providers must have distinct identities")
 		}
 		// The canonical research store serves TuShare closing observations.
 		// Choice retains its registered SDK collector and bound archive reader.

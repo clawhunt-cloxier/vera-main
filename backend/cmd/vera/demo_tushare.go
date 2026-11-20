@@ -77,11 +77,12 @@ func (s *demoTuShareSync) readiness(next http.Handler) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		ready, choiceReady, err := s.ready(ctx)
-		if err != nil {
+		switch {
+		case err != nil:
 			reason = "database_unavailable"
-		} else if !choiceReady {
+		case !choiceReady:
 			reason = "choice_provider_unavailable"
-		} else if ready {
+		case ready:
 			next.ServeHTTP(w, r)
 			return
 		}
