@@ -152,6 +152,9 @@ func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject datas
 	if id == "capital_flow" {
 		if disclosures {
 			av["S4"] = b.seatDisclosures(subject.ID, p.Window).availability()
+			if len(fundPositionSample(b, subject.ID)) > 0 && av["S5"].State == "unavailable" {
+				av["S5"] = limited(fundPositionLimit)
+			}
 		}
 		days := b.Window(p.Window)
 		count := 0
