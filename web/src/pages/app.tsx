@@ -411,6 +411,42 @@ export function Quick({ skill, daily = false }: { skill: SkillId; daily?: boolea
   );
 }
 
+function CapitalFlowAlternative({ subject }: { subject: Entity }) {
+  const nav = useNavigate();
+  const skills = useQuery({
+    queryKey: ['skills', 'legacy'],
+    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol: 'legacy' }),
+    staleTime: 0,
+  });
+  const preview = useMutation({
+    mutationFn: async () => {
+      const result = await post<PlanResult>(
+        '/api/v1/research-plans',
+        { skill_id: 'capital_flow', subject_id: subject.id, params: {} },
+        { idem: newKey(), protocol: 'legacy' }
+      );
+      if (result.kind !== 'plan' || !result.plan)
+        throw new Error(result.unsupported_reason || '当前无法为这只股票创建资金动向计划');
+      return result.plan;
+    },
+    onSuccess: (plan) => nav({ to: '/app/plan/$id', params: { id: plan.id } }),
+  });
+  const supported = skills.data?.items.some(
+    (skill) =>
+      skill.id === 'capital_flow' && skill.available && skill.subject_kinds.includes(subject.kind)
+  );
+  if (skills.isFetching || skills.isError || !supported) return null;
+  return (
+    <div className="card">
+      <p>你还可以查看{subject.name}的资金动向计划，核对行情和两融数据的可用情况。</p>
+      <button type="button" onClick={() => preview.mutate()} disabled={preview.isPending}>
+        {preview.isPending ? '正在检查…' : '查看资金动向计划'}
+      </button>
+      {preview.error && <ErrorBox error={preview.error} />}
+    </div>
+  );
+}
+
 export function PlanReview({ id }: { id: string }) {
   const me = useMe();
   const p = useQuery({
@@ -471,11 +507,13 @@ export function PlanReview({ id }: { id: string }) {
               </p>
             )}
           </div>
-          <p>
-            计划生成 {p.data.sections.length} 个章节，你可以取消勾选不需要的章节再提交。
-            {p.data.sections.some((s) => s.availability === 'limited') &&
-              '部分章节因数据不足而受限。'}
-          </p>
+          {p.data.executable && (
+            <p>
+              计划生成 {p.data.sections.length} 个章节，你可以取消勾选不需要的章节再提交。
+              {p.data.sections.some((s) => s.availability === 'limited') &&
+                '部分章节因数据不足而受限。'}
+            </p>
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -488,7 +526,7 @@ export function PlanReview({ id }: { id: string }) {
                 <label key={s.id} className={disabled.includes(s.id) ? 'muted' : ''}>
                   <input
                     type="checkbox"
-                    checked={!disabled.includes(s.id)}
+                    checked={s.availability !== 'unavailable' && !disabled.includes(s.id)}
                     onChange={() => toggle(s.id)}
                     disabled={s.availability === 'unavailable' || s.required}
                   />
@@ -500,7 +538,9 @@ export function PlanReview({ id }: { id: string }) {
             </fieldset>
             {!p.data.executable && (
               <p className="notice">
-                该计划当前无法执行{p.data.reason_code ? `（${p.data.reason_code}）` : ''}。
+                {p.data.reason_code === 'REQUIRED_SECTION_UNAVAILABLE'
+                  ? '必需章节缺少可用数据，本次计划无法提交。'
+                  : `该计划当前无法执行${p.data.reason_code ? `（${p.data.reason_code}）` : ''}。`}
               </p>
             )}
             <button type="submit" disabled={submit.isPending || !p.data.executable}>
@@ -508,6 +548,16 @@ export function PlanReview({ id }: { id: string }) {
             </button>
           </form>
           {submit.error && <ErrorBox error={submit.error} />}
+          {me.data &&
+            (me.data.research_protocol ?? 'legacy') === 'legacy' &&
+            !p.data.executable &&
+            p.data.reason_code === 'REQUIRED_SECTION_UNAVAILABLE' &&
+            planProtocol(p.data) === 'legacy' &&
+            (p.data.skill_id === 'stock_analysis' || p.data.skill_id === 'deep_research') &&
+            p.data.subject.kind === 'stock' &&
+            p.data.subject.skills.some((sk) => sk.skill_id === 'capital_flow' && sk.available) && (
+              <CapitalFlowAlternative subject={p.data.subject} />
+            )}
         </>
       )}
     </main>

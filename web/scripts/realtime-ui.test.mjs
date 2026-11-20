@@ -444,6 +444,116 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
     );
   }
 
+  await t.test('blocked annual research can preview capital flow for the same stock', async () => {
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      const button = page.getByRole('button', { name: '查看资金动向计划' });
+      const body = page.locator('main');
+      let entityCan = true,
+        registryCan = true,
+        previewCan = true,
+        originSkill = 'stock_analysis';
+      let previews = 0,
+        tasks = 0;
+      const me = { csrf_token: 'test', onboarded: true, synthetic: false, quota: {} };
+      const fixed = (id, flow) => ({
+        ...plan,
+        id,
+        skill_id: flow ? 'capital_flow' : originSkill,
+        skill_version: flow ? '1.0.1' : '1.0.2',
+        subject: {
+          ...entity,
+          skills: [{ skill_id: 'capital_flow', available: entityCan, reason: null }],
+        },
+        executable: flow && previewCan,
+        reason_code: flow && previewCan ? null : 'REQUIRED_SECTION_UNAVAILABLE',
+        snapshot_mode: 'fixed_legacy',
+        quote_requirement: null,
+        sections: [
+          {
+            id: 'S2',
+            title: flow ? '行情与交易' : '公司概况',
+            required: true,
+            availability: flow && previewCan ? 'available' : 'unavailable',
+            reason: flow
+              ? previewCan
+                ? null
+                : '缺少近期融资余额'
+              : '缺少最近年度财报可引用的主营业务原文',
+          },
+          { id: 'S5', title: '可选章节', required: false, availability: 'available', reason: null },
+        ],
+      });
+      await page.route(origin + '/app**', (route) =>
+        route.fulfill({ contentType: 'text/html', body: appHTML })
+      );
+      await page.route(origin + '/api/v1/**', async (route) => {
+        const req = route.request(),
+          path = new URL(req.url()).pathname.slice('/api/v1/'.length);
+        let result;
+        if (path === 'me') result = me;
+        else if (path === 'skills')
+          result = {
+            items: [
+              { ...stockSkill, id: 'capital_flow', title: '资金动向', available: registryCan },
+            ],
+          };
+        else if (path === 'research-plans' && req.method() === 'POST') {
+          previews++;
+          assert.equal(req.headers()['content-type'], 'application/json');
+          assert.deepEqual(req.postDataJSON(), {
+            skill_id: 'capital_flow',
+            subject_id: entity.id,
+            params: {},
+          });
+          result = { kind: 'plan', plan: fixed('alternative', true) };
+        } else if (path === 'research-plans/blocked') result = fixed('blocked', false);
+        else if (path === 'research-plans/alternative') result = fixed('alternative', true);
+        else if (path === 'research-tasks' && req.method() === 'POST') {
+          tasks++;
+          result = task;
+        } else throw new Error('Unexpected alternative plan request ' + path);
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify(result) });
+      });
+      for (const originType of ['stock_analysis', 'deep_research']) {
+        originSkill = originType;
+        await page.goto(origin + '/app/plan/blocked');
+        await button.waitFor();
+        assert.equal(await page.getByRole('button', { name: '提交任务' }).isDisabled(), true);
+        assert.match(await body.innerText(), /缺少最近年度财报可引用的主营业务原文/);
+        await page.getByRole('checkbox', { name: /S5/ }).uncheck();
+        assert.equal(previews, originType === 'stock_analysis' ? 0 : 1);
+        previewCan = originType === 'stock_analysis';
+        await button.click();
+        await page.waitForURL('**/app/plan/alternative');
+        await page.getByText('资金动向', { exact: true }).waitFor();
+        assert.equal(await page.getByRole('checkbox', { name: /S5/ }).isChecked(), true);
+        assert.equal(await page.getByRole('button', { name: '提交任务' }).isEnabled(), previewCan);
+        if (!previewCan) assert.match(await body.innerText(), /缺少近期融资余额/);
+        assert.equal(await button.count(), 0);
+        assert.equal(tasks, 0);
+      }
+      for (const [subjectAllowed, skillAllowed] of [
+        [false, true],
+        [true, false],
+      ]) {
+        entityCan = subjectAllowed;
+        registryCan = skillAllowed;
+        const registryResponse = subjectAllowed
+          ? page.waitForResponse((r) => r.url().endsWith('/api/v1/skills'))
+          : null;
+        await page.goto(origin + '/app/plan/blocked');
+        await page.getByText('必需章节缺少可用数据，本次计划无法提交。').waitFor();
+        if (registryResponse) await registryResponse;
+        assert.equal(await button.count(), 0);
+      }
+      assert.equal(previews, 2);
+    } finally {
+      await context.close();
+    }
+  });
+
   for (const synthetic of [false, true]) {
     await t.test(synthetic ? 'fixture industry comparison' : 'TuShare close research', async () => {
       const context = await browser.newContext();
