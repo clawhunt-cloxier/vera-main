@@ -440,7 +440,7 @@ func stockSearchTerms(text string) []string {
 		seen[v] = true
 		terms = append(terms, v)
 	}
-	add(text)
+	original := text
 	for _, word := range []string{
 		"最近可用行情", "最近行情", "近一个月", "近一周", "近三个月", "近半年", "近一年",
 		"研究报告", "深度研究", "资金动向", "资金面", "个股分析", "基本面", "财务面",
@@ -449,6 +449,9 @@ func stockSearchTerms(text string) []string {
 		text = strings.ReplaceAll(text, word, " ")
 	}
 	add(text)
+	if text == original {
+		add(original)
+	}
 	var run []rune
 	flush := func() {
 		if len(run) >= 2 {

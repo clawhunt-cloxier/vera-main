@@ -25,10 +25,10 @@ func TestMatchedSearchCodes(t *testing.T) {
 
 func TestStockSearchTermsExtractsNamesFromResearchText(t *testing.T) {
 	for input, want := range map[string][]string{
-		"中国移动":                 {"中国移动"},
-		"分析中国移动最近可用行情":       {"分析中国移动最近可用行情", "中国移动"},
-		"看看 中国石油 最近行情":        {"看看 中国石油 最近行情", "中国石油"},
-		"深度研究贵州茅台近一个月的基本面": {"深度研究贵州茅台近一个月的基本面", "贵州茅台"},
+		"中国移动":             {"中国移动"},
+		"分析中国移动最近可用行情":     {"中国移动"},
+		"看看 中国石油 最近行情":     {"中国石油"},
+		"深度研究贵州茅台近一个月的基本面": {"贵州茅台"},
 	} {
 		got := stockSearchTerms(input)
 		for _, term := range want {
