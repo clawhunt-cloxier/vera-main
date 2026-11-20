@@ -7,8 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/shopspring/decimal"
+
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 )
 
 var fundIdentifier = regexp.MustCompile(`^[0-9]{6}\.(OF|SH|SZ)$`)
