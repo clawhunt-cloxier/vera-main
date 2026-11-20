@@ -411,19 +411,18 @@ export function PlanReview({ id }: { id: string }) {
   const p = useQuery({
     queryKey: ['plan', id],
     queryFn: async () => {
-      // A text request can be created through the historical JSON protocol
-      // before the server discovers that the selected security needs a
-      // Choice collect_latest plan.  Read plan metadata through the
-      // observation representation first so refreshes can recover the
-      // original confirmation protocol, then fall back for fixture and
-      // TuShare-only deployments that do not expose that representation.
+      // Keep the negotiated session representation first.  A text request
+      // can be created through the historical JSON protocol before the
+      // server discovers that the selected security needs a Choice
+      // collect_latest plan.  In that case the server returns 406 and the
+      // observation representation exposes the original confirmation mode.
       try {
-        return await get<ResearchPlan>(`/api/v1/research-plans/${id}`, {
-          protocol: 'observation.v1',
-        });
+        return await get<ResearchPlan>(`/api/v1/research-plans/${id}`);
       } catch (err) {
         if (!(err instanceof ApiError) || err.status !== 406) throw err;
-        return get<ResearchPlan>(`/api/v1/research-plans/${id}`, { protocol: 'legacy' });
+        return get<ResearchPlan>(`/api/v1/research-plans/${id}`, {
+          protocol: 'observation.v1',
+        });
       }
     },
     staleTime: 60_000,
