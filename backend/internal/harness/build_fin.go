@@ -64,13 +64,13 @@ func (b *builder) fin(e uuid.UUID) finIndex {
 	ix := finIndex{byPeriod: map[string]map[string]dataservice.StoredRecord{}}
 	rs := b.B.Rows("fin.statement", e)
 	b.sources(rs)
-	annual := annualDocuments(b.B.Rows("doc.announcement", e))
+	docs := periodicDocuments(b.B.Rows("doc.announcement", e))
 	for _, r := range rs {
 		if str(r, "scope") != "consolidated" {
 			continue
 		}
-		if !b.B.Subject.Synthetic && str(r, "report_type") == "FY" {
-			document := str(annual[str(r, "report_period")], "announcement_id")
+		if !b.B.Subject.Synthetic {
+			document := str(docs[str(r, "report_period")], "announcement_id")
 			if document == "" || document != str(r, "filing_id") {
 				continue
 			}

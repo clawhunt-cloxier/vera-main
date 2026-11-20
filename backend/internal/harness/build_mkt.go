@@ -169,6 +169,9 @@ func (b *builder) market(e uuid.UUID, n int, group, section string) {
 				continue
 			}
 			b.S.Value(group, subj, "最近收盘价", days[i], facts.KindMarket, "不复权", "price", c, r.ID)
+			if !b.B.Subject.Synthetic {
+				b.S.Limit(subj + "的最近已取得收盘价对应交易日为 " + days[i] + "。")
+			}
 			break
 		}
 	}
@@ -189,7 +192,7 @@ func (b *builder) priceCharts(e uuid.UUID, days []string, pts []facts.Point, sec
 		price.Evidence = append(price.Evidence, p.EvidenceID)
 	}
 	price.Lines = []facts.SeriesLine{line}
-	rel := facts.Series{ID: "relative_perf", Title: "相对表现（区间起点 = 100）", Kind: "line", X: "trade_date", Unit: "点", Section: section}
+	rel := facts.Series{ID: "relative_perf", Title: "相对表现（各序列首个有效交易日 = 100）", Kind: "line", X: "trade_date", Unit: "点", Section: section}
 	add := func(name string, ps []facts.Point) {
 		var base *decimal.Decimal
 		l := facts.SeriesLine{Name: name}

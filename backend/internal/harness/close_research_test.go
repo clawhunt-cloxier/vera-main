@@ -166,3 +166,38 @@ func TestCloseRightsCoverSimAndRevocation(t *testing.T) {
 		t.Fatal("revocation allowed send")
 	}
 }
+
+func TestCloseCalendarThroughPreviousSession(t *testing.T) {
+	rows := []dataservice.StoredRecord{}
+	for _, day := range []string{"2026-11-18", "2026-11-19", "2026-11-20"} {
+		rows = append(rows, dataservice.StoredRecord{DatasetID: "ref.trading_calendar", Payload: map[string]any{"is_open": true, "trade_date": day}})
+	}
+	for _, tc := range []struct{ date, want string }{
+		{"2026-11-20T11:00:00", "2026-11-18"}, // Friday morning
+		{"2026-11-21T16:00:00", "2026-11-19"}, // Saturday
+		{"2026-11-23T16:00:00", "2026-11-20"}, // Monday close is still publishing
+		{"2026-12-01T16:00:00", ""},           // stale calendar
+	} {
+		at, err := time.ParseInLocation("2006-01-02T15:04:05", tc.date, cst)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b := newBundle(at, dataservice.EntityRow{}, nil, rows)
+		if got := previousCloseSession(b, rows); got != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.date, got, tc.want)
+		}
+	}
+}
+
+func TestClosePlanRequiresPublicationCutoff(t *testing.T) {
+	e := &Engine{Skills: TuShareSkills(), RealResearch: true}
+	subject := closeTestBuilder().B.Subject
+	if _, err := e.BuildPlan(t.Context(), uuid.New(), "stock_analysis", subject, nil); err == nil {
+		t.Fatal("plan bypassed database publication clock")
+	}
+	want := errors.New("publication clock unavailable")
+	e.CloseResearchCutoff = func(context.Context) (time.Time, error) { return time.Time{}, want }
+	if _, err := e.BuildPlan(t.Context(), uuid.New(), "stock_analysis", subject, nil); !errors.Is(err, want) {
+		t.Fatalf("unexpected cutoff failure %v", err)
+	}
+}

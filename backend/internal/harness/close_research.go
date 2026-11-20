@@ -67,26 +67,40 @@ func TuShareSkills() map[string]*Skill {
 }
 
 func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject dataservice.EntityRow, p Params, at time.Time, av map[string]Availability) error {
-	ds := []string{"ref.industry", "fin.statement", "doc.periodic_text", "news.item", "doc.announcement", "flow.margin"}
+	ds := []string{"ref.industry", "fin.statement", "doc.periodic_text", "news.item", "doc.announcement", "flow.margin", "mkt.daily_bar", "mkt.valuation_daily"}
 	recs, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: ds, EntityIDs: []uuid.UUID{subject.ID}, AsOf: at})
 	if err != nil {
 		return err
 	}
-	b := newBundle(at, subject, nil, recs)
+	calendar, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{"ref.trading_calendar"}, AsOf: at})
+	if err != nil {
+		return err
+	}
+	b := newBundle(at, subject, nil, append(recs, calendar...))
+	validSince := previousCloseSession(b, calendar)
+	lastBar := lastMarketDay(b.Rows("mkt.daily_bar", subject.ID), "close", true)
+	lastVal := lastMarketDay(b.Rows("mkt.valuation_daily", subject.ID), "total_mv", false)
+	if validSince == "" || lastBar < validSince {
+		reason := "收盘数据或交易日历需要刷新"
+		if lastBar != "" {
+			reason += "，已取得的行情截至 " + lastBar
+		}
+		if id == "stock_analysis" {
+			av["S6"] = unavailable(reason)
+		}
+		if id == "capital_flow" {
+			av["S2"] = unavailable(reason)
+		}
+	}
+	if id != "capital_flow" && (validSince == "" || lastVal < validSince) {
+		av["S5"] = unavailable("可比估值或交易日历需要刷新")
+	}
 	industry, hasIndustry := activeIndustry(b.Rows("ref.industry", subject.ID), at)
 	if !hasIndustry && id != "capital_flow" {
 		av["S2"] = unavailable("缺少截至研究时点有效的申万行业分类")
 	}
 	if id == "capital_flow" {
-		open, err := e.Store.Query(ctx, dataservice.Query{ModelUse: true, DatasetIDs: []string{"ref.trading_calendar"}, AsOf: at})
-		if err != nil {
-			return err
-		}
-		cal := newBundle(at, subject, nil, open)
-		if len(cal.Days) < 2 {
-			av["S2"] = unavailable("缺少有效交易日历")
-		}
-		days := cal.Window(p.Window)
+		days := b.Window(p.Window)
 		count := 0
 		for _, r := range b.Rows("flow.margin", subject.ID) {
 			if _, ok := input(r, "financing_balance", "CNY"); ok && inWindow(r, "trade_date", days) {
@@ -96,12 +110,15 @@ func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject datas
 		if count < 2 {
 			av["S3"] = unavailable("观察窗口内融资余额不足两个交易日")
 		}
+		if validSince == "" || lastMarketDay(b.Rows("flow.margin", subject.ID), "financing_balance", false) < validSince {
+			av["S3"] = unavailable("融资余额尚未更新至最近收盘交易日或其前一交易日")
+		}
 		return nil
 	}
 	// Only consecutive annual statements support a year-on-year comparison.
 	years := map[string]map[string]bool{}
 	latest := ""
-	annual := annualDocuments(b.Rows("doc.announcement", subject.ID))
+	annual := periodicDocuments(b.Rows("doc.announcement", subject.ID))
 	for _, r := range b.Rows("fin.statement", subject.ID) {
 		period := str(r, "report_period")
 		if str(r, "scope") != "consolidated" || str(r, "report_type") != "FY" || !strings.HasSuffix(period, "-12-31") {
@@ -124,7 +141,9 @@ func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject datas
 	sections := map[string]bool{}
 	latestDisclosed := ""
 	for period := range annual {
-		latestDisclosed = max(latestDisclosed, period)
+		if strings.HasSuffix(period, "-12-31") {
+			latestDisclosed = max(latestDisclosed, period)
+		}
 	}
 	announcement := str(annual[latestDisclosed], "announcement_id")
 	finOK = finOK && latestDisclosed == latest && announcement != ""
@@ -180,4 +199,56 @@ func checkCloseCoverage(ctx context.Context, e *Engine, id string, subject datas
 		}
 	}
 	return nil
+}
+
+// Accept the latest completed session or its predecessor while the vendor
+// is publishing today's close. For a holiday, dated calendar rows (including
+// closed sessions) distinguish a holiday from a stale installation.
+func previousCloseSession(b *Bundle, calendar []dataservice.StoredRecord) string {
+	if len(b.Days) < 2 {
+		return ""
+	}
+	completed := b.AsOf.In(cst)
+	if completed.Hour() < 15 {
+		completed = completed.AddDate(0, 0, -1)
+	}
+	for completed.Weekday() == time.Saturday || completed.Weekday() == time.Sunday {
+		completed = completed.AddDate(0, 0, -1)
+	}
+	date := completed.Format(time.DateOnly)
+	idx, _ := slices.BinarySearch(b.Days, date)
+	if idx < len(b.Days) && b.Days[idx] == date {
+		idx++
+	}
+	if idx == 0 {
+		return ""
+	}
+	lastCalendar := ""
+	for _, r := range calendar {
+		day := str(r, "trade_date")
+		if day <= date {
+			lastCalendar = max(lastCalendar, day)
+		}
+	}
+	if lastCalendar < date {
+		prior := completed.AddDate(0, 0, -1)
+		for prior.Weekday() == time.Saturday || prior.Weekday() == time.Sunday {
+			prior = prior.AddDate(0, 0, -1)
+		}
+		if lastCalendar < prior.Format(time.DateOnly) {
+			return ""
+		}
+		return b.Days[idx-1]
+	}
+	return b.Days[max(0, idx-2)]
+}
+
+func lastMarketDay(rows []dataservice.StoredRecord, field string, allowSuspended bool) string {
+	last := ""
+	for _, r := range rows {
+		if _, ok := dec(r, field); ok || (allowSuspended && boolean(r, "suspended")) {
+			last = max(last, str(r, "trade_date"))
+		}
+	}
+	return last
 }

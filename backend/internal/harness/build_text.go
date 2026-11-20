@@ -24,18 +24,15 @@ func clip(s string, n int) string {
 var sectionNames = map[string]string{"business_overview": "主营业务", "mdna": "经营情况讨论与分析", "risk_factors": "风险因素",
 	"core_competence": "核心竞争力", "outlook_plan": "未来发展规划", "other": "其他"}
 
-// New annual announcements can supersede an archived PDF, including when
+// New periodic announcements can supersede an archived PDF, including when
 // parsing the replacement failed. Select from disclosure metadata first.
-func annualDocuments(rows []dataservice.StoredRecord) map[string]dataservice.StoredRecord {
+func periodicDocuments(rows []dataservice.StoredRecord) map[string]dataservice.StoredRecord {
 	byPeriod := map[string]dataservice.StoredRecord{}
 	for _, r := range rows {
 		if str(r, "category") != "periodic_report" || r.Period == nil || r.PublishedAt == nil {
 			continue
 		}
 		p := r.Period.Format("2006-01-02")
-		if !strings.HasSuffix(p, "-12-31") {
-			continue
-		}
 		old, ok := byPeriod[p]
 		if !ok || r.PublishedAt.After(*old.PublishedAt) {
 			byPeriod[p] = r
@@ -57,10 +54,12 @@ func (b *builder) periodicText(e uuid.UUID, sections []string, maxPer, clipLen, 
 	}
 	b.sources(rs)
 	var periods []string
-	docs := annualDocuments(b.B.Rows("doc.announcement", e))
+	docs := periodicDocuments(b.B.Rows("doc.announcement", e))
 	if !b.B.Subject.Synthetic {
 		for period := range docs {
-			periods = append(periods, period)
+			if strings.HasSuffix(period, "-12-31") {
+				periods = append(periods, period)
+			}
 		}
 	} else {
 		for _, r := range rs {

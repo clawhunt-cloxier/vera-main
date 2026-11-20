@@ -45,6 +45,7 @@ type Engine struct {
 	RealResearch bool
 	// WithCloseResearchUse holds current TuShare usage rights for the callback.
 	WithCloseResearchUse func(context.Context, func() error) error
+	CloseResearchCutoff  func(context.Context) (time.Time, error)
 }
 
 const PromptVersion = "1.1.0"
@@ -120,7 +121,21 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 	if err != nil {
 		return nil, err
 	}
-	asOf := e.Now()
+	var asOf time.Time
+	if sk.Version == CloseResearchVersion {
+		if e.CloseResearchCutoff == nil {
+			return nil, errs.Unavailable("PUBLICATION_CUTOFF_UNAVAILABLE", "数据发布截止时点不可用")
+		}
+		asOf, err = e.CloseResearchCutoff(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if asOf.IsZero() {
+			return nil, errs.Unavailable("PUBLICATION_CUTOFF_UNAVAILABLE", "缺少数据发布截止时点")
+		}
+	} else {
+		asOf = e.Now()
+	}
 	av, notes, err := sk.Plan(ctx, e, subject, &p, asOf)
 	if err != nil {
 		return nil, err
