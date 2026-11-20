@@ -162,6 +162,12 @@ func TestAdminDataSyncFiltersAndProviderTest(t *testing.T) {
 	if _, err := r.run("provider", "test", "other"); err == nil {
 		t.Fatal("testing an unconfigured provider succeeded")
 	}
+	if _, err := r.run("provider", "test", "tushare", "--research"); err == nil {
+		t.Fatal("TuShare research probes ran in fixture mode")
+	}
+	if _, err := r.run("provider", "test", r.a.Provider.ID(), "--wrong"); err == nil {
+		t.Fatal("invalid probe mode was ignored")
+	}
 }
 
 func TestAdminUsageReportAndReconcile(t *testing.T) {

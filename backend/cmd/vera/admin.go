@@ -30,6 +30,7 @@ const adminUsage = `vera admin <command>
   user list | user disable <id> | user enable <id> | user reset-password <id>
   quota set --user <id> [--active N] [--queued N] [--daily N] [--deep N]
   provider list | provider test <id>
+  provider test tushare --research      探测首个配置证券的名录、近一年公告和三张合并报表，各请求一行
   provider model-use tushare on|off     设置本数据库下一次研究可使用的 TuShare 权限
   data sync [--dataset <id>[,<id>]] [--since 2026-11-01]   按配置的数据提供方同步（只新增）
   usage report [--day 2026-11-07] [--tz UTC]   当日模型调用、token、费用（按用户与技能汇总）
@@ -255,6 +256,21 @@ func runAdmin(ctx context.Context, a *app.App, args []string, out io.Writer, who
 		res.resource = "provider"
 		return res, providerList(ctx, a, out)
 	case "provider test":
+		if len(args) == 4 && sub(2) == "tushare" && sub(3) == "--research" {
+			res.action, res.resource = "provider.test.research", "provider:tushare"
+			if a.TuShare == nil {
+				return res, errors.New("请先配置 TuShare 数据源")
+			}
+			checks, err := a.TuShare.ResearchAccess(ctx)
+			res.detail = map[string]any{"checks": checks}
+			if writeErr := json.NewEncoder(out).Encode(checks); writeErr != nil {
+				return res, writeErr
+			}
+			return res, err
+		}
+		if len(args) != 3 {
+			return res, errors.New("用法：provider test <id> 或 provider test tushare --research")
+		}
 		res.resource = "provider:" + sub(2)
 		return res, providerTest(ctx, a, sub(2), out)
 	case "provider model-use":

@@ -66,9 +66,9 @@ func responseError(api string, code int, msg string) error {
 	switch {
 	case strings.Contains(msg, "每分钟"), strings.Contains(msg, "频次"), strings.Contains(msg, "频率"), strings.Contains(lower, "too many"):
 		return classified(ds.ErrRateLimited, api)
-	case strings.Contains(lower, "token"):
+	case code == 40101, strings.Contains(lower, "token"):
 		return classified(ds.ErrAuthFailed, api)
-	case code == 2002, strings.Contains(msg, "没有访问"), strings.Contains(msg, "权限"), strings.Contains(msg, "积分"):
+	case code == 2002, code == 40203, strings.Contains(msg, "没有访问"), strings.Contains(msg, "权限"), strings.Contains(msg, "积分"):
 		return classified(ds.ErrNotCovered, api)
 	case code == -2001, strings.Contains(msg, "参数"):
 		return classified(ds.ErrSchemaChanged, api)
