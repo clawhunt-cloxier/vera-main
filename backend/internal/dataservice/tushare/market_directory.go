@@ -118,7 +118,7 @@ func (c *marketCollector) directory() error {
 		margin[r.Values["ts_code"]] = r
 		if _, ok := pages[r.RawRef]; !ok {
 			page := r
-			page.RawLocator = "$.data.items"
+			page.RawLocator = "response_ref#$.data.items"
 			pages[r.RawRef] = page
 		}
 	}
