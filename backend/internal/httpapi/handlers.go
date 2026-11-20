@@ -281,20 +281,12 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 	paused := harness.KillSwitch(r.Context(), s.Pool)
 	items := []Skill{}
 	registry := s.skillsFor(r)
+	choice := s.choiceRequest(r)
 	for _, id := range skillOrder {
 		sk := registry[id]
-		available := !paused
-		if s.choiceRequest(r) && !s.FullVendorResearch {
-			// Choice-only deployments retain the historical single-stock
-			// observation product until another provider supplies the close
-			// research datasets.
-			available = id == "stock_analysis"
-		}
-		// A configured Choice runtime is an additional data source, not a
-		// deployment-wide switch that hides the other research skills. Each
-		// skill computes its own section availability from the registered
-		// datasets during plan creation. Historical observation requests still
-		// select their legacy skill registry through skillsFor.
+		// Choice protocols build single-stock plans. On a combined deployment,
+		// ordinary JSON requests use the close research registry instead.
+		available := !paused && (!choice || id == "stock_analysis")
 		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: available})
 	}
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
