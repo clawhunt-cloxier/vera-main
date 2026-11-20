@@ -36,6 +36,8 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T032 | 统一最近可用行情与三技能入口 | T030、T031 | REVIEW | Codex / agent/codex/T032-unified-research | 2026-11-20T10:36Z 领取（范围含 0.4 请求契约、前端、计划、技能可用性与验收，无迁移）；网页移除行情要求，0.4 未显式指定时绑定 `latest_available`，保留旧协议。双厂商部署保留三类技能和双来源报告。见 [T032 交接](docs/handoffs/2026-11-20-T032-codex.md) |
 | T033 | 统一研究入口与真实数据章节扩展 | T030、T031、T032 | REVIEW | Codex / agent/codex/T033-unified-stock-research | 2026-11-20T12:19Z 领取，独占涉及的公共数据/技能契约和迁移 00021。三技能统一最近可用行情，补充数据按来源绑定任务；CI、部署与真实样本待确认。见 [T033 交接](docs/handoffs/2026-11-20-T033-codex.md)。 |
 
+| T034 | 浏览器确认研究计划 | T033（已部署） | IN_PROGRESS | Codex / agent/codex/T034-confirm-research-protocol | 2026-11-20T14:07Z 领取。范围为前端确认协议选择、浏览器回归和测试站验收。 |
+
 ## 里程碑
 
 M1 本地演示：T011–T018、T019a、T022（M1 范围）、T024。M2 测试环境：T014b、T019b、T021、T022、T023。M3 PILOT：T020。详见 ADR-0003 D12。
