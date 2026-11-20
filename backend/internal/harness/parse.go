@@ -140,13 +140,6 @@ func (e *Engine) ParsePlan(ctx context.Context, ws uuid.UUID, text string) (*Par
 		return res, nil
 	}
 	en := ents[0]
-	if e.Brief != nil && !e.hasCloseSkills() {
-		p, err := e.BuildPlan(ctx, ws, "stock_analysis", en, map[string]any{})
-		if err != nil {
-			return nil, err
-		}
-		return &ParseResult{Kind: "plan", Plan: p, Candidates: []Candidate{}, Suggestions: []string{}}, nil
-	}
 	if skill == "" {
 		skill = defaultSkill(en.Kind)
 	}

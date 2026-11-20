@@ -86,6 +86,12 @@ func (e *Engine) BuildRealtimePlan(ctx context.Context, ws uuid.UUID, skillID st
 	if skillID != "stock_analysis" {
 		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "当前行情简报仅支持单只 A 股")
 	}
+	// New clients use the deployment-wide latest-available policy and omit the
+	// legacy selector. Keep an explicit realtime_trade value for old clients,
+	// while treating an omitted value as latest_available.
+	if requirement == "" {
+		requirement = string(emquant.QuoteLatestAvailable)
+	}
 	if !e.RealtimeEnabled() {
 		return nil, errs.Unavailable("REALTIME_UNAVAILABLE", "行情数据源尚未配置")
 	}
@@ -98,7 +104,7 @@ func (e *Engine) BuildRealtimePlan(ctx context.Context, ws uuid.UUID, skillID st
 	}) == nil
 	definition, err := NewQuoteBriefPlan(subject, preview, ready, requirement)
 	if err != nil {
-		return nil, errs.Unprocessable("INVALID_QUOTE_REQUEST", "请明确选择行情要求并选择非模拟 A 股")
+		return nil, errs.Unprocessable("INVALID_QUOTE_REQUEST", "请选择非模拟 A 股")
 	}
 	hash, err := definition.Hash()
 	if err != nil {

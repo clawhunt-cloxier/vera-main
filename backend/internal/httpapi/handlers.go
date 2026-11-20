@@ -283,7 +283,19 @@ func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
 	registry := s.skillsFor(r)
 	for _, id := range skillOrder {
 		sk := registry[id]
-		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: !paused && (!s.choiceRequest(r) || id == "stock_analysis")})
+		available := !paused
+		if s.choiceRequest(r) && !s.FullVendorResearch {
+			// Choice-only deployments retain the historical single-stock
+			// observation product until another provider supplies the close
+			// research datasets.
+			available = id == "stock_analysis"
+		}
+		// A configured Choice runtime is an additional data source, not a
+		// deployment-wide switch that hides the other research skills. Each
+		// skill computes its own section availability from the registered
+		// datasets during plan creation. Historical observation requests still
+		// select their legacy skill registry through skillsFor.
+		items = append(items, Skill{ID: sk.ID, Version: sk.Version, Title: sk.Title, SubjectKinds: sk.Subjects, ParamsSchema: sk.Schema, Available: available})
 	}
 	httpx.JSON(w, r, 200, map[string]any{"items": items})
 	return nil
@@ -306,7 +318,10 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if realtimeVersion(r) && len(in.QuoteRequirement) == 0 {
-		return errs.BadRequest("INVALID_BODY", "0.4 请求必须明确 quote_requirement")
+		// The current product policy is latest available market data. The
+		// explicit field remains readable for old clients that requested
+		// realtime_trade, but new clients do not need to choose a requirement.
+		in.QuoteRequirement = json.RawMessage(`"latest_available"`)
 	}
 	if !realtimeVersion(r) && len(in.QuoteRequirement) != 0 {
 		return errs.BadRequest("INVALID_BODY", "旧版请求不支持 quote_requirement，请使用 0.4 协议")
