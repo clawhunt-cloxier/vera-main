@@ -41,6 +41,7 @@ func TestFilingDisclosureTimeScopeAndRevisions(t *testing.T) {
 	corr.Values["ann_date"] = "20260410"
 	delete(corr.Values, "rec_time")
 	originalRow := filingTestRow(map[string]string{"ann_date": "20260331", "f_ann_date": "20260331", "end_date": "20251231", "comp_type": "1", "report_type": "1", "revenue": "340000001.42"})
+	preAdjustment := filingTestRow(map[string]string{"ann_date": "20260331", "f_ann_date": "20260331", "end_date": "20251231", "comp_type": "1", "report_type": "5", "revenue": "340000001.42"})
 	revised := filingTestRow(map[string]string{"ann_date": "20260410", "f_ann_date": "20260410", "end_date": "20251231", "comp_type": "1", "report_type": "1", "revenue": "330000000"})
 	for _, tc := range []struct {
 		end  time.Time
@@ -51,7 +52,7 @@ func TestFilingDisclosureTimeScopeAndRevisions(t *testing.T) {
 		{filingTestEnd, 2},
 	} {
 		i := indexFilings([]Row{corr, original}, filingTestCode, tc.end)
-		rs, err := mapStatements(filingTestCode, "income", []Row{originalRow, revised}, i)
+		rs, err := mapStatements(filingTestCode, "income", []Row{originalRow, preAdjustment, revised}, i)
 		if err != nil || len(rs) != tc.want {
 			t.Fatalf("cutoff=%v rows=%v err=%v", tc.end, rs, err)
 		}
@@ -60,6 +61,23 @@ func TestFilingDisclosureTimeScopeAndRevisions(t *testing.T) {
 		}
 	}
 	idx := indexFilings([]Row{original, corr}, filingTestCode, filingTestEnd)
+	if !slices.Equal(idx.statementTypes(), []string{"1", "5"}) {
+		t.Fatal("known revision must request pre-adjustment consolidated rows")
+	}
+	for _, tc := range []struct {
+		day, typ string
+		want     bool
+	}{
+		{"20260331", "1", false}, // a latest value carrying the old date cannot identify the original
+		{"20260331", "5", true},  // the vendor retained an identified pre-adjustment original
+		{"20260410", "5", false}, // pre-adjustment values cannot populate the current filing
+		{"20260410", "1", true}, {"20260410", "4", false},
+	} {
+		_, ok := idx.statementEdition("20251231", tc.day, tc.typ)
+		if ok != tc.want {
+			t.Fatalf("wrong mapping for type %s and date %s", tc.typ, tc.day)
+		}
+	}
 	for _, change := range []map[string]string{{"comp_type": "2"}, {"report_type": "2"}, {"report_type": "4"}, {"report_type": "6"},
 		{"end_date": "20241231"}, {"ts_code": "600002.SH"}, {"f_ann_date": "20260420"}} {
 		r := filingTestRow(map[string]string{"ann_date": "20260331", "f_ann_date": "20260331", "end_date": "20251231", "comp_type": "1", "report_type": "1", "revenue": "10"})

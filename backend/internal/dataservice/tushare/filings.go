@@ -171,6 +171,35 @@ func (i filingIndex) match(period, day string) (disclosure, bool) {
 	return found[0], true
 }
 
+// Type 1 contains the vendor's latest consolidated values. After a correction,
+// those values must identify the new filing. Type 5 identifies retained
+// pre-adjustment values and can bind only to an earlier dated edition.
+func (i filingIndex) statementEdition(period, day, typ string) (disclosure, bool) {
+	a, ok := i.match(period, day)
+	if !ok {
+		return disclosure{}, false
+	}
+	editions := i.byPeriod[period]
+	latest := a.id == editions[len(editions)-1].id
+	switch typ {
+	case "1":
+		return a, latest
+	case "5":
+		return a, !latest
+	default:
+		return disclosure{}, false
+	}
+}
+
+func (i filingIndex) statementTypes() []string {
+	for _, editions := range i.byPeriod {
+		if len(editions) > 1 {
+			return []string{"1", "5"}
+		}
+	}
+	return []string{"1"}
+}
+
 func filingDecimal(s string) (string, error) {
 	v, err := decimal.NewFromString(s)
 	if err != nil || v.Exponent() < -40 || v.Exponent() > 30 {
@@ -184,7 +213,7 @@ func mapStatements(code, api string, rows []Row, index filingIndex) ([]dataservi
 	bad := map[string]bool{}
 	for _, row := range rows {
 		v := row.Values
-		if v["ts_code"] != code || v["report_type"] != "1" || v["comp_type"] != "1" {
+		if v["ts_code"] != code || v["comp_type"] != "1" {
 			continue
 		}
 		// f_ann_date is the actual disclosure date. Do not use end_date or an
@@ -193,7 +222,7 @@ func mapStatements(code, api string, rows []Row, index filingIndex) ([]dataservi
 		if day == "" {
 			day = v["ann_date"]
 		}
-		a, ok := index.match(v["end_date"], day)
+		a, ok := index.statementEdition(v["end_date"], day, v["report_type"])
 		if !ok {
 			continue
 		}
@@ -287,17 +316,22 @@ func collectFilings(ctx context.Context, src Source, code string, end time.Time,
 			result.Records = append(result.Records, a.announcement())
 		}
 	}
-	params := map[string]string{"ts_code": code, "start_date": start.Format("20060102"), "end_date": day.Format("20060102"), "report_type": "1"}
+	params := map[string]string{"ts_code": code, "start_date": start.Format("20060102"), "end_date": day.Format("20060102")}
 	for _, api := range []string{"income", "balancesheet", "cashflow"} {
 		if peer && api == "cashflow" {
 			continue
 		}
 		fields := append([]string{"ts_code", "ann_date", "f_ann_date", "end_date", "report_type", "comp_type"}, slices.Sorted(maps.Keys(filingAccounts[api]))...)
-		rows, err := src.Rows(ctx, api, params, fields, 100)
-		if err != nil {
-			return result, err
+		var financial []Row
+		for _, typ := range idx.statementTypes() {
+			params["report_type"] = typ
+			rows, err := src.Rows(ctx, api, params, fields, 100)
+			if err != nil {
+				return result, err
+			}
+			financial = append(financial, rows...)
 		}
-		rs, err := mapStatements(code, api, rows, idx)
+		rs, err := mapStatements(code, api, financial, idx)
 		if err != nil {
 			return result, err
 		}
