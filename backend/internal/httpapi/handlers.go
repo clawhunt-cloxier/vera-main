@@ -34,15 +34,17 @@ func (s *Server) meBody(r *http.Request) (Me, error) {
 	if s.FullVendorResearch {
 		me.ClosingResearchAvailable = s.closeGrant(r)(noop) == nil
 	}
-	quote, err := s.quoteCapabilities(r.Context())
-	if err != nil {
-		return me, err
-	}
-	if quote.Latest {
-		me.ResearchProtocol = "v0.4"
-		me.RealtimeTradeAvailable = quote.Realtime
-	} else if s.Engine.Brief != nil {
-		me.ResearchProtocol = "observation.v1"
+	if !s.combined() || s.choiceGrant(r)(noop) == nil {
+		quote, err := s.quoteCapabilities(r.Context())
+		if err != nil {
+			return me, err
+		}
+		if quote.Latest {
+			me.ResearchProtocol = "v0.4"
+			me.RealtimeTradeAvailable = quote.Realtime
+		} else if s.Engine.Brief != nil {
+			me.ResearchProtocol = "observation.v1"
+		}
 	}
 	if ws != uuid.Nil {
 		q, err := s.Engine.Quota(r.Context(), ws)

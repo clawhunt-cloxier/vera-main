@@ -26,6 +26,22 @@ type responseGrant func(func() error) error
 func noop() error                        { return nil }
 func unrestricted(fn func() error) error { return fn() }
 
+// Keep handler errors intact. A failed source check before the callback runs
+// means the report cannot currently be displayed.
+func checkSource(check responseGrant, message string) responseGrant {
+	return func(fn func() error) error {
+		called := false
+		err := check(func() error {
+			called = true
+			return fn()
+		})
+		if err != nil && !called {
+			return errs.Unavailable("SOURCE_UNAVAILABLE", message).Wrap(err)
+		}
+		return err
+	}
+}
+
 func (s *Server) closeGrant(r *http.Request) responseGrant {
 	return func(fn func() error) error {
 		err := s.Store.WithResearchUse(r.Context(), fn)
@@ -40,10 +56,14 @@ func (s *Server) closeGrant(r *http.Request) responseGrant {
 func (s *Server) choiceGrant(r *http.Request) responseGrant {
 	return func(fn func() error) error {
 		if s.combined() {
-			return s.Engine.WithChoiceResearchUse(r.Context(), fn)
+			return checkSource(func(use func() error) error { return s.Engine.WithChoiceResearchUse(r.Context(), use) }, "Choice 研究来源当前不可用")(fn)
 		}
 		return s.Engine.Brief.WithDisplayCatalog(r.Context(), fn)
 	}
+}
+
+func (s *Server) mixedGrant(r *http.Request) responseGrant {
+	return checkSource(func(use func() error) error { return s.Engine.WithMixedResearchUse(r.Context(), use) }, "双来源研究数据当前不可用")
 }
 
 func (s *Server) versionGrant(r *http.Request, version string) (responseGrant, error) {
@@ -52,7 +72,7 @@ func (s *Server) versionGrant(r *http.Request, version string) (responseGrant, e
 	}
 	switch {
 	case version == harness.MixedObservationVersion:
-		return func(fn func() error) error { return s.Engine.WithMixedResearchUse(r.Context(), fn) }, nil
+		return s.mixedGrant(r), nil
 	case version == emquant.ObservationBriefVersion || version == harness.RealtimeBriefVersion:
 		return s.choiceGrant(r), nil
 	case harness.IsCloseResearchVersion(version):
@@ -155,7 +175,9 @@ func (s *Server) snapshotGrant(r *http.Request, task uuid.UUID, version string, 
 	return func(fn func() error) error {
 		switch version {
 		case harness.MixedObservationVersion:
-			return s.Engine.WithMixedDisplay(ctx, ws, task, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return fn() })
+			return checkSource(func(use func() error) error {
+				return s.Engine.WithMixedDisplay(ctx, ws, task, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return use() })
+			}, "双来源研报的冻结数据当前不可读取")(fn)
 		case emquant.ObservationBriefVersion, harness.RealtimeBriefVersion:
 			if s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil {
 				return errs.Unavailable("SOURCE_UNAVAILABLE", "真实报告来源当前不可读取")
@@ -194,7 +216,7 @@ func (s *Server) listGrant(r *http.Request) ([]string, responseGrant, error) {
 		if observationVersion(r) || realtimeVersion(r) {
 			vs = append(vs, harness.MixedObservationVersion)
 		}
-		return vs, func(fn func() error) error { return s.Engine.WithMixedResearchUse(r.Context(), fn) }, nil
+		return vs, s.mixedGrant(r), nil
 	case ce == nil:
 		return vs, choice, nil
 	case te == nil:

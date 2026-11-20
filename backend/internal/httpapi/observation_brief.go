@@ -118,7 +118,9 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 		return nil
 	}
 	if version == harness.MixedObservationVersion {
+		var rendered bool
 		err = s.Engine.WithMixedDisplay(r.Context(), ws, task, func(o emquant.BriefObservation, records []dataservice.StoredRecord) error {
+			rendered = true
 			for _, rec := range records {
 				if rec.ID == id && rec.ProviderID == "tushare" {
 					httpx.JSON(w, r, 200, s.evidence(r, rec))
@@ -127,6 +129,9 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 			}
 			return display(o)
 		})
+		if err != nil && !rendered {
+			return true, errs.Unavailable("SOURCE_UNAVAILABLE", "双来源证据当前不可读取").Wrap(err)
+		}
 	} else {
 		err = s.choiceGrant(r)(func() error {
 			return s.Engine.Brief.WithSnapshot(r.Context(), ws, task, dataservice.SourceDisplay, display)

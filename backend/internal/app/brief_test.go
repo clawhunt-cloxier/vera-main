@@ -344,10 +344,10 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if err := (&App{Cfg: &fixtureCfg, Pool: pool}).build(ctx); err == nil {
 		t.Fatal("fixture rollback accepted real database")
 	}
-	t.Run("mixed closing snapshot", func(t *testing.T) { checkMixedObservation(t, a, ws, sub, id) })
+	t.Run("mixed closing snapshot", func(t *testing.T) { checkMixedObservation(t, a, ws, sub, id, token) })
 }
 
-func checkMixedObservation(t *testing.T, a *App, ws uuid.UUID, subject dataservice.EntityRow, historical uuid.UUID) {
+func checkMixedObservation(t *testing.T, a *App, ws uuid.UUID, subject dataservice.EntityRow, historical uuid.UUID, token string) {
 	ctx := t.Context()
 	store := dataservice.NewResearchStore(a.Pool, a.Store.Catalog(), "tushare", []string{subject.Code}, true)
 	e := *a.Engine
@@ -435,6 +435,7 @@ func checkMixedObservation(t *testing.T, a *App, ws uuid.UUID, subject dataservi
 	if err := e.Run(ctx, ws, task, 1); err != nil {
 		t.Fatal(err)
 	}
+	checkMixedHTTP(t, a, &e, store, subject, historical, doc, bar, token)
 	for _, provider := range []string{"tushare", a.Brief.ProviderID} {
 		if _, err := a.Pool.Exec(ctx, `UPDATE providers SET enabled=false WHERE id=$1`, provider); err != nil {
 			t.Fatal(err)
