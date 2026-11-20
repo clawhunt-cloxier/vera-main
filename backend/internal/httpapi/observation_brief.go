@@ -88,11 +88,12 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 		raw := o.Manifest.Liquidity
 		label := "日成交观察（非完整日线）"
 		var lines []string
-		if id == o.Manifest.Security.ID {
+		switch id {
+		case o.Manifest.Security.ID:
 			raw = o.Manifest.Security
 			label = "当前证券名称观察"
 			lines = []string{o.Manifest.Code + " · " + o.Name}
-		} else if id == o.Manifest.Liquidity.ID {
+		case o.Manifest.Liquidity.ID:
 			for _, row := range o.Rows {
 				volume, err := observationDisplayValue(row.VolumeShares, sharesToLotsShift)
 				if err != nil {
@@ -108,7 +109,7 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 				}
 				lines = append(lines, line)
 			}
-		} else {
+		default:
 			return errs.NotFound()
 		}
 		loc := "原始归档 SHA-256 " + raw.Source.BodySHA256 + "；$.data.Values（与 Codes/Indicators/Dates 轴对应）"
@@ -123,7 +124,16 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 			rendered = true
 			for _, rec := range records {
 				if rec.ID == id && rec.ProviderID == "tushare" {
-					httpx.JSON(w, r, 200, s.evidence(r, rec))
+					// Render only the frozen closing price actually bound to
+					// this brief. All labels come from the same manifest.
+					price, ok := rec.Payload["close"].(string)
+					day, hasDay := rec.Payload["trade_date"].(string)
+					if !ok || !hasDay {
+						return errs.NotFound()
+					}
+					label, unit := "不复权收盘价", "元/股"
+					basis := "TuShare 不复权收盘日线"
+					httpx.JSON(w, r, 200, Evidence{ID: id, DatasetID: rec.DatasetID, Provider: "TuShare Pro", Origin: rec.Origin, SourceTier: rec.SourceTier, Title: o.Name + " · " + label, Label: label, Value: &price, Unit: &unit, Basis: &basis, Period: &day, AvailableAt: rec.AvailableAt, PublishedAt: rec.PublishedAt, Locator: rec.RawLocator, ContentHash: rec.ContentHash})
 					return nil
 				}
 			}
@@ -133,9 +143,7 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 			return true, errs.Unavailable("SOURCE_UNAVAILABLE", "双来源证据当前不可读取").Wrap(err)
 		}
 	} else {
-		err = s.choiceGrant(r)(func() error {
-			return s.Engine.Brief.WithSnapshot(r.Context(), ws, task, dataservice.SourceDisplay, display)
-		})
+		err = s.withDaily(r, ws, task, display)
 	}
 	return true, err
 }
@@ -161,25 +169,23 @@ func (s *Server) realtimeEvidence(w http.ResponseWriter, r *http.Request, ws, ev
 	if s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil {
 		return true, errs.Unavailable("SOURCE_UNAVAILABLE", "真实证据来源当前不可读取")
 	}
-	err = s.choiceGrant(r)(func() error {
-		return s.Engine.Brief.Runtime.WithTaskSnapshotQuote(r.Context(), ws, task, dataservice.SourceDisplay, func(view emquant.QuoteView) error {
-			for _, q := range view.Quotes {
-				if q.StageID != evidenceID {
-					continue
-				}
-				basis := "冻结的 Choice 行情快照；时间分别表示行情事件、系统接收和数据库可用时点"
-				state := map[string]string{"continuous": "连续交易", "closed": "非交易状态", "suspended": "停牌", "unknown": "未确认"}[q.MarketState]
-				excerpt := fmt.Sprintf("最新价 %s 元；交易状态 %s；行情事件 %s；接收 %s；可用 %s", q.Price, state, q.EventAt.UTC().Format(time.RFC3339), q.ReceivedAt.UTC().Format(time.RFC3339), q.AvailableAt.UTC().Format(time.RFC3339))
-				loc := "原始归档 SHA-256 " + q.RawSHA256 + "；价格 " + q.Locators["NOW"] + "；时间 " + q.Locators["TIME"]
-				eventAt, receivedAt, unit := q.EventAt, q.ReceivedAt, "CNY/share"
-				httpx.JSON(w, r, 200, Evidence{ID: evidenceID, DatasetID: "mkt.intraday_quote", Provider: q.ProviderID,
-					Origin: "vendor_derived", SourceTier: "L2", Title: q.Code + " · 行情快照", Label: "行情最新价（厂商快照）",
-					Value: &q.Price, Unit: &unit, Basis: &basis, EventAt: &eventAt, ReceivedAt: &receivedAt, AvailableAt: q.AvailableAt,
-					LatencyMode: q.LatencyMode, Locator: &loc, Excerpt: &excerpt, ContentHash: q.RawSHA256})
-				return nil
+	err = s.withQuote(r, ws, task, func(view emquant.QuoteView) error {
+		for _, q := range view.Quotes {
+			if q.StageID != evidenceID {
+				continue
 			}
-			return errs.NotFound()
-		})
+			basis := "冻结的 Choice 行情快照；时间分别表示行情事件、系统接收和数据库可用时点"
+			state := map[string]string{"continuous": "连续交易", "closed": "非交易状态", "suspended": "停牌", "unknown": "未确认"}[q.MarketState]
+			excerpt := fmt.Sprintf("最新价 %s 元；交易状态 %s；行情事件 %s；接收 %s；可用 %s", q.Price, state, q.EventAt.UTC().Format(time.RFC3339), q.ReceivedAt.UTC().Format(time.RFC3339), q.AvailableAt.UTC().Format(time.RFC3339))
+			loc := "原始归档 SHA-256 " + q.RawSHA256 + "；价格 " + q.Locators["NOW"] + "；时间 " + q.Locators["TIME"]
+			eventAt, receivedAt, unit := q.EventAt, q.ReceivedAt, "CNY/share"
+			httpx.JSON(w, r, 200, Evidence{ID: evidenceID, DatasetID: "mkt.intraday_quote", Provider: q.ProviderID,
+				Origin: "vendor_derived", SourceTier: "L2", Title: q.Code + " · 行情快照", Label: "行情最新价（厂商快照）",
+				Value: &q.Price, Unit: &unit, Basis: &basis, EventAt: &eventAt, ReceivedAt: &receivedAt, AvailableAt: q.AvailableAt,
+				LatencyMode: q.LatencyMode, Locator: &loc, Excerpt: &excerpt, ContentHash: q.RawSHA256})
+			return nil
+		}
+		return errs.NotFound()
 	})
 	return true, err
 }

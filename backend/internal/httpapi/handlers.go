@@ -324,11 +324,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 			return errs.BadRequest("INVALID_BODY", "请输入 2–500 字")
 		}
 		var err error
-		if realtimeVersion(r) {
+		switch {
+		case realtimeVersion(r):
 			res, err = s.Engine.ParseRealtimePlan(r.Context(), ws, t, requirement)
-		} else if observationVersion(r) {
+		case observationVersion(r):
 			res, err = s.Engine.ParseObservationPlan(r.Context(), ws, t)
-		} else {
+		default:
 			res, err = s.Engine.ParsePlan(r.Context(), ws, t)
 		}
 		if err != nil {
@@ -348,11 +349,12 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 			return errs.BadRequest("INVALID_BODY", "params 必须是对象")
 		}
 		var p *harness.Plan
-		if realtimeVersion(r) {
+		switch {
+		case realtimeVersion(r):
 			p, err = s.Engine.BuildRealtimePlan(r.Context(), ws, in.SkillID, sub, params, requirement)
-		} else if observationVersion(r) {
+		case observationVersion(r):
 			p, err = s.Engine.BuildObservationPlan(r.Context(), ws, in.SkillID, sub, params)
-		} else {
+		default:
 			p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
 		}
 		if err != nil {

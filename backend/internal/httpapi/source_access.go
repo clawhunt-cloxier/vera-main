@@ -179,19 +179,65 @@ func (s *Server) snapshotGrant(r *http.Request, task uuid.UUID, version string, 
 				return s.Engine.WithMixedDisplay(ctx, ws, task, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return use() })
 			}, "双来源研报的冻结数据当前不可读取")(fn)
 		case emquant.ObservationBriefVersion, harness.RealtimeBriefVersion:
-			if s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil {
-				return errs.Unavailable("SOURCE_UNAVAILABLE", "真实报告来源当前不可读取")
+			if version == harness.RealtimeBriefVersion {
+				return s.withQuote(r, ws, task, func(emquant.QuoteView) error { return fn() })
 			}
-			return meta(func() error {
-				if version == harness.RealtimeBriefVersion {
-					return s.Engine.Brief.Runtime.WithTaskSnapshotQuote(ctx, ws, task, dataservice.SourceDisplay, func(emquant.QuoteView) error { return fn() })
-				}
-				return s.Engine.Brief.WithSnapshot(ctx, ws, task, dataservice.SourceDisplay, func(emquant.BriefObservation) error { return fn() })
-			})
+			return s.withDaily(r, ws, task, func(emquant.BriefObservation) error { return fn() })
 		default:
 			return meta(fn)
 		}
 	}
+}
+
+// The provider switch and the bound snapshot are checked in one transaction.
+// In particular a full pool of concurrent readers never waits for a second
+// connection while already holding its first grant lock.
+func (s *Server) withDaily(r *http.Request, ws, task uuid.UUID, use func(emquant.BriefObservation) error) error {
+	brief := s.Engine.Brief
+	if brief == nil || brief.Runtime == nil {
+		return errs.Unavailable("SOURCE_UNAVAILABLE", "Choice 研究来源当前不可用")
+	}
+	if !s.combined() {
+		return brief.WithSnapshot(r.Context(), ws, task, dataservice.SourceDisplay, use)
+	}
+	return pgx.BeginFunc(r.Context(), s.Pool, func(tx pgx.Tx) error {
+		if err := brief.MixedProviderUse(r.Context(), tx, dataservice.SourceModel); err != nil {
+			return errs.Unavailable("SOURCE_UNAVAILABLE", "Choice 研究来源当前不可用").Wrap(err)
+		}
+		o, err := brief.Read(r.Context(), tx, ws, task, dataservice.SourceDisplay)
+		if err != nil {
+			return err
+		}
+		if o.Manifest.Security.Product != brief.Product || o.Manifest.Liquidity.Product != brief.Product {
+			return errs.Unavailable("SOURCE_UNAVAILABLE", "成交快照不属于当前 Choice 产品")
+		}
+		return use(o)
+	})
+}
+
+func (s *Server) withQuote(r *http.Request, ws, task uuid.UUID, use func(emquant.QuoteView) error) error {
+	brief := s.Engine.Brief
+	if brief == nil || brief.Runtime == nil {
+		return errs.Unavailable("SOURCE_UNAVAILABLE", "Choice 研究来源当前不可用")
+	}
+	if !s.combined() {
+		return brief.Runtime.WithTaskSnapshotQuote(r.Context(), ws, task, dataservice.SourceDisplay, use)
+	}
+	return pgx.BeginTxFunc(r.Context(), s.Pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
+		if err := brief.MixedProviderUse(r.Context(), tx, dataservice.SourceModel); err != nil {
+			return errs.Unavailable("SOURCE_UNAVAILABLE", "Choice 研究来源当前不可用").Wrap(err)
+		}
+		view, err := brief.Runtime.ReadTaskSnapshotQuote(r.Context(), tx, ws, task, dataservice.SourceDisplay)
+		if err != nil {
+			return err
+		}
+		for _, q := range view.Quotes {
+			if q.ProviderID != brief.ProviderID || q.Product != brief.Product {
+				return errs.Unavailable("SOURCE_UNAVAILABLE", "行情快照不属于当前 Choice 产品")
+			}
+		}
+		return use(view)
+	})
 }
 
 // Filter the list before SQL LIMIT. If a source is revoked, its own items and

@@ -3,14 +3,18 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
@@ -96,6 +100,35 @@ func checkMixedHTTP(t *testing.T, a *App, e *harness.Engine, store *dataservice.
 	if body := request("GET", evidencePath+bar.String(), "", obs, "", 200).Body.String(); !strings.Contains(body, "TuShare") || !strings.Contains(body, "12.34") {
 		t.Fatalf("incorrect frozen closing evidence: %.500s", body)
 	}
+	// Each protected reader has a single DB connection available. A reader
+	// that holds a grant and tries to borrow another connection deadlocks.
+	config := a.Pool.Config()
+	config.MaxConns, config.MinConns = 1, 0
+	smallPool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer smallPool.Close()
+	smallEngine := *e
+	smallEngine.Pool = smallPool
+	smallEngine.Store = dataservice.NewResearchStore(smallPool, store.Catalog(), "tushare", []string{subject.Code}, true)
+	small := (&httpapi.Server{Pool: smallPool, ID: identity.New(smallPool, identity.Options{}), Engine: &smallEngine, Store: smallEngine.Store, FullVendorResearch: true}).Handler()
+	var readers sync.WaitGroup
+	for _, path := range []string{oldPath, reportPath, evidencePath + bar.String(), evidencePath + choiceID.String()} {
+		readers.Go(func() {
+			bounded, cancel := context.WithTimeout(ctx, 7*time.Second)
+			defer cancel()
+			req := httptest.NewRequest("GET", path, nil).WithContext(bounded)
+			req.AddCookie(&http.Cookie{Name: identity.CookieName, Value: token})
+			req.Header.Set("Accept", obs)
+			rec := httptest.NewRecorder()
+			small.ServeHTTP(rec, req)
+			if rec.Code != 200 {
+				t.Errorf("concurrent read %s = %d: %.300s", path, rec.Code, rec.Body)
+			}
+		})
+	}
+	readers.Wait()
 	for _, disabled := range []string{"tushare", a.Brief.ProviderID} {
 		if _, err := a.Pool.Exec(ctx, `UPDATE providers SET enabled=false WHERE id=$1`, disabled); err != nil {
 			t.Fatal(err)
