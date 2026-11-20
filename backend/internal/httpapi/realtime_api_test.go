@@ -158,7 +158,9 @@ func TestRealtimeAPIRejectsMalformedOrMixedPlanInputs(t *testing.T) {
 		media  string
 		status int
 	}{
-		{map[string]any{"text": "分析API synthetic stock"}, realtimeMedia, 400},
+		// New clients omit the retired quote selector. The server binds the
+		// deployment-wide latest-available policy.
+		{map[string]any{"text": "分析API synthetic stock"}, realtimeMedia, 200},
 		{map[string]any{"text": "分析API synthetic stock", "quote_requirement": nil}, realtimeMedia, 422},
 		{map[string]any{"text": "分析API synthetic stock", "quote_requirement": "guess"}, realtimeMedia, 422},
 		{map[string]any{"text": "分析API synthetic stock", "params": map[string]any{}, "quote_requirement": "latest_available"}, realtimeMedia, 400},

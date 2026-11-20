@@ -141,7 +141,7 @@ const evidence = {
   content_hash: 'mock-only',
 };
 
-test('0.4 selection, confirmation, frozen report and evidence render on desktop and mobile', async (t) => {
+test('0.4 latest-available confirmation, frozen report and evidence render on desktop and mobile', async (t) => {
   const server = await createServer({ server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
   await server.listen();
   const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
@@ -160,14 +160,11 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
     { width: 390, height: 844 },
   ]) {
     await t.test(`${viewport.width}px`, async () => {
-      const allowRealtime = viewport.width === 1280;
       const selectedPlan = {
         ...plan,
-        quote_requirement: allowRealtime ? 'realtime_trade' : 'latest_available',
+        quote_requirement: 'latest_available',
       };
-      const selectedSource = allowRealtime
-        ? freshness
-        : { ...freshness, latency_mode: 'unknown', status: 'unknown', note: '交易状态：未确认' };
+      const selectedSource = freshness;
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
       page.setDefaultTimeout(10000);
@@ -191,13 +188,13 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
             synthetic: true,
             display_name: '模拟验收',
             research_protocol: 'v0.4',
-            realtime_trade_available: allowRealtime,
+            realtime_trade_available: false,
           };
         else if (path === '/api/v1/skills') body = { items: [] };
         else if (path === '/api/v1/research-plans' && request.method() === 'POST') {
           assert.equal(request.headers()['content-type'], media);
           assert.equal(request.headers().accept, media);
-          assert.equal(request.postDataJSON().quote_requirement, selectedPlan.quote_requirement);
+          assert.equal(request.postDataJSON().quote_requirement, undefined);
           body = {
             kind: 'plan',
             plan: selectedPlan,
@@ -225,21 +222,13 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
       });
       await page.goto(`${origin}/app`);
       await page.getByLabel('描述你想要的研究').fill('分析模拟验收公司');
-      assert.equal(
-        await page.getByRole('radio', { name: '最近可用行情', exact: true }).isChecked(),
-        true
-      );
-      const strict = page.getByRole('radio', { name: '交易中实时成交行情', exact: true });
-      if (allowRealtime) await strict.check();
-      else assert.equal(await strict.isDisabled(), true);
+      assert.equal(await page.getByText('行情要求', { exact: true }).count(), 0);
       await page.getByRole('button', { name: '开始研究', exact: true }).click();
       await page.getByRole('heading', { name: '研究计划：模拟验收公司', exact: true }).waitFor();
       assert.match(await page.locator('main').innerText(), /计划预览时间/);
       assert.match(
         await page.locator('main').innerText(),
-        allowRealtime
-          ? /若无法核实交易中实时成交条件，任务将弃权/
-          : /最近可用行情可能是延迟、盘后或休市数据/
+        /最近可用行情可能是延迟、盘后或休市数据/
       );
       await page.getByRole('button', { name: '提交任务', exact: true }).click();
       await page.getByRole('link', { name: '查看报告', exact: true }).click();
@@ -253,7 +242,6 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
         /14:00:01[\s\S]*14:00:02[\s\S]*14:00:03/
       );
       await page.getByRole('button', { name: '查看证据 1', exact: true }).click();
-      if (!allowRealtime) assert.match(await page.locator('#limits').innerText(), /延迟性质未知/);
       await page.getByText('模拟行情证据', { exact: true }).waitFor();
       assert.match(
         await page.getByTestId('evidence-panel').innerText(),
@@ -390,15 +378,7 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           else throw new Error(`Unexpected compatibility request ${path}`);
           await route.fulfill({ contentType: selected, body: JSON.stringify(body) });
         });
-        if (advertisedProtocol === 'v0.4') {
-          await page.goto(`${origin}/app`);
-          await page.getByRole('link', { name: 'Choice 日成交简报' }).click();
-          await page.getByRole('combobox').fill(oldPlan.subject.symbol);
-          await page.getByRole('option').first().click();
-          await page.getByRole('button', { name: '发起研究' }).click();
-          await page.waitForURL('**/app/plan/mock-old-plan');
-          await page.reload();
-        } else await page.goto(`${origin}/app/plan/mock-old-plan`);
+        await page.goto(`${origin}/app/plan/mock-old-plan`);
         await page.getByRole('heading', { name: '研究计划：模拟验收公司', exact: true }).waitFor();
         assert.match(await page.locator('main').innerText(), /这是非实时简报/);
         assert.equal(await page.getByRole('radio').count(), 0);
@@ -571,8 +551,8 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           ['个股分析 TuShare 收盘研究', json, 'stock_analysis'],
           ['资金动向 TuShare 收盘研究', json, 'capital_flow'],
           ['深度研究 TuShare 收盘研究', json, 'deep_research'],
-          ['日成交简报（Choice + TuShare）', observationMedia, 'stock_analysis'],
-          ['Choice 行情快照', media, 'stock_analysis'],
+          ['Choice + TuShare 双来源行情研究', observationMedia, 'stock_analysis'],
+          ['Choice 最近可用行情', media, 'stock_analysis'],
         ];
         let expected = paths[0];
         let snapshotEnabled = true;
@@ -587,7 +567,7 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           ...plan,
           skill_id: expected[2],
           skill_version: expected[1] === observationMedia ? '1.1.0-demo.4' : plan.skill_version,
-          quote_requirement: expected[1] === media ? 'realtime_trade' : null,
+          quote_requirement: expected[1] === media ? 'latest_available' : null,
           snapshot_mode: expected[1] === json ? 'fixed_legacy' : 'collect_latest',
         });
         await page.route(origin + '/app**', (route) =>
@@ -621,7 +601,8 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
               ...(freeText
                 ? { text: '研究这只股票' }
                 : { skill_id: expected[2], subject_id: entity.id, params: {} }),
-              ...(expected[1] === media ? { quote_requirement: 'realtime_trade' } : {}),
+              // New clients leave quote_requirement out. The server binds
+              // latest_available for the v0.4 protocol.
             });
             requests++;
             body = { kind: 'plan', plan: currentPlan() };
@@ -645,14 +626,13 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
           } else throw new Error('Unexpected combined request ' + path);
           await route.fulfill({ contentType: responseType, body: JSON.stringify(body) });
         });
-        for (const entry of paths) {
+        for (const entry of paths.slice(0, 3)) {
           expected = entry;
           await page.goto(origin + '/app');
+          await page.getByRole('heading', { name: '发起研究', exact: true }).waitFor();
           await page.getByRole('link', { name: expected[0], exact: true }).click();
           await page.getByRole('combobox', { name: '搜索研究对象' }).fill(entity.symbol);
           await page.getByRole('option', { name: new RegExp(entity.name) }).click();
-          if (expected[1] === media)
-            await page.getByRole('radio', { name: '交易中实时成交行情' }).check();
           await page.getByRole('button', { name: '发起研究' }).click();
           if (expected[1] === observationMedia)
             await page.getByText(/按冻结时点取用已发布的 TuShare 数据/).waitFor();
@@ -672,26 +652,33 @@ test('0.4 selection, confirmation, frozen report and evidence render on desktop 
             );
           }
         }
-        expected = paths[3];
-        freeText = true;
-        await page.goto(origin + '/app');
-        await page.getByLabel('研究数据').selectOption('observation.v1');
-        await page.getByLabel('描述你想要的研究').fill('研究这只股票');
-        await page.getByRole('button', { name: '开始研究' }).click();
-        await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
-        freeText = false;
+        for (const entry of paths.slice(3)) {
+          expected = entry;
+          freeText = true;
+          await page.goto(origin + '/app');
+          await page
+            .getByLabel('研究数据')
+            .selectOption(expected[1] === observationMedia ? 'observation.v1' : 'v0.4');
+          await page.getByLabel('描述你想要的研究').fill('研究这只股票');
+          await page.getByRole('button', { name: '开始研究' }).click();
+          await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
+          freeText = false;
+        }
         expected = paths[0];
         await page.goto(origin + '/app/watchlist');
         await page.getByRole('button', { name: '分析' }).click();
         await page.getByLabel('研究数据').selectOption('legacy');
         await page.getByRole('button', { name: '生成研究计划' }).click();
         await page.getByRole('heading', { name: '研究计划：' + entity.name }).waitFor();
-        assert.equal(requests, 7);
+        assert.equal(requests, 6);
         snapshotEnabled = false;
         await page.goto(origin + '/app');
-        await page.getByRole('link', { name: paths[0][0] }).waitFor();
-        assert.equal(await page.getByRole('link', { name: 'Choice 行情快照' }).count(), 0);
-        await page.getByRole('link', { name: paths[3][0] }).waitFor();
+        await page.getByRole('link', { name: paths[0][0], exact: true }).waitFor();
+        assert.equal(await page.getByRole('link', { name: 'Choice 最近可用行情' }).count(), 0);
+        assert.equal(
+          await page.getByRole('link', { name: 'Choice + TuShare 双来源行情研究' }).count(),
+          0
+        );
       } finally {
         await context.close();
       }
