@@ -57,11 +57,13 @@ func disclosureFrom(row Row, code string, end time.Time) (disclosure, bool) {
 	if err != nil || v["ts_code"] != code || a.title == "" {
 		return disclosure{}, false
 	}
-	a.published = d.AddDate(0, 0, 1).Add(-time.Nanosecond)
+	// PostgreSQL timestamptz stores microseconds. Use its last representable
+	// instant of the Shanghai disclosure date so replay compares identically.
+	a.published = d.AddDate(0, 0, 1).Add(-time.Microsecond)
 	if raw := v["rec_time"]; raw != "" {
 		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
 			if t, e := time.ParseInLocation(layout, raw, filingZone); e == nil {
-				a.published = t
+				a.published = t.Truncate(time.Microsecond)
 				a.exact = true
 				break
 			}
