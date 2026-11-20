@@ -267,13 +267,7 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
-		scope := ""
-		if s.Engine.Brief != nil {
-			scope = s.Engine.Brief.ProviderID
-		}
-		if s.FullVendorResearch {
-			scope = "tushare"
-		}
+		scope := s.replayScope()
 		sum := sha256.Sum256(append([]byte(r.URL.Path+"\x00"+representation(r)+"\x00"+scope+"\x00"), body...))
 		hash := hex.EncodeToString(sum[:])
 		route := r.Pattern
@@ -335,4 +329,17 @@ func (s *Server) idempotent(next http.Handler) http.Handler {
 			return err
 		})
 	})
+}
+
+// Scope cached domain responses to their deployment and licensed product.
+// NUL separators distinguish the current namespaces from all previous vendor
+// scopes (a single environment variable). The empty fixture scope is stable.
+func (s *Server) replayScope() string {
+	if s.FullVendorResearch {
+		return "v2\x00tushare"
+	}
+	if source := s.Engine.Brief; source != nil {
+		return "v2\x00emquant\x00" + source.ProviderID + "\x00" + source.Product
+	}
+	return ""
 }
