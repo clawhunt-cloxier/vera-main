@@ -1,6 +1,8 @@
 # TuShare Pro 收盘研究
 
-工作台可对已登记的 A 股公司运行个股分析、个股资金动向和公司深度研究。技能版本为 `1.0.1`。研究计划冻结数据库的可用截止时间，行情取最近已收盘交易日，财报同时受实际披露时间和本地入库时间约束。需要更新时，由运维发起同步。模型只使用计划中已有的证据和计算结果。
+工作台可对已登记的 A 股公司运行个股分析、个股资金动向和公司深度研究。资金动向版本为 `1.0.1`，个股分析和公司深研为 `1.0.2`，按更正后的公告版本选择分部数据。研究计划冻结数据库的可用截止时间，行情取最近已收盘交易日，财报同时受实际披露时间和本地入库时间约束。需要更新时，由运维发起同步。模型只使用计划中已有的证据和计算结果。
+
+同站启用 `VERA_DATA_PROVIDER=emquant+tushare` 后，可从工作台选择收盘研究、日成交简报或按账户开放的 Choice 行情快照。对于已登记且具备收盘数据及两家用途授权的证券，日成交简报将 Choice 成交量、成交额和换手率与 TuShare 不复权收盘价放入同一份报告。计划列出具体版本供用户确认。已确认的双来源简报绑定两组证据，重试复用该快照。财务和资金研究继续使用 TuShare，Choice 行情快照执行各自的时点和许可校验。[双厂商部署](DEPLOYMENT.md)
 
 ## 接口与覆盖
 
@@ -33,6 +35,7 @@
 
 ```sh
 vera admin provider test tushare
+vera admin provider test tushare --research
 vera sync
 vera admin provider list
 vera admin provider model-use tushare on
@@ -48,7 +51,7 @@ vera admin provider model-use tushare on
 
 ## 用真实账号验收
 
-从已有 Choice 测试站切换时，先在 Choice 配置下部署支持两家厂商的镜像并确认就绪，保存这次镜像 SHA、原有密钥配置版本和数据库备份。Compose 从宿主机 `/opt/vera/.env` 读取运行配置（权限 0600）。切换该文件内的厂商时一并设置 `VERA_REQUIRE_CHOICE_QUOTE=false`，保留旧值 true 会在启动时报告配置冲突。对象存储可复用现有桶，需为 `TUSHARE_S3_*` 对应身份授予桶内 `tushare/` 前缀的写入与读取权限。重复归档会读回原文核对哈希。
+从已有 Choice 测试站切换时，先在 Choice 配置下部署支持两家厂商的镜像并确认就绪，保存这次镜像 SHA、原有密钥配置版本和数据库备份。Compose 从宿主机 `/opt/vera/.env` 读取运行配置（权限 0600）。仅切到 TuShare 单厂商时需要设置 `VERA_REQUIRE_CHOICE_QUOTE=false`。组合模式可保留既有 Choice 行情就绪策略。对象存储可复用现有桶，需为 `TUSHARE_S3_*` 对应身份授予桶内 `tushare/` 前缀的写入与读取权限。重复归档会读回原文核对哈希。
 
 在 `/opt/vera` 使用已验证的同一镜像运行 `VERA_IMAGE="$(cat .current_image)" docker compose up -d vera`，使容器加载新配置。回退时先恢复原 Choice 密钥配置版本，再用切换前记录的镜像重建容器并核对 `/readyz`。CD 自动回滚只恢复镜像，厂商配置由运维恢复。保留数据库和归档对象，以便读取历史报告及证据。
 
