@@ -154,6 +154,7 @@ type filingSample struct {
 	doc      []byte
 	archived bool
 	requests []string
+	fail     map[string]dataservice.ErrClass
 }
 
 func (f *filingSample) FilingTransport() http.RoundTripper {
@@ -173,6 +174,9 @@ func (f *filingSample) Archive(_ context.Context, kind string, b []byte) (string
 }
 func (f *filingSample) Rows(_ context.Context, api string, p map[string]string, fields []string, size int) ([]Row, error) {
 	f.requests = append(f.requests, api)
+	if class := f.fail[api]; class != "" {
+		return nil, &dataservice.ProviderError{Class: class, Err: fmt.Errorf("synthetic endpoint %s", api)}
+	}
 	switch api {
 	case "anns_d":
 		if p["start_date"] <= "20260331" && p["end_date"] >= "20260331" {
@@ -194,6 +198,54 @@ func (f *filingSample) Rows(_ context.Context, api string, p map[string]string, 
 		return nil, fmt.Errorf("unexpected endpoint %s", api)
 	}
 	return nil, nil
+}
+
+func TestFilingPermissionGaps(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		fail     map[string]dataservice.ErrClass
+		records  int
+		errClass dataservice.ErrClass
+	}{
+		{"announcement subscription missing", map[string]dataservice.ErrClass{"anns_d": dataservice.ErrNotCovered}, 0, ""},
+		{"no announcements", map[string]dataservice.ErrClass{"anns_d": dataservice.ErrEmptyValid}, 0, ""},
+		// The announcement, income and balance data survive a missing cashflow
+		// subscription. An unentitled split by segment cannot discard them.
+		{"cashflow and segment subscription missing", map[string]dataservice.ErrClass{"cashflow": dataservice.ErrNotCovered, "fina_mainbz": dataservice.ErrNotCovered}, 3, ""},
+		{"account denied while reading announcements", map[string]dataservice.ErrClass{"anns_d": dataservice.ErrAuthFailed}, 0, dataservice.ErrAuthFailed},
+		{"bad credential on optional segment", map[string]dataservice.ErrClass{"fina_mainbz": dataservice.ErrAuthFailed}, 4, dataservice.ErrAuthFailed},
+		{"unexpected income schema", map[string]dataservice.ErrClass{"income": dataservice.ErrSchemaChanged}, 1, dataservice.ErrSchemaChanged},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			src := &filingSample{fail: test.fail}
+			batch, err := collectFilings(t.Context(), src, filingTestCode, filingTestEnd, false)
+			if test.errClass != "" {
+				if filingErrorClass(err) != test.errClass {
+					t.Fatalf("got %v, wanted upstream error %s", err, test.errClass)
+				}
+				return
+			}
+			if err != nil || len(batch.Notes) == 0 || len(batch.Records) != test.records {
+				t.Fatalf("records=%v notes=%v err=%v", batch.Records, batch.Notes, err)
+			}
+			for _, r := range batch.Records {
+				if r.RawRef == "" || r.RawSHA256 == "" || r.RawLocator == "" {
+					t.Fatal("record without archived evidence", r)
+				}
+			}
+			if test.records == 3 {
+				items := map[any]bool{}
+				for _, r := range batch.Records {
+					if r.DatasetID == "fin.statement" {
+						items[r.Payload["item_code"]] = true
+					}
+				}
+				if !items["IS.revenue"] || !items["BS.total_assets"] || items["CF.operating_net"] {
+					t.Fatal("wrong accounts after partial coverage", items)
+				}
+			}
+		})
+	}
 }
 
 // Exercise a generated Chinese PDF through the same bounded subprocess used by

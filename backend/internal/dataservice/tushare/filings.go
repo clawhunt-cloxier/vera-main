@@ -2,6 +2,7 @@ package tushare
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -288,6 +289,14 @@ func mapSegments(rows []Row, code string, a disclosure, typ string) ([]dataservi
 	return out, nil
 }
 
+func filingErrorClass(err error) dataservice.ErrClass {
+	var pe *dataservice.ProviderError
+	if errors.As(err, &pe) {
+		return pe.Class
+	}
+	return ""
+}
+
 func collectFilings(ctx context.Context, src Source, code string, end time.Time, peer bool) (Batch, error) {
 	var result Batch
 	day := end.In(filingZone)
@@ -303,6 +312,15 @@ func collectFilings(ctx context.Context, src Source, code string, end time.Time,
 		r, err := src.Rows(ctx, "anns_d", map[string]string{"ts_code": code, "start_date": lo.Format("20060102"), "end_date": hi.Format("20060102")},
 			[]string{"ts_code", "ann_date", "name", "title", "url", "rec_time"}, 2000)
 		if err != nil {
+			switch filingErrorClass(err) {
+			case dataservice.ErrEmptyValid:
+				continue
+			case dataservice.ErrNotCovered:
+				// A complete announcement index is needed to distinguish a
+				// current filing from a restatement. Market data is independent.
+				result.Notes = append(result.Notes, code+" 的 TuShare 公告索引缺少覆盖，财报与正文不可用")
+				return result, nil
+			}
 			return result, err
 		}
 		rows = append(rows, r...)
@@ -316,6 +334,9 @@ func collectFilings(ctx context.Context, src Source, code string, end time.Time,
 			result.Records = append(result.Records, a.announcement())
 		}
 	}
+	if len(idx.byPeriod) == 0 {
+		return result, nil
+	}
 	params := map[string]string{"ts_code": code, "start_date": start.Format("20060102"), "end_date": day.Format("20060102")}
 	for _, api := range []string{"income", "balancesheet", "cashflow"} {
 		if peer && api == "cashflow" {
@@ -327,6 +348,11 @@ func collectFilings(ctx context.Context, src Source, code string, end time.Time,
 			params["report_type"] = typ
 			rows, err := src.Rows(ctx, api, params, fields, 100)
 			if err != nil {
+				switch filingErrorClass(err) {
+				case dataservice.ErrEmptyValid, dataservice.ErrNotCovered:
+					result.Notes = append(result.Notes, fmt.Sprintf("%s 的 TuShare %s 合并报表类型 %s 缺少覆盖", code, api, typ))
+					continue
+				}
 				return result, err
 			}
 			financial = append(financial, rows...)
@@ -361,11 +387,12 @@ func collectFilings(ctx context.Context, src Source, code string, end time.Time,
 				r, err := src.Rows(ctx, "fina_mainbz", map[string]string{"ts_code": code, "period": p, "type": typ},
 					[]string{"ts_code", "end_date", "bz_item", "bz_code", "bz_sales", "bz_cost", "curr_type"}, 100)
 				if err != nil {
-					if ctx.Err() != nil {
-						return result, ctx.Err()
+					switch filingErrorClass(err) {
+					case dataservice.ErrEmptyValid, dataservice.ErrNotCovered:
+						result.Notes = append(result.Notes, "TuShare fina_mainbz "+typ+" 不可用")
+						continue
 					}
-					result.Notes = append(result.Notes, "TuShare fina_mainbz "+typ+" 不可用")
-					continue
+					return result, err
 				}
 				segs, err := mapSegments(r, code, a, typ)
 				if err != nil {
