@@ -31,6 +31,8 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T029 | 研报证据侧栏的读者展示 | T014 | REVIEW | Codex / agent/codex/T029-reader-evidence | 领取于 2026-11-19T15:57Z，范围为证据栏成交单位、来源定位与换手率说明，以及兼容旧报告的验收。见[交接](docs/handoffs/2026-11-19-T029-codex.md)。 |
 | T023 | test 环境部署、性能与恢复 | T019a、T022、T024 | TODO | 未领取 | 镜像、Compose 生产配置、Caddy/TLS、备份恢复演练、压测、告警、费用总上限开关；EXT-03；V08 |
 
+| T030 | TuShare 收盘研究与三项 MVP 研报 | T014 | IN_PROGRESS | Codex / agent/codex/T030-tushare | 2026-11-20T04:16Z 领取。范围含 Go 厂商适配、原件归档、数据治理、研究入口、技能与验收。见[交接](docs/handoffs/2026-11-20-T030-codex.md)。 |
+
 ## 里程碑
 
 M1 本地演示：T011–T018、T019a、T022（M1 范围）、T024。M2 测试环境：T014b、T019b、T021、T022、T023。M3 PILOT：T020。详见 ADR-0003 D12。
