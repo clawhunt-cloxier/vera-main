@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"time"
@@ -59,60 +58,6 @@ func formatObservationTable(t *facts.Table) error {
 	return nil
 }
 
-// This wraps all report representations, including PDF and series, for both
-// protocol versions. RLS lookup precedes system-side archive authorization.
-func (s *Server) protectBriefRead(w http.ResponseWriter, r *http.Request, fn func(http.ResponseWriter, *http.Request) error) error {
-	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.HasPrefix(r.URL.Path, "/api/v1/reports/") {
-		return fn(w, r)
-	}
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		return fn(w, r)
-	}
-	_, ws := principal(r)
-	var task uuid.UUID
-	var version string
-	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT t.id,t.skill_version FROM report_versions v JOIN research_tasks t ON t.id=v.task_id AND t.workspace_id=v.workspace_id WHERE v.report_id=$1`, id).Scan(&task, &version)
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return errs.NotFound()
-	}
-	if err != nil {
-		return err
-	}
-	if version != emquant.ObservationBriefVersion && version != harness.RealtimeBriefVersion {
-		return fn(w, r)
-	}
-	if s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil {
-		return errs.Unavailable("SOURCE_UNAVAILABLE", "真实报告来源当前不可读取")
-	}
-	if version == harness.RealtimeBriefVersion {
-		if s.Engine.Brief.Runtime == nil {
-			return errs.Unavailable("SOURCE_UNAVAILABLE", "实时行情来源当前不可读取")
-		}
-		// Build the response before taking the grant locks, then reauthorize
-		// and keep them through the final display. PDF and series share this gate.
-		buf := httptest.NewRecorder()
-		buf.Header().Set("Content-Type", w.Header().Get("Content-Type"))
-		if err := fn(buf, r); err != nil {
-			return err
-		}
-		return s.Engine.Brief.Runtime.WithTaskSnapshotQuote(r.Context(), ws, task, dataservice.SourceDisplay, func(emquant.QuoteView) error {
-			for k, values := range buf.Header() {
-				w.Header()[k] = values
-			}
-			w.WriteHeader(buf.Code)
-			_, err := w.Write(buf.Body.Bytes())
-			return err
-		})
-	}
-	if err := s.Engine.Brief.WithSnapshot(r.Context(), ws, task, dataservice.SourceDisplay, func(emquant.BriefObservation) error { return nil }); err != nil {
-		return err
-	}
-	return fn(w, r)
-}
-
 func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, error) {
 	id, err := pathID(r, "id")
 	if err != nil {
@@ -120,11 +65,15 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 	}
 	_, ws := principal(r)
 	var task uuid.UUID
+	var version string
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT s.task_id FROM observation_brief_snapshots s
- JOIN report_versions v ON v.task_id=s.task_id AND v.workspace_id=s.workspace_id
- WHERE (convert_from(s.manifest,'UTF8')::jsonb -> 'Liquidity' ->> 'ID'=$1 OR convert_from(s.manifest,'UTF8')::jsonb -> 'Security' ->> 'ID'=$1)
- ORDER BY v.delivered_at LIMIT 1`, id.String()).Scan(&task)
+		return tx.QueryRow(r.Context(), `SELECT s.task_id,t.skill_version FROM observation_brief_snapshots s
+			JOIN report_versions v ON v.task_id=s.task_id AND v.workspace_id=s.workspace_id
+			JOIN research_tasks t ON t.id=v.task_id AND t.workspace_id=v.workspace_id
+			CROSS JOIN LATERAL (SELECT convert_from(s.manifest,'UTF8')::jsonb AS m) manifest
+			WHERE t.skill_version=ANY($2::text[]) AND (m->'Liquidity'->>'ID'=$1 OR m->'Security'->>'ID'=$1
+			OR EXISTS(SELECT 1 FROM jsonb_array_elements(m->'Supplement') x WHERE x->>'ID'=$1))
+			ORDER BY (t.skill_version=$3) DESC,v.delivered_at DESC LIMIT 1`, id.String(), s.historyVersions(), emquant.ObservationBriefVersion).Scan(&task, &version)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s.realtimeEvidence(w, r, ws, id)
@@ -132,10 +81,10 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 	if err != nil {
 		return true, err
 	}
-	if s.Engine.Brief == nil {
+	if s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil {
 		return true, errs.Unavailable("SOURCE_UNAVAILABLE", "真实证据来源当前不可读取")
 	}
-	err = s.Engine.Brief.WithSnapshot(r.Context(), ws, task, dataservice.SourceDisplay, func(o emquant.BriefObservation) error {
+	display := func(o emquant.BriefObservation) error {
 		raw := o.Manifest.Liquidity
 		label := "日成交观察（非完整日线）"
 		var lines []string
@@ -143,7 +92,7 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 			raw = o.Manifest.Security
 			label = "当前证券名称观察"
 			lines = []string{o.Manifest.Code + " · " + o.Name}
-		} else {
+		} else if id == o.Manifest.Liquidity.ID {
 			for _, row := range o.Rows {
 				volume, err := observationDisplayValue(row.VolumeShares, sharesToLotsShift)
 				if err != nil {
@@ -159,13 +108,30 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 				}
 				lines = append(lines, line)
 			}
+		} else {
+			return errs.NotFound()
 		}
 		loc := "原始归档 SHA-256 " + raw.Source.BodySHA256 + "；$.data.Values（与 Codes/Indicators/Dates 轴对应）"
 		excerpt := strings.Join(lines, "\n")
 		basis := "来自 Choice，仅反映采集时取得的版本。采集时间不代表首次发布时间，数据为非实时观察。"
 		httpx.JSON(w, r, 200, Evidence{ID: id, DatasetID: raw.DatasetID, Provider: "Choice / 东方财富", Origin: "vendor_derived", SourceTier: "L2", Title: o.Name + " · " + label, Label: label, Basis: &basis, ReceivedAt: &raw.Source.ReceivedAt, AvailableAt: o.Cutoff, LatencyMode: "unknown", Locator: &loc, Excerpt: &excerpt, ContentHash: raw.Source.BodySHA256})
 		return nil
-	})
+	}
+	if version == harness.MixedObservationVersion {
+		err = s.Engine.WithMixedDisplay(r.Context(), ws, task, func(o emquant.BriefObservation, records []dataservice.StoredRecord) error {
+			for _, rec := range records {
+				if rec.ID == id && rec.ProviderID == "tushare" {
+					httpx.JSON(w, r, 200, s.evidence(r, rec))
+					return nil
+				}
+			}
+			return display(o)
+		})
+	} else {
+		err = s.choiceGrant(r)(func() error {
+			return s.Engine.Brief.WithSnapshot(r.Context(), ws, task, dataservice.SourceDisplay, display)
+		})
+	}
 	return true, err
 }
 
@@ -190,23 +156,25 @@ func (s *Server) realtimeEvidence(w http.ResponseWriter, r *http.Request, ws, ev
 	if s.Engine.Brief == nil || s.Engine.Brief.Runtime == nil {
 		return true, errs.Unavailable("SOURCE_UNAVAILABLE", "真实证据来源当前不可读取")
 	}
-	err = s.Engine.Brief.Runtime.WithTaskSnapshotQuote(r.Context(), ws, task, dataservice.SourceDisplay, func(view emquant.QuoteView) error {
-		for _, q := range view.Quotes {
-			if q.StageID != evidenceID {
-				continue
+	err = s.choiceGrant(r)(func() error {
+		return s.Engine.Brief.Runtime.WithTaskSnapshotQuote(r.Context(), ws, task, dataservice.SourceDisplay, func(view emquant.QuoteView) error {
+			for _, q := range view.Quotes {
+				if q.StageID != evidenceID {
+					continue
+				}
+				basis := "冻结的 Choice 行情快照；时间分别表示行情事件、系统接收和数据库可用时点"
+				state := map[string]string{"continuous": "连续交易", "closed": "非交易状态", "suspended": "停牌", "unknown": "未确认"}[q.MarketState]
+				excerpt := fmt.Sprintf("最新价 %s 元；交易状态 %s；行情事件 %s；接收 %s；可用 %s", q.Price, state, q.EventAt.UTC().Format(time.RFC3339), q.ReceivedAt.UTC().Format(time.RFC3339), q.AvailableAt.UTC().Format(time.RFC3339))
+				loc := "原始归档 SHA-256 " + q.RawSHA256 + "；价格 " + q.Locators["NOW"] + "；时间 " + q.Locators["TIME"]
+				eventAt, receivedAt, unit := q.EventAt, q.ReceivedAt, "CNY/share"
+				httpx.JSON(w, r, 200, Evidence{ID: evidenceID, DatasetID: "mkt.intraday_quote", Provider: q.ProviderID,
+					Origin: "vendor_derived", SourceTier: "L2", Title: q.Code + " · 行情快照", Label: "行情最新价（厂商快照）",
+					Value: &q.Price, Unit: &unit, Basis: &basis, EventAt: &eventAt, ReceivedAt: &receivedAt, AvailableAt: q.AvailableAt,
+					LatencyMode: q.LatencyMode, Locator: &loc, Excerpt: &excerpt, ContentHash: q.RawSHA256})
+				return nil
 			}
-			basis := "冻结的 Choice 行情快照；时间分别表示行情事件、系统接收和数据库可用时点"
-			state := map[string]string{"continuous": "连续交易", "closed": "非交易状态", "suspended": "停牌", "unknown": "未确认"}[q.MarketState]
-			excerpt := fmt.Sprintf("最新价 %s 元；交易状态 %s；行情事件 %s；接收 %s；可用 %s", q.Price, state, q.EventAt.UTC().Format(time.RFC3339), q.ReceivedAt.UTC().Format(time.RFC3339), q.AvailableAt.UTC().Format(time.RFC3339))
-			loc := "原始归档 SHA-256 " + q.RawSHA256 + "；价格 " + q.Locators["NOW"] + "；时间 " + q.Locators["TIME"]
-			eventAt, receivedAt, unit := q.EventAt, q.ReceivedAt, "CNY/share"
-			httpx.JSON(w, r, 200, Evidence{ID: evidenceID, DatasetID: "mkt.intraday_quote", Provider: q.ProviderID,
-				Origin: "vendor_derived", SourceTier: "L2", Title: q.Code + " · 行情快照", Label: "行情最新价（厂商快照）",
-				Value: &q.Price, Unit: &unit, Basis: &basis, EventAt: &eventAt, ReceivedAt: &receivedAt, AvailableAt: q.AvailableAt,
-				LatencyMode: q.LatencyMode, Locator: &loc, Excerpt: &excerpt, ContentHash: q.RawSHA256})
-			return nil
-		}
-		return errs.NotFound()
+			return errs.NotFound()
+		})
 	})
 	return true, err
 }

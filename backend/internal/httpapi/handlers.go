@@ -612,7 +612,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		rs, err := tx.Query(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE ($1::timestamptz IS NULL OR (t.created_at, t.id) < ($1, $2))
 			AND ($3 = '' OR t.skill_id=$3) AND ($4 = '' OR t.status=$4) AND ($5::uuid IS NULL OR t.subject_id=$5)
-			AND t.skill_version=ANY($7::text[]) ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, at, cid, skill, status, subj, n+1, s.historyVersions())
+			AND t.skill_version=ANY($7::text[]) ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, at, cid, skill, status, subj, n+1, s.listVersions(r))
 		if err != nil {
 			return err
 		}
@@ -728,7 +728,7 @@ func (s *Server) reportSummaries(r *http.Request, ws uuid.UUID, where string, ar
 	var rows []row
 	err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		scope := fmt.Sprintf(`EXISTS (SELECT 1 FROM research_tasks t WHERE t.id=v.task_id AND t.workspace_id=v.workspace_id AND t.skill_version=ANY($%d::text[]))`, len(args)+1)
-		rs, err := tx.Query(r.Context(), `SELECT report_id, version, title, skill_id, subject_id, result_kind, delivered_at FROM report_versions v WHERE `+scope+` AND `+where, append(args, s.historyVersions())...)
+		rs, err := tx.Query(r.Context(), `SELECT report_id, version, title, skill_id, subject_id, result_kind, delivered_at FROM report_versions v WHERE `+scope+` AND `+where, append(args, s.listVersions(r))...)
 		if err != nil {
 			return err
 		}
@@ -788,7 +788,7 @@ func (s *Server) loadDoc(r *http.Request) (uuid.UUID, harness.Document, []byte, 
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return uuid.Nil, doc, nil, err
 	}
-	if doc.SkillVersion == emquant.ObservationBriefVersion {
+	if doc.SkillVersion == emquant.ObservationBriefVersion || doc.SkillVersion == harness.MixedObservationVersion {
 		for _, section := range doc.Sections {
 			for i := range section.Tables {
 				if err := formatObservationTable(&section.Tables[i]); err != nil {
@@ -901,25 +901,35 @@ func (s *Server) feedback(w http.ResponseWriter, r *http.Request) error {
 // ---- evidence & calculations: visible only when used by a task of this workspace ----
 
 func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
-	if handled, err := s.briefEvidence(w, r); handled || err != nil {
-		return err
-	}
 	id, err := pathID(r, "id")
 	if err != nil {
 		return err
 	}
 	_, ws := principal(r)
-	var ok bool
+	// A published TuShare record may also be present in a standalone close
+	// task. That task grants its own path, independently of Choice.
+	var version string
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
-			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]))`, id, s.historyVersions()).Scan(&ok)
+		return tx.QueryRow(r.Context(), `SELECT t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
+			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]) AND t.skill_version=ANY($3::text[]) LIMIT 1`, id, s.historyVersions(),
+			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion}).Scan(&version)
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		if s.Engine.Brief != nil {
+			if handled, err := s.briefEvidence(w, r); handled || err != nil {
+				return err
+			}
+		}
+		return errs.NotFound()
+	}
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return errs.NotFound()
+	grant, err := s.versionGrant(r, version)
+	if err != nil {
+		return err
 	}
+	// Query before taking the write-time grant to keep the transaction short.
 	recs, err := s.Store.Get(r.Context(), []uuid.UUID{id})
 	if err != nil {
 		return err
@@ -928,8 +938,8 @@ func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
 	if !found || rec.ProviderID != s.historyRecordProvider() {
 		return errs.NotFound()
 	}
-	httpx.JSON(w, r, 200, s.evidence(r, rec))
-	return nil
+	ev := s.evidence(r, rec)
+	return grant(func() error { httpx.JSON(w, r, 200, ev); return nil })
 }
 
 func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidence {
