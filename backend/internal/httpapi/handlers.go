@@ -343,15 +343,7 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	case in.Text == nil && in.SubjectID != nil && in.SkillID != "" && len(in.Params) > 0 && string(in.Params) != "null":
-		catalog := s.catalogFor(r)
-		if s.Engine.Brief != nil && s.Engine.ChoiceCatalog != nil {
-			// A Choice-discovered security is intentionally absent from the
-			// TuShare research allowlist.  Resolve its identity from the broad
-			// catalog, then let plan construction enforce the selected skill's
-			// source permissions.
-			catalog = s.Engine.ChoiceCatalog
-		}
-		ents, err := catalog.Entities(r.Context(), []uuid.UUID{*in.SubjectID})
+		ents, err := s.catalogFor(r).Entities(r.Context(), []uuid.UUID{*in.SubjectID})
 		if err != nil {
 			return err
 		}
@@ -370,12 +362,7 @@ func (s *Server) createPlan(w http.ResponseWriter, r *http.Request) error {
 		case observationVersion(r):
 			p, err = s.Engine.BuildObservationPlan(r.Context(), ws, in.SkillID, sub, params)
 		default:
-			if in.SkillID == "stock_analysis" && s.Engine.Brief != nil && s.FullVendorResearch &&
-				s.Engine.Store != nil && !s.Engine.Store.RegisteredResearchSubject(sub.Code) {
-				p, err = s.Engine.BuildObservationPlan(r.Context(), ws, in.SkillID, sub, params)
-			} else {
-				p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
-			}
+			p, err = s.Engine.BuildPlan(r.Context(), ws, in.SkillID, sub, params)
 		}
 		if err != nil {
 			return err

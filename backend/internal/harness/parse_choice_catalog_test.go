@@ -24,7 +24,7 @@ func choiceCatalogParseEngine(t *testing.T) (*Engine, *pgxpool.Pool, *dataservic
 	if err != nil {
 		t.Fatal(err)
 	}
-	choice := dataservice.NewStore(pool, cat)
+	choice := dataservice.NewVendorStore(pool, cat)
 	// The research store deliberately contains only the configured TuShare
 	// subject. Choice-discovered securities remain searchable through choice.
 	research := dataservice.NewResearchStore(pool, cat, "tushare", []string{"600519.SH"}, true)
@@ -63,18 +63,21 @@ func TestParsePlanResolvesChoiceOnlyAshareNames(t *testing.T) {
 				t.Fatal(err)
 			}
 			ws := workspace(t, pool)
-			got, err := e.ParsePlan(ctx, ws, "分析"+tc.name)
+			got, err := e.ParseObservationPlan(ctx, ws, tc.name)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if got.Kind != "plan" || got.Plan == nil {
-				t.Fatalf("ParsePlan(%q) = kind %q, candidates=%v, want plan", tc.name, got.Kind, got.Candidates)
+				t.Fatalf("ParseObservationPlan(%q) = kind %q, candidates=%v, want plan", tc.name, got.Kind, got.Candidates)
 			}
 			if got.Plan.Subject.Code != tc.code || got.Plan.Subject.Name != tc.name {
 				t.Fatalf("resolved subject = %s %s, want %s %s", got.Plan.Subject.Code, got.Plan.Subject.Name, tc.code, tc.name)
 			}
 			if got.Plan.SkillVersion != emquant.ObservationBriefVersion {
 				t.Fatalf("unregistered Choice subject used skill version %q, want %q", got.Plan.SkillVersion, emquant.ObservationBriefVersion)
+			}
+			if _, err := e.BuildPlan(ctx, ws, "stock_analysis", got.Plan.Subject, nil); err == nil {
+				t.Fatal("catalog discovery granted closing research for an unregistered subject")
 			}
 		})
 	}

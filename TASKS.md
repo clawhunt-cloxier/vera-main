@@ -37,7 +37,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T033 | 统一研究入口与真实数据章节扩展 | T030、T031、T032 | REVIEW | Codex / agent/codex/T033-unified-stock-research | 2026-11-20T12:19Z 领取，独占涉及的公共数据/技能契约和迁移 00021。三技能统一最近可用行情，补充数据按来源绑定任务；CI、部署与真实样本待确认。见 [T033 交接](docs/handoffs/2026-11-20-T033-codex.md)。 |
 
 | T034 | 浏览器确认研究计划 | T033（已部署） | REVIEW | Codex / agent/codex/T034-confirm-research-protocol | 2026-11-20T14:07Z 领取。浏览器按计划快照模式确认，客户端与桌面、手机浏览器回归通过。[复现与验收](docs/handoffs/2026-11-20-T034-codex.md) |
-| T035 | 任意 A 股名称解析与 Choice 观察兜底 | T030、T033、T034 | REVIEW | Codex / agent/codex/T035-any-a-share | 2026-11-20T15:35Z 领取。自然语言解析使用 Choice 目录，未登记证券走 Choice `ObservationBrief`，已登记证券继续走 TuShare/Choice 双来源收盘研究；支持候选对象按钮与动态计划协议恢复。Go 全量测试、前端构建及 Playwright 模拟回归见 [交接](docs/handoffs/2026-11-20-T035-codex.md)。 |
+| T035 | 个股分析按简称或代码查找 A 股 | T030、T033、T034 | REVIEW | Codex / agent/codex/T035-any-a-share | 2026-11-20T15:35Z 领取。个股分析选择器按已授权来源发现证券，并按对应的收盘研究或成交简报协议创建及确认计划。[交接与验收](docs/handoffs/2026-11-20-T035-codex.md) |
 
 ## 里程碑
 

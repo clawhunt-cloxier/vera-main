@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
-  ApiError,
   fmtTime,
   get,
   newKey,
@@ -410,21 +409,7 @@ export function PlanReview({ id }: { id: string }) {
   const me = useMe();
   const p = useQuery({
     queryKey: ['plan', id],
-    queryFn: async () => {
-      // Keep the negotiated session representation first.  A text request
-      // can be created through the historical JSON protocol before the
-      // server discovers that the selected security needs a Choice
-      // collect_latest plan.  In that case the server returns 406 and the
-      // observation representation exposes the original confirmation mode.
-      try {
-        return await get<ResearchPlan>(`/api/v1/research-plans/${id}`);
-      } catch (err) {
-        if (!(err instanceof ApiError) || err.status !== 406) throw err;
-        return get<ResearchPlan>(`/api/v1/research-plans/${id}`, {
-          protocol: 'observation.v1',
-        });
-      }
-    },
+    queryFn: () => get<ResearchPlan>(`/api/v1/research-plans/${id}`),
     staleTime: 60_000,
   });
   const [disabled, setDisabled] = useState<string[]>([]);
