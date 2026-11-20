@@ -158,7 +158,7 @@ func (a *App) build(ctx context.Context) error {
 		a.Engine.WithCloseResearchUse = a.Store.WithResearchUse
 		a.Engine.CloseResearchCutoff = a.Store.PublicationCutoff
 	}
-	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Provider.Now}
+	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Provider.Now, ProviderID: a.Provider.ID()}
 	return nil
 }
 

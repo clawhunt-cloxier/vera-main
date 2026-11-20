@@ -54,9 +54,10 @@ type Item struct {
 }
 
 type Service struct {
-	Pool  *pgxpool.Pool
-	Store *dataservice.Store
-	Now   func() time.Time
+	Pool       *pgxpool.Pool
+	Store      *dataservice.Store
+	Now        func() time.Time
+	ProviderID string
 }
 
 var kinds = []string{"price_above", "price_below", "daily_change", "margin_change", "new_filing"}
@@ -129,7 +130,7 @@ func (s *Service) List(ctx context.Context, ws uuid.UUID) ([]Item, error) {
 			return err
 		}
 		for i := range out {
-			out[i].Snapshot, err = latestSnapshot(ctx, tx, out[i].ID)
+			out[i].Snapshot, err = s.latestSnapshot(ctx, tx, out[i].ID)
 			if err != nil {
 				return err
 			}
@@ -139,10 +140,10 @@ func (s *Service) List(ctx context.Context, ws uuid.UUID) ([]Item, error) {
 	return out, err
 }
 
-func latestSnapshot(ctx context.Context, tx pgx.Tx, item uuid.UUID) (*Snapshot, error) {
+func (s *Service) latestSnapshot(ctx context.Context, tx pgx.Tx, item uuid.UUID) (*Snapshot, error) {
 	var m []byte
 	var trig []string
-	err := tx.QueryRow(ctx, `SELECT metrics, triggered FROM watchlist_snapshots WHERE item_id=$1 ORDER BY trade_date DESC LIMIT 1`, item).Scan(&m, &trig)
+	err := tx.QueryRow(ctx, `SELECT metrics, triggered FROM watchlist_snapshots WHERE item_id=$1 AND provider_id=$2 ORDER BY trade_date DESC LIMIT 1`, item, s.ProviderID).Scan(&m, &trig)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -169,7 +170,7 @@ func (s *Service) Get(ctx context.Context, ws, id uuid.UUID) (Item, error) {
 		if err != nil {
 			return err
 		}
-		it.Snapshot, err = latestSnapshot(ctx, tx, id)
+		it.Snapshot, err = s.latestSnapshot(ctx, tx, id)
 		return err
 	})
 	return it, err
@@ -206,14 +207,16 @@ func (s *Service) Add(ctx context.Context, ws uuid.UUID, entity uuid.UUID, tags 
 		}
 		var price *decimal.Decimal
 		var day *string
+		var addedProvider *string
 		if bar != nil {
 			p := adjClose(*bar)
 			price = &p
 			d, _ := bar.Payload["trade_date"].(string)
 			day = &d
+			addedProvider = &bar.ProviderID
 		}
-		err := tx.QueryRow(ctx, `INSERT INTO watchlist_items(workspace_id,entity_id,tags,note,alerts,added_price,added_trade_date) VALUES($1,$2,$3,$4,$5,$6,$7)
-			ON CONFLICT (workspace_id, entity_id) DO NOTHING RETURNING id`, ws, entity, tags, note, ab, price, day).Scan(&id)
+		err := tx.QueryRow(ctx, `INSERT INTO watchlist_items(workspace_id,entity_id,tags,note,alerts,added_price,added_trade_date,added_price_provider_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+			ON CONFLICT (workspace_id, entity_id) DO NOTHING RETURNING id`, ws, entity, tags, note, ab, price, day, addedProvider).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errs.Conflict("ALREADY_IN_WATCHLIST", "该股票已在自选股中")
 		}
@@ -290,7 +293,8 @@ func str(r dataservice.StoredRecord, f string) string { s, _ := r.Payload[f].(st
 
 func (s *Service) series(ctx context.Context, ds string, e uuid.UUID, days int) ([]dataservice.StoredRecord, error) {
 	from := s.Now().AddDate(0, 0, -days)
-	return s.Store.Query(ctx, dataservice.Query{DatasetIDs: []string{ds}, EntityIDs: []uuid.UUID{e}, From: &from, AsOf: s.Now()})
+	recs, err := s.Store.Query(ctx, dataservice.Query{DatasetIDs: []string{ds}, EntityIDs: []uuid.UUID{e}, From: &from, AsOf: s.Now()})
+	return slices.DeleteFunc(recs, func(r dataservice.StoredRecord) bool { return r.ProviderID != s.ProviderID }), err
 }
 
 func (s *Service) latestBar(ctx context.Context, e uuid.UUID) (*dataservice.StoredRecord, error) {
@@ -314,7 +318,7 @@ func (s *Service) Refresh(ctx context.Context, ws, id uuid.UUID) error {
 	var added *decimal.Decimal
 	var alerts []byte
 	err := db.InWorkspace(ctx, s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT entity_id, added_price, alerts FROM watchlist_items WHERE id=$1`, id).Scan(&entity, &added, &alerts)
+		return tx.QueryRow(ctx, `SELECT entity_id, CASE WHEN added_price_provider_id=$2 THEN added_price END, alerts FROM watchlist_items WHERE id=$1`, id, s.ProviderID).Scan(&entity, &added, &alerts)
 	})
 	if err != nil {
 		return err
@@ -393,8 +397,8 @@ func (s *Service) Refresh(ctx context.Context, ws, id uuid.UUID) error {
 	}
 	m, _ := json.Marshal(sn)
 	return db.InWorkspace(ctx, s.Pool, ws, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO watchlist_snapshots(workspace_id,item_id,trade_date,metrics,triggered) VALUES($1,$2,$3,$4,$5)
-			ON CONFLICT (item_id, trade_date) DO UPDATE SET metrics=excluded.metrics, triggered=excluded.triggered`, ws, id, sn.TradeDate, m, sn.Triggered)
+		_, err := tx.Exec(ctx, `INSERT INTO watchlist_snapshots(workspace_id,item_id,trade_date,metrics,triggered,provider_id) VALUES($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (item_id, provider_id, trade_date) DO UPDATE SET metrics=excluded.metrics, triggered=excluded.triggered`, ws, id, sn.TradeDate, m, sn.Triggered, last.ProviderID)
 		return err
 	})
 }

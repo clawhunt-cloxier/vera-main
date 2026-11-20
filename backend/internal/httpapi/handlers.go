@@ -379,6 +379,9 @@ func (s *Server) getPlan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if !slices.Contains(s.historyVersions(), p.SkillVersion) {
+		return errs.NotFound()
+	}
 	if p.QuoteRequirement != nil && !realtimeVersion(r) {
 		return errs.New(406, "REPRESENTATION_UNAVAILABLE", "该计划需要 0.4 客户端")
 	}
@@ -407,6 +410,9 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) error {
 	plan, err := s.Engine.LoadPlan(r.Context(), ws, in.PlanID)
 	if err != nil {
 		return err
+	}
+	if !slices.Contains(s.historyVersions(), plan.SkillVersion) {
+		return errs.NotFound()
 	}
 	if !planConfirmationVersion(plan.SnapshotMode, plan.QuoteRequirement, representation(r)) {
 		return errs.Conflict("PLAN_VERSION_MISMATCH", "确认协议必须与创建计划的协议一致")
@@ -493,7 +499,7 @@ func (s *Server) task(r *http.Request, ws, id uuid.UUID) (Task, error) {
 	var tr taskRow
 	err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		var err error
-		tr, err = scanTask(tx.QueryRow(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE t.id=$1`, id))
+		tr, err = scanTask(tx.QueryRow(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE t.id=$1 AND t.skill_version=ANY($2::text[])`, id, s.historyVersions()))
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -600,7 +606,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		rs, err := tx.Query(r.Context(), `SELECT `+taskCols+` FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE ($1::timestamptz IS NULL OR (t.created_at, t.id) < ($1, $2))
 			AND ($3 = '' OR t.skill_id=$3) AND ($4 = '' OR t.status=$4) AND ($5::uuid IS NULL OR t.subject_id=$5)
-			ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, at, cid, skill, status, subj, n+1)
+			AND t.skill_version=ANY($7::text[]) ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, at, cid, skill, status, subj, n+1, s.historyVersions())
 		if err != nil {
 			return err
 		}
@@ -643,6 +649,16 @@ func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	_, ws := principal(r)
+	if err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
+		var exists bool
+		err := tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM research_tasks WHERE id=$1 AND skill_version=ANY($2::text[]))`, id, s.historyVersions()).Scan(&exists)
+		if err == nil && !exists {
+			return errs.NotFound()
+		}
+		return err
+	}); err != nil {
+		return err
+	}
 	if _, _, err := s.Engine.CancelTask(r.Context(), ws, id, in.Expected); err != nil {
 		return err
 	}
@@ -705,7 +721,8 @@ func (s *Server) reportSummaries(r *http.Request, ws uuid.UUID, where string, ar
 	}
 	var rows []row
 	err := db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		rs, err := tx.Query(r.Context(), `SELECT report_id, version, title, skill_id, subject_id, result_kind, delivered_at FROM report_versions WHERE `+where, args...)
+		scope := fmt.Sprintf(`EXISTS (SELECT 1 FROM research_tasks t WHERE t.id=v.task_id AND t.workspace_id=v.workspace_id AND t.skill_version=ANY($%d::text[]))`, len(args)+1)
+		rs, err := tx.Query(r.Context(), `SELECT report_id, version, title, skill_id, subject_id, result_kind, delivered_at FROM report_versions v WHERE `+scope+` AND `+where, append(args, s.historyVersions())...)
 		if err != nil {
 			return err
 		}
@@ -754,7 +771,7 @@ func (s *Server) loadDoc(r *http.Request) (uuid.UUID, harness.Document, []byte, 
 	_, ws := principal(r)
 	var body, series []byte
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT document, series FROM report_versions WHERE report_id=$1 AND version=$2`, id, v).Scan(&body, &series)
+		return tx.QueryRow(r.Context(), `SELECT v.document, v.series FROM report_versions v JOIN research_tasks t ON t.id=v.task_id AND t.workspace_id=v.workspace_id WHERE v.report_id=$1 AND v.version=$2 AND t.skill_version=ANY($3::text[])`, id, v, s.historyVersions()).Scan(&body, &series)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, doc, nil, errs.NotFound()
@@ -889,7 +906,7 @@ func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
 	var ok bool
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
 		return tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
-			WHERE $1 = ANY(sn.record_ids))`, id).Scan(&ok)
+			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]))`, id, s.historyVersions()).Scan(&ok)
 	})
 	if err != nil {
 		return err
@@ -902,7 +919,7 @@ func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	rec, found := recs[id]
-	if !found {
+	if !found || rec.ProviderID != s.historyRecordProvider() {
 		return errs.NotFound()
 	}
 	httpx.JSON(w, r, 200, s.evidence(r, rec))
@@ -986,7 +1003,7 @@ func (s *Server) getCalculation(w http.ResponseWriter, r *http.Request) error {
 	var c Calculation
 	var inputs []byte
 	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT id, formula_id, formula_version, inputs, result::text, unit, applicability, reason FROM calculations WHERE id=$1`, id).
+		return tx.QueryRow(r.Context(), `SELECT c.id, c.formula_id, c.formula_version, c.inputs, c.result::text, c.unit, c.applicability, c.reason FROM calculations c JOIN research_tasks t ON t.id=c.task_id AND t.workspace_id=c.workspace_id WHERE c.id=$1 AND t.skill_version=ANY($2::text[])`, id, s.historyVersions()).
 			Scan(&c.ID, &c.FormulaID, &c.FormulaVersion, &inputs, &c.Result, &c.Unit, &c.Applicability, &c.Reason)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
