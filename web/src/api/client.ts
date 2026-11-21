@@ -164,28 +164,25 @@ export const kindLabel: Record<string, string> = {
   attributed: '引述',
   scenario: '情景',
 };
-export const statusLabel: Record<string, string> = {
-  QUEUED: '排队中',
-  COLLECTING: '取数中',
-  ANALYZING: '分析中',
-  ASSEMBLING: '组装中',
-  DELIVERING: '交付中',
-  CANCEL_REQUESTED: '取消处理中',
+const outcomeLabels = {
   COMPLETED: '已完成',
-  ABSTAINED: '已弃权',
-  BUDGET_EXHAUSTED: '预算耗尽',
+  ABSTAINED: '未生成报告',
+  BUDGET_EXHAUSTED: '研究额度已用尽',
   CANCELLED: '已取消',
-  BLOCKED: '已阻止',
-  FAILED: '失败',
+  BLOCKED: '暂时无法执行',
+  FAILED: '研究失败',
 };
-export const terminal = [
-  'COMPLETED',
-  'ABSTAINED',
-  'BUDGET_EXHAUSTED',
-  'CANCELLED',
-  'BLOCKED',
-  'FAILED',
-];
+export const terminal = Object.keys(outcomeLabels);
+export const statusLabel: Record<Task['status'], string> = {
+  QUEUED: '处理中',
+  COLLECTING: '处理中',
+  ANALYZING: '处理中',
+  ASSEMBLING: '处理中',
+  DELIVERING: '处理中',
+  CANCEL_REQUESTED: '正在取消',
+  ...outcomeLabels,
+};
+export const taskStatusLabel = (status: Task['status']) => statusLabel[status] ?? '处理中';
 
 export const fmtTime = (s: string) =>
   new Intl.DateTimeFormat('zh-CN', {
