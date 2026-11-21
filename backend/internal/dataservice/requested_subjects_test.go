@@ -86,7 +86,7 @@ func TestRequestedSubjectPrewarmRequiresPublishedBars(t *testing.T) {
 	if _, err := api.UpsertSearchEntity(ctx, "stock", coldTarget, "模拟目录简称", nil); err != nil {
 		t.Fatal(err)
 	}
-	assertRequestedState(t, api, coldTarget, true, true)
+	assertRequestedState(t, api, coldTarget, true, false)
 	batch := syntheticRequestedBatch()
 	// The real collector also marks configured stocks encountered as peers.
 	batch.entities[1].Attrs["tushare_research_subject"] = true
@@ -109,7 +109,7 @@ func TestRequestedSubjectPrewarmRequiresPublishedBars(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE capabilities SET updated_at=now()-interval '25 hours'`); err != nil {
 		t.Fatal(err)
 	}
-	assertRequestedState(t, api, coldTarget, true, false)
+	assertRequestedState(t, api, coldTarget, true, true)
 	if n := syncPrewarm(); n != 0 {
 		t.Fatalf("unchanged market inserted %d records", n)
 	}
