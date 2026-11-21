@@ -256,7 +256,6 @@ func (b *builder) industryFin(ind dataservice.EntityRow, members []uuid.UUID, fi
 // industryValuation: median PE/PB of members and industry index performance.
 func (b *builder) industryValuation(ind dataservice.EntityRow, members []uuid.UUID, n int, group, section string) bool {
 	subj := ind.Name + "（" + ind.Code + "）"
-	basis := b.basis["mkt.valuation_daily"]
 	found := false
 	for _, m := range []struct{ f, label string }{{"pe_ttm", "PE(TTM)"}, {"pb_mrq", "PB(MRQ)"}} {
 		var in []facts.Input
@@ -273,7 +272,7 @@ func (b *builder) industryValuation(ind dataservice.EntityRow, members []uuid.UU
 		}
 		found = true
 		c := facts.Median("F16.median", "times", in, 3)
-		b.S.Computed(group, subj, "成分股 "+m.label+" 中位数（仅正值）", "截至 "+b.B.AsOf.Format("2006-01-02"), c, ind.Code+"|med|"+m.f).Vendor(basis)
+		b.vendorComputed(group, subj, "成分股 "+m.label+" 中位数（仅正值）", "截至 "+b.B.AsOf.Format("2006-01-02"), c, ind.Code+"|med|"+m.f, "mkt.valuation_daily", m.f, "times")
 	}
 	if idx := industryIndex(ind); idx != "" && len(b.B.Index(idx)) > 0 {
 		days := b.B.Window(n)
@@ -432,7 +431,7 @@ func (b *builder) groupVendor(label, code string, members []uuid.UUID, n int, gr
 	if len(xl) == 0 {
 		return false
 	}
-	f := b.S.Computed(group, label, "厂商口径超大单净额合计", wl, facts.Sum("F21.sum_over_window", "CNY", xl), code+"|xl").Vendor(b.basis["flow.order_size"])
+	f := b.vendorComputed(group, label, "厂商口径超大单净额合计", wl, facts.Sum("F21.sum_over_window", "CNY", xl), code+"|xl", "flow.order_size", "xl_net", "CNY")
 	f.Change = true
 	return true
 }

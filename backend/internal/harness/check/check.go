@@ -16,7 +16,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 )
 
-const RulesVersion = "1.0.0"
+const RulesVersion = "1.0.1"
 
 // Claim mirrors one item of section-output.schema.json.
 type Claim struct {
@@ -141,7 +141,7 @@ func checkKind(c Claim, cited []facts.Fact, cx Context) *Failure {
 	}
 	switch c.Kind {
 	case "computed":
-		if !has(facts.KindComputed) {
+		if !slices.ContainsFunc(cited, cx.Sheet.SupportsComputedClaim) {
 			return fail("R-05", "computed 结论必须引用计算事实")
 		}
 	case "attributed":

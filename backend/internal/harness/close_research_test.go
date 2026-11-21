@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/check"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 )
 
@@ -28,6 +31,51 @@ func addCloseRecord(b *builder, ds string, payload map[string]any) dataservice.S
 	k := key(ds, *r.EntityID)
 	b.B.byKey[k] = append(b.B.byKey[k], r)
 	return r
+}
+
+func TestVendorFlowCumulativeClaimsFromFrozenSheet(t *testing.T) {
+	b := closeTestBuilder()
+	b.basis = map[string]string{"flow.order_size": "测试厂商按单笔成交金额分档"}
+	b.B.Days = []string{"2026-10-27", "2026-10-28"}
+	for _, day := range b.B.Days {
+		addCloseRecord(b, "flow.order_size", map[string]any{"trade_date": day, "xl_net": "10000", "l_net": "-20000", "s_net": "30000"})
+	}
+	if !b.vendorFlow(b.B.Subject.ID, len(b.B.Days), "flow.vendor") || len(b.S.Facts) != 3 {
+		t.Fatal("missing order-size facts")
+	}
+	b.S.Finalize()
+	ledger, err := json.Marshal(b.S)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored facts.Sheet
+	if err := json.Unmarshal(ledger, &restored); err != nil {
+		t.Fatal(err)
+	}
+	s7 := Section{Groups: []string{"flow.vendor"}, Kinds: []string{KComp, KFact}}
+	cx := (&Engine{}).checkCtx(&taskRow{AsOf: b.B.AsOf}, &restored, s7)
+	for i, text := range []string{"超大单净额累计为 2.00 万元。", "大单净额累计为 -4.00 万元。", "小单净额累计为 6.00 万元。"} {
+		f := restored.Facts[i]
+		if f.Kind != facts.KindVendorDerived || len(f.Evidence) != 2 {
+			t.Fatalf("lost vendor provenance on %s", f.ID)
+		}
+		claim := check.Claim{Kind: KComp, Text: "按测试厂商分档口径，" + text, Refs: []string{f.ID}}
+		if failure := check.Check(claim, cx); failure != nil {
+			t.Errorf("%s: %v", f.ID, failure)
+		}
+		claim.Text = text
+		if failure := check.Check(claim, cx); failure == nil || failure.Rule != "R-07" {
+			t.Errorf("%s without vendor attribution: got %v, want R-07", f.ID, failure)
+		}
+	}
+	// All three fields in a row share its evidence UUID. Substituting a value
+	// from another field must fail even when the two-day total stays the same.
+	calc := &restored.Calcs[0]
+	calc.Inputs[0].Value = decimal.NewFromInt(30_000) // s_net in the first row
+	calc.Inputs[1].Value = decimal.NewFromInt(-10_000)
+	if restored.SupportsComputedClaim(restored.Facts[0]) {
+		t.Fatal("accepted altered per-row inputs after ledger restore")
+	}
 }
 
 func TestCloseMarketDoesNotInventFactorsOrCrossDates(t *testing.T) {

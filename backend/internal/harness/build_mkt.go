@@ -257,7 +257,7 @@ func (b *builder) valuation(e uuid.UUID, peers []uuid.UUID, group string) bool {
 					}
 				}
 			}
-			b.S.Computed(group, subj, fmt.Sprintf("%s 近 %d 年历史分位", m.label, yrs), fmt.Sprintf("近 %d 年至 %s", yrs, d), c, k(fmt.Sprintf("pct%d|%s", yrs, m.f))).Vendor(basis)
+			b.vendorComputed(group, subj, fmt.Sprintf("%s 近 %d 年历史分位", m.label, yrs), fmt.Sprintf("近 %d 年至 %s", yrs, d), c, k(fmt.Sprintf("pct%d|%s", yrs, m.f)), "mkt.valuation_daily", m.f, "times")
 		}
 		if len(peers) > 0 {
 			var pv []facts.PeerValue
@@ -276,7 +276,7 @@ func (b *builder) valuation(e uuid.UUID, peers []uuid.UUID, group string) bool {
 				}
 			}
 			med, rank, total := facts.PeerMedianRank(cur, pv)
-			mf := b.S.Computed(group, subj, m.label+" 可比公司中位数", d+"，可比公司 "+fmt.Sprint(len(pv))+" 家", med, k("peer|"+m.f)).Vendor(basis)
+			mf := b.vendorComputed(group, subj, m.label+" 可比公司中位数", d+"，可比公司 "+fmt.Sprint(len(pv))+" 家", med, k("peer|"+m.f), "mkt.valuation_daily", m.f, "times")
 			if med.OK() && cur.Value.IsPositive() {
 				b.S.Note(group, subj, m.label+" 在可比公司中的排位（由高到低）", d, facts.KindComputed,
 					fmt.Sprintf("第 %d 位（共 %d 家）", rank, total), append(slices.Clone(mf.Evidence), last.ID)...).Vendor(basis)

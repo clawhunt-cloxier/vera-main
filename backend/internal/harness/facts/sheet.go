@@ -21,21 +21,22 @@ const (
 
 // Fact is one entry of the FactSheet. Display is the only numeric form a model sees.
 type Fact struct {
-	ID       string           `json:"id"`
-	Group    string           `json:"group"`
-	Subject  string           `json:"subject"`
-	Label    string           `json:"label"`
-	Value    *decimal.Decimal `json:"-"`
-	Display  string           `json:"value"`
-	Unit     string           `json:"unit"`
-	Period   string           `json:"period"`
-	Kind     string           `json:"kind"`
-	Basis    string           `json:"basis,omitempty"`
-	Flags    []string         `json:"flags,omitempty"`
-	Change   bool             `json:"-"` // value is a change/flow whose sign carries direction
-	Evidence []uuid.UUID      `json:"-"`
-	CalcID   *uuid.UUID       `json:"-"`
-	Text     string           `json:"text,omitempty"`
+	ID          string           `json:"id"`
+	Group       string           `json:"group"`
+	Subject     string           `json:"subject"`
+	Label       string           `json:"label"`
+	Value       *decimal.Decimal `json:"-"`
+	Display     string           `json:"value"`
+	Unit        string           `json:"unit"`
+	Period      string           `json:"period"`
+	Kind        string           `json:"kind"`
+	Basis       string           `json:"basis,omitempty"`
+	Flags       []string         `json:"flags,omitempty"`
+	Change      bool             `json:"-"` // value is a change/flow whose sign carries direction
+	Evidence    []uuid.UUID      `json:"-"`
+	CalcID      *uuid.UUID       `json:"-"`
+	VendorField string           `json:"-"` // dataset.field from the frozen source row
+	Text        string           `json:"text,omitempty"`
 }
 
 // Negative reports whether the fact is a signed quantity below zero.
@@ -82,6 +83,9 @@ type Sheet struct {
 	// Frozen rows observed by builders. Real reports identify each dataset's
 	// actual contributor, even when other vendors are enabled in the catalog.
 	SourceProviders map[string]map[string]string `json:"source_providers,omitempty"` // dataset → provider → latest available_at
+	// A source row can contain several different measurements. Store only the
+	// fields that support an applicable vendor calculation, including their units.
+	VendorInputs map[string]map[uuid.UUID]Input `json:"vendor_inputs,omitempty"`
 }
 
 func NewSheet(task uuid.UUID, epoch int64) *Sheet {
@@ -106,14 +110,8 @@ func (s *Sheet) Value(group, subject, label, period, kind, basis, unit string, v
 func (s *Sheet) Computed(group, subject, label, period string, c Calc, key string) *Fact {
 	c.ID = StableID(s.Task, s.Epoch, key)
 	s.Calcs = append(s.Calcs, c)
-	var ev []uuid.UUID
-	for _, in := range c.Inputs {
-		if !slices.Contains(ev, in.EvidenceID) {
-			ev = append(ev, in.EvidenceID)
-		}
-	}
 	id := c.ID
-	f := Fact{Group: group, Subject: subject, Label: label, Period: period, Kind: KindComputed, Evidence: ev, CalcID: &id,
+	f := Fact{Group: group, Subject: subject, Label: label, Period: period, Kind: KindComputed, Evidence: c.inputEvidence(), CalcID: &id,
 		Change: c.Unit == "pp" || strings.Contains(c.FormulaID, "change") || strings.Contains(c.FormulaID, "yoy") ||
 			strings.Contains(c.FormulaID, "return") || strings.Contains(c.FormulaID, "gap") || strings.Contains(c.FormulaID, "premium") ||
 			strings.Contains(c.FormulaID, "drawdown") || strings.Contains(c.FormulaID, "consecutive")}
@@ -174,6 +172,54 @@ func (s *Sheet) Calc(id uuid.UUID) (Calc, bool) {
 		}
 	}
 	return Calc{}, false
+}
+
+// RecordVendorInput binds a field read directly from a frozen source row.
+func (s *Sheet) RecordVendorInput(field string, source Input) {
+	if s.VendorInputs == nil {
+		s.VendorInputs = make(map[string]map[uuid.UUID]Input)
+	}
+	if s.VendorInputs[field] == nil {
+		s.VendorInputs[field] = make(map[uuid.UUID]Input)
+	}
+	s.VendorInputs[field][source.EvidenceID] = source
+}
+
+// inputEvidence is the stable list of distinct evidence IDs bound to a calculation.
+func (c Calc) inputEvidence() []uuid.UUID {
+	var ids []uuid.UUID
+	seen := make(map[uuid.UUID]bool, len(c.Inputs))
+	for _, in := range c.Inputs {
+		if !seen[in.EvidenceID] {
+			ids = append(ids, in.EvidenceID)
+			seen[in.EvidenceID] = true
+		}
+	}
+	return ids
+}
+
+// SupportsComputedClaim checks whether a frozen fact can support a computed conclusion.
+// A vendor-defined measurement may also be the output of a system calculation.
+func (s *Sheet) SupportsComputedClaim(f Fact) bool {
+	if f.Kind == KindComputed {
+		return true
+	}
+	if f.Kind != KindVendorDerived || strings.TrimSpace(f.Basis) == "" || f.CalcID == nil || *f.CalcID == uuid.Nil || f.Value == nil {
+		return false
+	}
+	c, ok := s.Calc(*f.CalcID)
+	if !ok || !c.OK() || c.FormulaID == "" || c.FormulaVer == "" || !c.Result.Equal(*f.Value) {
+		return false
+	}
+	for _, in := range c.Inputs {
+		original, exists := s.VendorInputs[f.VendorField][in.EvidenceID]
+		if !exists || original.EvidenceID != in.EvidenceID || original.Unit != in.Unit || !original.Value.Equal(in.Value) {
+			return false
+		}
+	}
+	display, unit := Display(*c.Result, c.Unit)
+	return display == f.Display && unit == f.Unit && len(f.Evidence) > 0 &&
+		!slices.Contains(f.Evidence, uuid.Nil) && slices.Equal(f.Evidence, c.inputEvidence())
 }
 
 // Select returns facts whose group matches one of the prefixes.
@@ -245,10 +291,11 @@ func Ptr(s string) *string { return &s }
 // hidden there. The sheet itself is persisted in the step ledger and reloaded on redelivery, so it carries them.
 type storedFact struct {
 	Fact
-	Num      *decimal.Decimal `json:"num,omitempty"`
-	Change   bool             `json:"change,omitempty"`
-	Evidence []uuid.UUID      `json:"evidence,omitempty"`
-	CalcID   *uuid.UUID       `json:"calc_id,omitempty"`
+	Num         *decimal.Decimal `json:"num,omitempty"`
+	Change      bool             `json:"change,omitempty"`
+	Evidence    []uuid.UUID      `json:"evidence,omitempty"`
+	CalcID      *uuid.UUID       `json:"calc_id,omitempty"`
+	VendorField string           `json:"vendor_field,omitempty"`
 }
 
 type storedSeries struct {
@@ -267,7 +314,7 @@ type storedSheet struct {
 func (s *Sheet) MarshalJSON() ([]byte, error) {
 	st := storedSheet{sheetAlias: (*sheetAlias)(s), Facts: make([]storedFact, len(s.Facts)), Charts: make([]storedSeries, len(s.Charts))}
 	for i, f := range s.Facts {
-		st.Facts[i] = storedFact{Fact: f, Num: f.Value, Change: f.Change, Evidence: f.Evidence, CalcID: f.CalcID}
+		st.Facts[i] = storedFact{Fact: f, Num: f.Value, Change: f.Change, Evidence: f.Evidence, CalcID: f.CalcID, VendorField: f.VendorField}
 	}
 	for i, c := range s.Charts {
 		st.Charts[i] = storedSeries{Series: c, Section: c.Section}
@@ -284,6 +331,7 @@ func (s *Sheet) UnmarshalJSON(b []byte) error {
 	for i, f := range st.Facts {
 		fact := f.Fact
 		fact.Value, fact.Change, fact.Evidence, fact.CalcID = f.Num, f.Change, f.Evidence, f.CalcID
+		fact.VendorField = f.VendorField
 		s.Facts[i] = fact
 	}
 	for i, c := range st.Charts {
