@@ -106,14 +106,8 @@ func (s *Sheet) Value(group, subject, label, period, kind, basis, unit string, v
 func (s *Sheet) Computed(group, subject, label, period string, c Calc, key string) *Fact {
 	c.ID = StableID(s.Task, s.Epoch, key)
 	s.Calcs = append(s.Calcs, c)
-	var ev []uuid.UUID
-	for _, in := range c.Inputs {
-		if !slices.Contains(ev, in.EvidenceID) {
-			ev = append(ev, in.EvidenceID)
-		}
-	}
 	id := c.ID
-	f := Fact{Group: group, Subject: subject, Label: label, Period: period, Kind: KindComputed, Evidence: ev, CalcID: &id,
+	f := Fact{Group: group, Subject: subject, Label: label, Period: period, Kind: KindComputed, Evidence: c.inputEvidence(), CalcID: &id,
 		Change: c.Unit == "pp" || strings.Contains(c.FormulaID, "change") || strings.Contains(c.FormulaID, "yoy") ||
 			strings.Contains(c.FormulaID, "return") || strings.Contains(c.FormulaID, "gap") || strings.Contains(c.FormulaID, "premium") ||
 			strings.Contains(c.FormulaID, "drawdown") || strings.Contains(c.FormulaID, "consecutive")}
@@ -174,6 +168,37 @@ func (s *Sheet) Calc(id uuid.UUID) (Calc, bool) {
 		}
 	}
 	return Calc{}, false
+}
+
+// inputEvidence is the stable list of distinct evidence IDs bound to a calculation.
+func (c Calc) inputEvidence() []uuid.UUID {
+	var ids []uuid.UUID
+	seen := make(map[uuid.UUID]bool, len(c.Inputs))
+	for _, in := range c.Inputs {
+		if !seen[in.EvidenceID] {
+			ids = append(ids, in.EvidenceID)
+			seen[in.EvidenceID] = true
+		}
+	}
+	return ids
+}
+
+// SupportsComputedClaim checks whether a frozen fact can support a computed conclusion.
+// A vendor-defined measurement may also be the output of a system calculation.
+func (s *Sheet) SupportsComputedClaim(f Fact) bool {
+	if f.Kind == KindComputed {
+		return true
+	}
+	if f.Kind != KindVendorDerived || strings.TrimSpace(f.Basis) == "" || f.CalcID == nil || *f.CalcID == uuid.Nil || f.Value == nil {
+		return false
+	}
+	c, ok := s.Calc(*f.CalcID)
+	if !ok || !c.OK() || c.FormulaID == "" || c.FormulaVer == "" || !c.Result.Equal(*f.Value) {
+		return false
+	}
+	display, unit := Display(*c.Result, c.Unit)
+	return display == f.Display && unit == f.Unit && len(f.Evidence) > 0 &&
+		!slices.Contains(f.Evidence, uuid.Nil) && slices.Equal(f.Evidence, c.inputEvidence())
 }
 
 // Select returns facts whose group matches one of the prefixes.
