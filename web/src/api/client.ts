@@ -63,7 +63,12 @@ export const setCsrf = (t: string) => {
 
 export const newKey = () => crypto.randomUUID();
 
-type Opts = { idem?: string; noRedirect?: boolean; protocol?: ResearchProtocol };
+type Opts = {
+  idem?: string;
+  noRedirect?: boolean;
+  protocol?: ResearchProtocol;
+  signal?: AbortSignal;
+};
 
 export async function api<T>(
   method: string,
@@ -93,6 +98,7 @@ export async function api<T>(
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
+    signal: opts.signal,
   });
   if (res.status === 204) return undefined as T;
   const text = await res.text();
