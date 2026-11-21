@@ -14,6 +14,7 @@ import (
 )
 
 const marketMemberFields = "ts_code name l1_code l1_name l2_code l2_name l3_code l3_name in_date out_date is_new"
+const securityFields = "ts_code symbol name fullname cnspell market exchange list_status list_date"
 
 // TuShare defaults to latest memberships. Both partitions are needed to
 // identify which SW2021 classification actually applied on the closing day.
@@ -226,15 +227,19 @@ func marketPeers(subject string, members, vals map[string]Row) []string {
 }
 
 func (c *marketCollector) security(code string, member, value, eligible Row, pages map[string]Row, joins marketJoins) (dataservice.Entity, *dataservice.Record, error) {
-	const fields = "ts_code symbol name fullname cnspell market exchange list_status list_date"
-	rs, err := c.rows("stock_basic", map[string]string{"ts_code": code, "list_status": "L"}, fields, 1000, false)
-	if err != nil {
-		return dataservice.Entity{}, nil, err
+	var r Row
+	if code == c.code && c.requestedIdentity != nil {
+		r = *c.requestedIdentity
+	} else {
+		rs, err := c.rows("stock_basic", map[string]string{"ts_code": code, "list_status": "L"}, securityFields, 1000, false)
+		if err != nil {
+			return dataservice.Entity{}, nil, err
+		}
+		if len(rs) != 1 {
+			return dataservice.Entity{}, nil, fmt.Errorf("TuShare stock_basic: expected one listed stock for %s, got %d", code, len(rs))
+		}
+		r = rs[0]
 	}
-	if len(rs) != 1 {
-		return dataservice.Entity{}, nil, fmt.Errorf("TuShare stock_basic: expected one listed stock for %s, got %d", code, len(rs))
-	}
-	r := rs[0]
 	v := r.Values
 	exchanges := map[string]string{"SSE": "SH", "SZSE": "SZ", "BSE": "BJ"}
 	ex := exchanges[v["exchange"]]

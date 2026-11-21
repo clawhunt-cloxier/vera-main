@@ -27,18 +27,19 @@ var marketZone = time.FixedZone("Asia/Shanghai", 8*3600)
 type marketCollector struct {
 	Source
 	Batch
-	ctx              context.Context
-	code             string
-	from, until, day string
-	latestVal        Row
+	ctx               context.Context
+	code              string
+	from, until, day  string
+	latestVal         Row
+	requestedIdentity *Row // exact archived stock_basic row verified before on-demand collection
 }
 
-func collectMarket(ctx context.Context, src Source, code string, end time.Time) (Batch, error) {
+func collectMarket(ctx context.Context, src Source, code string, end time.Time, requestedIdentity *Row) (Batch, error) {
 	local := end.In(marketZone)
 	if local.Hour() < 15 {
 		local = local.AddDate(0, 0, -1)
 	}
-	c := marketCollector{Source: src, ctx: ctx, code: code, from: local.AddDate(-5, 0, -7).Format(marketDay), until: local.Format(marketDay)}
+	c := marketCollector{Source: src, ctx: ctx, code: code, from: local.AddDate(-5, 0, -7).Format(marketDay), until: local.Format(marketDay), requestedIdentity: requestedIdentity}
 	for _, step := range []func() error{c.calendar, c.stockHistory, c.directory, c.flows, c.dividends, c.dragonTiger, c.fundPositions} {
 		if err := step(); err != nil {
 			return Batch{}, err

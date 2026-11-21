@@ -120,10 +120,85 @@ func TestOptionalNewsRateLimitPreservesIndependentMarketData(t *testing.T) {
 	}
 }
 
+// A changing directory must not substitute a second observation after an
+// on-demand target's identity and trading currency have been verified.
+type changingDirectorySource struct {
+	*marketTestSource
+	targetCalls int
+}
+
+func (s *changingDirectorySource) Rows(ctx context.Context, api string, params map[string]string, fields []string, limit int) ([]Row, error) {
+	rows, err := s.marketTestSource.Rows(ctx, api, params, fields, limit)
+	if api == "stock_basic" && params["ts_code"] == "600000.SH" && len(rows) == 1 {
+		s.targetCalls++
+		if s.targetCalls == 1 {
+			rows[0].RawRef = "synthetic/verified-directory"
+		} else {
+			rows[0].Values["name"] = "矛盾的目录身份"
+			rows[0].Values["symbol"] = "900000"
+			rows[0].RawRef = "synthetic/conflicting-directory"
+		}
+	}
+	return rows, err
+}
+
+func TestRequestedIdentityPublishedFromVerifiedArchive(t *testing.T) {
+	const code = "600000.SH"
+	src := &changingDirectorySource{marketTestSource: marketTestData()}
+	src.data["stock_basic"][0]["symbol"] = "600000"
+	src.data["stock_basic"][0]["curr_type"] = "CNY"
+	end := time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC)
+	p := Provider{source: src}
+	batch, _, err := p.CollectRequested(t.Context(), code, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entities, err := batch.Entities(t.Context())
+	if err != nil || src.targetCalls != 1 || !slices.ContainsFunc(entities, func(e dataservice.Entity) bool {
+		return e.Code == code && e.Name == "合成主体0" && e.Attrs["tushare_research_subject"] == true
+	}) {
+		t.Fatalf("verified target missing or fetched again: calls=%d err=%v", src.targetCalls, err)
+	}
+	records, err := batch.Records(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range records {
+		if r.EntityCode == code && r.DatasetID == "ref.security" {
+			var refs marketJoins
+			if err := json.Unmarshal(src.objects[r.RawRef], &refs); err != nil || refs[code]["stock_basic"].Ref != "synthetic/verified-directory" {
+				t.Fatalf("security snapshot missing verified source: %v %v", refs, err)
+			}
+			return
+		}
+	}
+	t.Fatal("verified subject did not publish a security snapshot")
+}
+
+func TestRequestedIdentityRejectsWrongCurrencyAndExchange(t *testing.T) {
+	for _, tc := range []struct {
+		field, value string
+		class        dataservice.ErrClass
+	}{{"curr_type", "USD", dataservice.ErrNotCovered}, {"exchange", "SZSE", dataservice.ErrSchemaChanged}, {"symbol", "900000", dataservice.ErrSchemaChanged}} {
+		t.Run(tc.field, func(t *testing.T) {
+			src := marketTestData()
+			stock := src.data["stock_basic"][0]
+			stock["curr_type"], stock["symbol"] = "CNY", "600000"
+			stock[tc.field] = tc.value
+			p := Provider{source: src}
+			batch, _, err := p.CollectRequested(t.Context(), "600000.SH", time.Now())
+			var pe *dataservice.ProviderError
+			if batch != nil || !errors.As(err, &pe) || pe.Class != tc.class {
+				t.Fatalf("contradictory identity accepted or misclassified: %v", err)
+			}
+		})
+	}
+}
+
 func TestMarketClosingResearch(t *testing.T) {
 	src := marketTestData()
 	const code = "600000.SH"
-	b, err := collectMarket(t.Context(), src, code, time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC))
+	b, err := collectMarket(t.Context(), src, code, time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +299,7 @@ func TestMarketRightsAndConflicts(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			src := marketTestData()
 			test.change(src)
-			b, err := collectMarket(t.Context(), src, "600000.SH", cutoff)
+			b, err := collectMarket(t.Context(), src, "600000.SH", cutoff, nil)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("got %v", err)
 			}
@@ -249,7 +324,7 @@ func TestMarginRosterIsExchangeScoped(t *testing.T) {
 			}
 		}
 	}
-	b, err := collectMarket(t.Context(), src, "600000.SH", time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC))
+	b, err := collectMarket(t.Context(), src, "600000.SH", time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
