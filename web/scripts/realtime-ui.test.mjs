@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
+import { testReportLayout } from './report-layout.mjs';
 import { testWorkspaceTasks } from './workspace-tasks.mjs';
 
 const media = 'application/vnd.vera.v0.4+json';
@@ -156,6 +157,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
     readFileSync(new URL('../app.html', import.meta.url), 'utf8')
   );
   await testWorkspaceTasks(t, { browser, origin, appHTML, task, stockSkill, plan });
+  await testReportLayout(t, { browser, origin, appHTML, report, evidence });
 
   for (const viewport of [
     { width: 1280, height: 900 },
