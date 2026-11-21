@@ -11,8 +11,6 @@ import {
   post,
   quoteRequirementLabel,
   skillTitle,
-  statusLabel,
-  terminal,
   type Entity,
   type PlanResult,
   type ResearchPlan,
@@ -22,252 +20,16 @@ import {
   type Task,
 } from '../api/client';
 import { useMe } from '../api/hooks';
+import { preparationFailure, researchError, researchText } from '../api/researchPresentation';
 import { EntitySearch } from '../components/EntitySearch';
-import { Empty, ErrorBox, Loading, Skeleton, SyntheticBanner, Tag } from '../components/ui';
+import { ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
+import './research.css';
 
 function supportsMode(schema: unknown, mode: string): boolean {
   const field = (obj: unknown, key: string): unknown =>
     typeof obj === 'object' && obj !== null ? (obj as Record<string, unknown>)[key] : undefined;
   const modes = field(field(field(schema, 'properties'), 'mode'), 'enum');
   return Array.isArray(modes) && modes.includes(mode);
-}
-
-export function App() {
-  const me = useMe();
-  const protocol = newResearchProtocol(me.data);
-  const skills = useQuery({
-    queryKey: ['skills', protocol],
-    queryFn: () => get<{ items: Skill[] }>('/api/v1/skills', { protocol }),
-    enabled: !!me.data,
-    staleTime: 15_000,
-  });
-  const tasks = useQuery({
-    queryKey: ['tasks'],
-    queryFn: () => get<{ items: Task[] }>('/api/v1/research-tasks'),
-    staleTime: 5000,
-    refetchInterval: 5000,
-  });
-  const [text, setText] = useState('');
-  const nav = useNavigate();
-  const plan = useMutation({
-    mutationFn: async (candidate?: PlanResult['candidates'][number]) => {
-      const r = await post<PlanResult>(
-        '/api/v1/research-plans',
-        candidate
-          ? { skill_id: candidate.skill_id, subject_id: candidate.subject.id, params: {} }
-          : { text },
-        { idem: newKey(), protocol }
-      );
-      if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
-      return r;
-    },
-    onSuccess: () => setText(''),
-  });
-  const synthetic = me.data?.synthetic ?? false;
-  const enabledSkills = skills.data?.items.filter((sk) => sk.available) ?? [];
-  const stockOnly =
-    enabledSkills.length > 0 &&
-    enabledSkills.every((sk) => sk.subject_kinds.length === 1 && sk.subject_kinds[0] === 'stock');
-  const placeholder = enabledSkills.some((skill) => skill.id === 'capital_flow')
-    ? stockOnly
-      ? '例如：分析宁德时代最近的资金面'
-      : '例如：看看半导体行业最近的资金动向'
-    : '例如：个股分析，比亚迪';
-
-  return (
-    <main>
-      {me.isLoading && <Loading />}
-      {me.error && <ErrorBox error={me.error} />}
-      {me.data && (
-        <>
-          {synthetic && <SyntheticBanner />}
-          <header className="app-head">
-            <strong className="logo">VERA</strong>
-            <nav>
-              <Link to="/app/watchlist">自选股</Link>
-              <Link to="/app/reports">报告</Link>
-              <details className="menu">
-                <summary aria-label="账户菜单">{me.data?.display_name ?? '账户'}</summary>
-                <button
-                  type="button"
-                  className="ghost small"
-                  onClick={async () => {
-                    try {
-                      await post('/auth/logout', {});
-                    } finally {
-                      window.location.assign('/');
-                    }
-                  }}
-                >
-                  退出登录
-                </button>
-              </details>
-            </nav>
-          </header>
-
-          <section className="quick">
-            <h1>发起研究</h1>
-            <div className="card">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  plan.mutate();
-                }}
-              >
-                <label htmlFor="queryInput" className="form-label">
-                  描述你想要的研究
-                </label>
-                <textarea
-                  id="queryInput"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder={placeholder}
-                  rows={3}
-                  required
-                  maxLength={500}
-                  className="form-input"
-                />
-                <div className="meta" style={{ marginTop: 12 }}>
-                  <span className="muted">{text.length}/500</span>
-                </div>
-                <div className="actions">
-                  <button
-                    type="submit"
-                    disabled={plan.isPending || !text.trim()}
-                    className="primary"
-                  >
-                    {plan.isPending ? '识别中…' : '开始研究'}
-                  </button>
-                </div>
-              </form>
-              {plan.error && <ErrorBox error={plan.error} />}
-              {plan.data?.kind === 'choose' && (
-                <div className="notice">
-                  <p>请选择研究对象和研究类型。</p>
-                  {plan.data.candidates.length > 0 && (
-                    <div className="actions" role="list" aria-label="研究候选项">
-                      {plan.data.candidates.map((candidate) => (
-                        <button
-                          key={`${candidate.skill_id}-${candidate.subject.id}`}
-                          type="button"
-                          className="secondary"
-                          disabled={plan.isPending}
-                          onClick={() => plan.mutate(candidate)}
-                        >
-                          {skillTitle[candidate.skill_id] ?? candidate.skill_id} ·{' '}
-                          {candidate.subject.name}
-                          {candidate.subject.symbol ? `（${candidate.subject.symbol}）` : ''}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {plan.data?.kind === 'unsupported' && (
-                <p className="error">
-                  <strong>不支持的需求：</strong> {plan.data.unsupported_reason}
-                </p>
-              )}
-            </div>
-          </section>
-
-          <section className="skills">
-            <h2>快速启动</h2>
-            {skills.error && <ErrorBox error={skills.error} />}
-            <div className="grid">
-              {skills.isLoading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="card small">
-                    <Skeleton height={24} />
-                    <Skeleton height={16} style={{ marginTop: 12 }} />
-                  </div>
-                ))
-              ) : skills.isSuccess && skills.data.items.length === 0 ? (
-                <Empty>暂无可用技能</Empty>
-              ) : (
-                skills.data?.items.map((sk) => (
-                  <Link
-                    key={sk.id}
-                    to="/app/quick/$skill"
-                    params={{ skill: sk.id }}
-                    className="card interactive"
-                  >
-                    <h3>{skillTitle[sk.id]}</h3>
-                    {!sk.available && <Tag tone="warn">暂不可用</Tag>}
-                  </Link>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="recent">
-            <h2>最近任务</h2>
-            {tasks.isLoading && <Loading label="加载任务中…" />}
-            {tasks.data?.items.length === 0 && (
-              <Empty>尚未发起研究任务。在上方输入需求或选择快速启动试试。</Empty>
-            )}
-            {tasks.data && tasks.data.items.length > 0 && (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>研究对象</th>
-                      <th>技能</th>
-                      <th>状态</th>
-                      <th>创建时间</th>
-                      <th style={{ width: 100 }}>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tasks.data.items.map((t) => (
-                      <tr key={t.id}>
-                        <td>
-                          <strong>{t.subject.name}</strong>
-                        </td>
-                        <td>{skillTitle[t.skill_id]}</td>
-                        <td>
-                          <Tag
-                            tone={
-                              t.status === 'COMPLETED'
-                                ? 'ok'
-                                : terminal.includes(t.status)
-                                  ? 'bad'
-                                  : 'info'
-                            }
-                          >
-                            {statusLabel[t.status]}
-                          </Tag>
-                        </td>
-                        <td>{fmtTime(t.created_at)}</td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            {t.status === 'COMPLETED' && t.report_ref && (
-                              <Link
-                                to="/app/reports/$id"
-                                params={{ id: t.report_ref.id }}
-                                className="btn-link"
-                              >
-                                查看
-                              </Link>
-                            )}
-                            {!terminal.includes(t.status) && (
-                              <Link to="/app/tasks/$id" params={{ id: t.id }} className="btn-link">
-                                详情
-                              </Link>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-    </main>
-  );
 }
 
 export function Quick({ skill }: { skill: SkillId }) {
@@ -338,34 +100,36 @@ export function Quick({ skill }: { skill: SkillId }) {
     active.current = new AbortController();
     plan.mutate({ signal: active.current.signal, prepareClose });
   };
-  const clearSelection = () => {
+  const stopWaiting = () => {
     active.current?.abort();
     active.current = null;
     plan.reset();
     setPreparing('');
-    setSelection(null);
   };
+  const canOfferBrief =
+    searchObservation && skill === 'stock_analysis' && selection?.protocol === 'observation.v1';
   return (
-    <main>
+    <main className="research-page">
       {me.data?.synthetic && <SyntheticBanner />}
-      <p>
-        <Link to="/app">← 返回工作台</Link>
-      </p>
-      <h1>{skillTitle[skill]}</h1>
+      <Link to="/app" className="research-back">
+        ← 返回工作台
+      </Link>
+      <header className="research-intro">
+        <h1>{skillTitle[skill]}</h1>
+        <p>选择研究对象后，可在计划中查看资料覆盖范围并确认章节。</p>
+      </header>
       {(me.isPending || (me.data && s.isPending)) && <Loading label="加载研究能力…" />}
-      {me.error && <ErrorBox error={me.error} />}
-      {s.error && <ErrorBox error={s.error} />}
+      {me.error && <ErrorBox error={researchError(me.error)} />}
+      {s.error && <ErrorBox error={researchError(s.error)} />}
       {me.data && s.isSuccess && !s.isFetching && !available && (
         <p className="notice">当前部署未开放这项研究。</p>
       )}
       {available && (
         <form
+          className="research-panel"
           onSubmit={(e) => {
             e.preventDefault();
-            const closingStock =
-              subject?.kind === 'stock' &&
-              (skill !== 'stock_analysis' || selection?.protocol !== 'observation.v1');
-            startPlan(searchObservation && closingStock);
+            startPlan(searchObservation && subject?.kind === 'stock');
           }}
         >
           <label>
@@ -373,29 +137,23 @@ export function Quick({ skill }: { skill: SkillId }) {
             <EntitySearch
               kinds={s.data?.subject_kinds}
               onPick={(entity, source) => setSelection({ entity, protocol: source ?? protocol })}
-              onEdit={clearSelection}
+              onEdit={() => {
+                stopWaiting();
+                setSelection(null);
+              }}
               protocol={protocol}
               searchObservation={searchObservation}
               placeholder={stockOnly ? '输入 A 股简称或代码' : undefined}
             />
           </label>
-          {searchObservation &&
-            skill === 'stock_analysis' &&
-            selection?.protocol === 'observation.v1' && (
-              <div>
-                <p className="muted small">
-                  本次将使用 Choice 行情生成成交简报。也可以为{subject?.name}采集 TuShare
-                  数据后进行个股分析。
-                </p>
-                <button type="button" disabled={plan.isPending} onClick={() => startPlan(true)}>
-                  准备个股研究数据
-                </button>
-              </div>
-            )}
           {skill === 'deep_research' && available && (
             <label>
               模式
-              <select value={selectedMode} onChange={(e) => setMode(e.target.value)}>
+              <select
+                value={selectedMode}
+                disabled={plan.isPending}
+                onChange={(e) => setMode(e.target.value)}
+              >
                 <option value="">
                   {stockOnly || subject?.kind === 'stock'
                     ? '公司深度研究'
@@ -407,23 +165,56 @@ export function Quick({ skill }: { skill: SkillId }) {
               </select>
             </label>
           )}
-          <button
-            type="submit"
-            disabled={
-              !available ||
-              !subject ||
-              !s.data?.subject_kinds.includes(subject.kind) ||
-              plan.isPending
-            }
-          >
-            {plan.isPending ? '准备中…' : '发起研究'}
-          </button>
+          <div className="research-actions">
+            <button
+              className="research-primary"
+              type="submit"
+              disabled={
+                !available ||
+                !subject ||
+                !s.data?.subject_kinds.includes(subject.kind) ||
+                plan.isPending
+              }
+            >
+              {plan.isPending ? '准备中…' : '发起研究'}
+            </button>
+            {canOfferBrief && (
+              <button
+                type="button"
+                className="research-secondary"
+                disabled={plan.isPending}
+                onClick={() => startPlan(false)}
+              >
+                查看成交简报
+              </button>
+            )}
+          </div>
+          {canOfferBrief && !plan.isPending && (
+            <p className="research-help">只想了解近期成交情况？成交简报提供已核实的日成交数据。</p>
+          )}
+          {plan.isPending && (
+            <div className="research-wait">
+              <div role="status" aria-live="polite">
+                <span className="research-ring" aria-hidden="true" />
+                <div>
+                  <strong>
+                    {preparing || `正在为${subject?.name ?? '所选对象'}准备研究计划…`}
+                  </strong>
+                  {preparing && <p>首次准备可能需要几分钟，请保持页面打开。</p>}
+                </div>
+              </div>
+              <button type="button" onClick={stopWaiting}>
+                停止等待
+              </button>
+            </div>
+          )}
+          {plan.error && <ErrorBox error={researchError(plan.error)} />}
+          {plan.data?.kind === 'unsupported' && (
+            <p className="notice">
+              这个对象暂不支持本项研究。{researchText(plan.data.unsupported_reason ?? '')}
+            </p>
+          )}
         </form>
-      )}
-      {preparing && <p role="status">{preparing}</p>}
-      {plan.error && <ErrorBox error={plan.error} />}
-      {plan.data?.kind === 'unsupported' && (
-        <p className="muted">这个对象暂不支持：{plan.data.unsupported_reason}</p>
       )}
     </main>
   );
@@ -445,10 +236,9 @@ async function waitForCloseData(
       );
       signal.throwIfAborted();
       if (result.status === 'ready') return;
-      if (result.status !== 'pending')
-        throw new Error(result.message || '未能准备这只股票的 TuShare 数据，请稍后重新发起研究。');
+      if (result.status !== 'pending') throw new Error(preparationFailure(result.message));
       delay = 5000;
-      onPending(result.message || `正在同步${subject.name}的 TuShare 研究数据，完成后将打开计划。`);
+      onPending(`正在为${subject.name}准备研究计划…`);
     } catch (error) {
       signal.throwIfAborted();
       if (!(error instanceof ApiError && error.status === 429 && error.retryable)) throw error;
@@ -462,7 +252,7 @@ async function waitForCloseData(
         : Math.min(delay * 2, 60_000);
       // Browsers treat delays above the signed 32-bit timer range as immediate.
       delay = Math.min(delay, 2_147_483_647);
-      onPending(`${subject.name}的研究数据请求暂时限频，页面将自动重试。`);
+      onPending('当前研究请求较多，页面将自动重试。');
     }
     await new Promise<void>((resolve) => {
       const abort = () => {
@@ -505,13 +295,18 @@ function CapitalFlowAlternative({ subject }: { subject: Entity }) {
   );
   if (skills.isFetching || skills.isError || !supported) return null;
   return (
-    <div className="card">
+    <aside className="research-alternative">
       <p>你还可以查看{subject.name}的资金动向计划，核对行情和两融数据的可用情况。</p>
-      <button type="button" onClick={() => preview.mutate()} disabled={preview.isPending}>
+      <button
+        type="button"
+        className="research-secondary"
+        onClick={() => preview.mutate()}
+        disabled={preview.isPending}
+      >
         {preview.isPending ? '正在检查…' : '查看资金动向计划'}
       </button>
-      {preview.error && <ErrorBox error={preview.error} />}
-    </div>
+      {preview.error && <ErrorBox error={researchError(preview.error)} />}
+    </aside>
   );
 }
 
@@ -549,37 +344,42 @@ export function PlanReview({ id }: { id: string }) {
     setDisabled((d) => (d.includes(sid) ? d.filter((x) => x !== sid) : [...d, sid]));
   };
   return (
-    <main>
+    <main className="research-page">
       {me.data?.synthetic && <SyntheticBanner />}
-      <p>
-        <Link to="/app">← 返回工作台</Link>
-      </p>
+      <Link to="/app" className="research-back">
+        ← 返回工作台
+      </Link>
       {p.isLoading && <Loading />}
-      {p.error && <ErrorBox error={p.error} />}
+      {p.error && <ErrorBox error={researchError(p.error)} />}
       {p.data && (
         <>
-          <h1>研究计划：{p.data.subject.name}</h1>
-          <div className="meta">
-            <Tag>{skillTitle[p.data.skill_id]}</Tag>{' '}
-            <span className="muted">
-              {p.data.snapshot_mode === 'collect_latest' ? '计划预览时间' : '数据截止'}{' '}
-              {fmtTime(p.data.as_of)}
-            </span>
-            {p.data.quote_requirement && (
-              <Tag tone="info">{quoteRequirementLabel[p.data.quote_requirement]}</Tag>
-            )}
+          <header className="research-intro">
+            <h1>研究计划：{p.data.subject.name}</h1>
+            <p>确认要纳入报告的章节，然后提交研究。</p>
+          </header>
+          <div className="research-plan-summary">
+            <div className="research-plan-meta">
+              <Tag>{skillTitle[p.data.skill_id]}</Tag>
+              <span className="muted">
+                {p.data.snapshot_mode === 'collect_latest' ? '计划预览时间' : '数据截止'}{' '}
+                {fmtTime(p.data.as_of)}
+              </span>
+              {p.data.quote_requirement && (
+                <Tag tone="info">{quoteRequirementLabel[p.data.quote_requirement]}</Tag>
+              )}
+            </div>
             {p.data.snapshot_mode === 'collect_latest' && p.data.quote_requirement && (
               <p>
-                确认后采集数据，再冻结一次快照。报告分别标明行情事件、接收、可用时点和交易状态。
+                提交后获取行情，报告将标明交易、接收与数据可用的时间。
                 {p.data.quote_requirement === 'realtime_trade'
-                  ? '若无法核实交易中实时成交条件，任务将弃权。'
+                  ? '如果无法核实实时成交行情，本次研究将无法交付。'
                   : '最近可用行情可能是延迟、盘后或休市数据，具体性质将在报告中注明。'}
               </p>
             )}
             {p.data.snapshot_mode === 'collect_latest' && !p.data.quote_requirement && (
               <p>
                 {p.data.skill_version === '1.1.0-demo.4'
-                  ? '确认后采集 Choice 日成交数据，并按冻结时点取用已发布的 TuShare 数据。报告会列明各项数据的实际来源和期间。'
+                  ? '确认后获取日成交数据，并取用截止时已发布的收盘资料。报告会列明各项数据的来源和期间。'
                   : '确认后采集真实成交数据并冻结快照。这是非实时简报；实时行情和未核实字段不纳入分析。'}
               </p>
             )}
@@ -587,19 +387,20 @@ export function PlanReview({ id }: { id: string }) {
               <p className="muted">报告将列明各项数据的来源、日期和覆盖限制。</p>
             )}
           </div>
-          {coverage && (
-            <p className="coverage-summary">
-              <span>{coverage.available} 个可用</span>
-              <span>{coverage.limited} 个受限</span>
-              <span>{coverage.unavailable} 个不可用</span>
-            </p>
-          )}
           <form
+            className="research-panel"
             onSubmit={(e) => {
               e.preventDefault();
               submit.mutate();
             }}
           >
+            {coverage && (
+              <p className="coverage-summary">
+                <span>{coverage.available} 个可用</span>
+                <span>{coverage.limited} 个受限</span>
+                <span>{coverage.unavailable} 个不可用</span>
+              </p>
+            )}
             <fieldset className="sections">
               <legend>章节</legend>
               {p.data.sections.map((s) => (
@@ -616,14 +417,16 @@ export function PlanReview({ id }: { id: string }) {
                   <span className="section-option-body">
                     <span className="section-option-title">
                       <span>
-                        {s.id} {s.title}
+                        {s.id} {researchText(s.title)}
                       </span>
                       {s.required && <Tag>必需</Tag>}
                       {s.availability === 'limited' && <Tag tone="warn">受限</Tag>}
                       {s.availability === 'unavailable' && <Tag tone="bad">不可用</Tag>}
                     </span>
                     {s.reason && (
-                      <span className="muted small section-option-reason">{s.reason}</span>
+                      <span className="muted small section-option-reason">
+                        {researchText(s.reason)}
+                      </span>
                     )}
                   </span>
                 </label>
@@ -633,14 +436,26 @@ export function PlanReview({ id }: { id: string }) {
               <p className="notice">
                 {p.data.reason_code === 'REQUIRED_SECTION_UNAVAILABLE'
                   ? '必需章节缺少可用数据，本次计划无法提交。'
-                  : `该计划当前无法执行${p.data.reason_code ? `（${p.data.reason_code}）` : ''}。`}
+                  : '暂时无法提交此计划。请检查章节说明，或返回工作台选择其他研究。'}
               </p>
             )}
-            <button type="submit" disabled={submit.isPending || !p.data.executable}>
-              {submit.isPending ? '提交中…' : '提交任务'}
-            </button>
+            <div className="research-plan-footer">
+              {p.data.estimate && (
+                <p>
+                  参考用时约 {Math.max(1, Math.ceil(p.data.estimate.p95_seconds / 60))} 分钟 · 配额{' '}
+                  {p.data.estimate.quota_cost} 次
+                </p>
+              )}
+              <button
+                type="submit"
+                className="research-primary"
+                disabled={submit.isPending || !p.data.executable}
+              >
+                {submit.isPending ? '提交中…' : '提交任务'}
+              </button>
+            </div>
           </form>
-          {submit.error && <ErrorBox error={submit.error} />}
+          {submit.error && <ErrorBox error={researchError(submit.error)} />}
           {me.data &&
             newResearchProtocol(me.data) === 'legacy' &&
             !p.data.executable &&

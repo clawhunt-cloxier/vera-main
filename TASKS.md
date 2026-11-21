@@ -42,6 +42,8 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 
 | T037 | 保留厂商分档资金汇总的计算依据 | T036（已部署） | DONE | Codex / agent/codex/T037-flow-calculation | PR #50（`c08ed1d`）已合入并部署。Verify `44873565726`、部署 `44873565707` 通过。2026-11-21 测试站真实验收任务 `01a1fcc8-3882-7f3e-b81f-db4d475b820b`、报告 `a7689c4f-fdf1-54e0-a17d-a92e7d63a7cf`、PDF `中国移动-资金动向-T037-a7689c4f.pdf` 通过三档 `F21.sum_over_window`、20 条/档冻结 TuShare 证据、Choice/TuShare 证据读取及正文金额核对。[交接](docs/handoffs/2026-11-21-T037-codex.md) |
 
+| T038 | 优化工作台与研究等待体验 | T036、T037（已部署） | REVIEW | Codex / agent/codex/T038-workspace | 2026-11-21T12:09Z 接续开发。工作台、研究计划与任务页已接通，新增桌面与手机浏览器验收。[交接](docs/handoffs/2026-11-21-T038-codex.md) |
+
 ## 里程碑
 
 M1 本地演示：T011–T018、T019a、T022（M1 范围）、T024。M2 测试环境：T014b、T019b、T021、T022、T023。M3 PILOT：T020。详见 ADR-0003 D12。

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
+import { testWorkspaceTasks } from './workspace-tasks.mjs';
 
 const media = 'application/vnd.vera.v0.4+json';
 const observationMedia = 'application/vnd.vera.observation.v1+json';
@@ -154,6 +155,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
     '/app',
     readFileSync(new URL('../app.html', import.meta.url), 'utf8')
   );
+  await testWorkspaceTasks(t, { browser, origin, appHTML, task, stockSkill, plan });
 
   for (const viewport of [
     { width: 1280, height: 900 },
@@ -207,7 +209,8 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           assert.equal(request.headers()['content-type'], media);
           assert.equal(request.postDataJSON().plan_hash, plan.plan_hash);
           body = task;
-        } else if (path === '/api/v1/research-tasks') body = { items: [] };
+        } else if (path === '/api/v1/research-tasks' || path === '/api/v1/watchlist')
+          body = { items: [] };
         else if (path === '/api/v1/research-tasks/mock-task') body = task;
         else if (path === '/api/v1/reports/mock-report/versions/1')
           body = { ...report, source_freshness: [selectedSource] };
@@ -337,6 +340,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
               research_protocol: advertisedProtocol,
             };
           else if (path === '/api/v1/skills') body = { items: [stockSkill] };
+          else if (path === '/api/v1/watchlist') body = { items: [] };
           else if (path === '/api/v1/entities') {
             assert.equal(accept, observationMedia);
             body = { items: [oldPlan.subject] };
@@ -660,10 +664,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
         const assertNeutralAndFits = async () => {
           assert.equal(await page.getByLabel('研究数据').count(), 0);
           assert.equal(await page.getByRole('group', { name: /行情要求/ }).count(), 0);
-          assert.equal(
-            await page.getByText(/Choice 日成交简报|行情数据简报|TuShare 收盘研究/).count(),
-            0
-          );
+          assert.doesNotMatch(await page.locator('main').innerText(), /choice|tushare/i);
           assert.equal(
             await page.locator('html').evaluate((element) => element.scrollWidth),
             viewport.width
@@ -727,7 +728,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
   }
 
   await t.test(
-    'stock picker creates and confirms research using the selected catalog',
+    'stock picker defaults to full research and offers a separate short brief',
     async () => {
       const context = await browser.newContext();
       try {
@@ -774,7 +775,6 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
             body = { status: 'ready' };
           } else if (path === 'research-plans') {
             selected = stocks.find((stock) => stock.id === req.postDataJSON().subject_id);
-            selectedMedia = preparedStocks.includes(selected.id) ? json : observationMedia;
             assert.equal(accept, selectedMedia);
             assert.equal(req.headers()['content-type'], selectedMedia);
             body = { kind: 'plan', plan: { ...plan, subject: selected } };
@@ -795,7 +795,8 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           else throw new Error('Unexpected request ' + path);
           await route.fulfill({ contentType: accept.includes(',') ? media : accept, json: body });
         });
-        for (const stock of stocks) {
+        for (const [index, stock] of stocks.entries()) {
+          selectedMedia = index === 1 ? observationMedia : json;
           await page.goto(origin + '/app/quick/stock_analysis');
           const input = page.getByRole('combobox');
           const create = page.getByRole('button', { name: '发起研究' });
@@ -811,11 +812,11 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           assert.match(await options.first().innerText(), new RegExp(stock.name));
           assert.equal(await options.count(), stock.id === 'maotai' ? 1 : 2);
           await input.press('Enter');
-          const notice = page.getByText(/本次将使用 Choice 行情生成成交简报/);
-          if (stock.id === 'maotai') assert.equal(await notice.count(), 0);
-          else assert.match(await notice.innerText(), /TuShare/);
-          if (stock.id === 'petro')
-            await page.getByRole('button', { name: '准备个股研究数据' }).click();
+          const brief = page.getByRole('button', { name: '查看成交简报', exact: true });
+          if (stock.id === 'maotai') assert.equal(await brief.count(), 0);
+          else await brief.waitFor();
+          assert.doesNotMatch(await page.locator('main').innerText(), /choice|tushare/i);
+          if (selectedMedia === observationMedia) await brief.click();
           else await create.click();
           await page.getByRole('heading', { name: '研究计划：' + stock.name }).waitFor();
           await page.getByRole('button', { name: '提交任务' }).click();
@@ -902,7 +903,10 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           }
           body = {
             status,
-            message: { pending: '正在同步测试证券', failed: '此账号缺少数据权限' }[status],
+            message: {
+              pending: '正在同步中国移动的 TuShare 研究数据，完成后将打开计划。',
+              failed: 'TuShare 账号缺少数据权限',
+            }[status],
           };
         } else if (path === 'research-plans') {
           assert.equal(headers.accept, json);
@@ -936,20 +940,25 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
         await page.getByRole('option', { name: /中国移动/ }).click();
         assert.deepEqual(prepares, []);
         await start.click();
-        await page.getByText('正在同步测试证券').waitFor();
+        await page
+          .getByRole('status')
+          .filter({ hasText: /正在为中国移动准备研究计划/ })
+          .waitFor();
+        assert.doesNotMatch(await page.locator('main').innerText(), /choice|tushare/i);
         assert.deepEqual(plans, []);
         if (skill.id === 'deep_research') {
           await input.fill('601857');
           await page.getByRole('option', { name: /中国石油/ }).click();
           status = 'failed';
           await start.click();
-          await page.getByRole('alert').filter({ hasText: '此账号缺少数据权限' }).waitFor();
+          await page.getByRole('alert').filter({ hasText: /权限/ }).waitFor();
+          assert.doesNotMatch(await page.locator('main').innerText(), /choice|tushare/i);
           assert.deepEqual(plans, []);
           status = 'ready';
           await start.click();
         } else {
           status = 'limited';
-          await page.getByRole('status').filter({ hasText: '限频' }).waitFor();
+          await page.getByRole('status').filter({ hasText: '自动重试' }).waitFor();
           assert.deepEqual(plans, []);
           status = 'ready';
         }
@@ -1069,7 +1078,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
               assert.equal(req.postDataJSON().plan_hash, plan.plan_hash);
               data = task;
             }
-          } else if (path === 'research-tasks') data = { items: [] };
+          } else if (path === 'research-tasks' || path === 'watchlist') data = { items: [] };
           else if (path === 'research-plans/mock-plan') data = fixedPlan();
           else if (path === 'research-tasks/mock-task')
             data = { ...task, skill_id: skill, snapshot_mode: 'fixed_legacy' };

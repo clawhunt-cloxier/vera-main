@@ -13,7 +13,7 @@ export function ErrorBox({ error }: { error: unknown }) {
   return (
     <div className="error" role="alert">
       <strong>{e?.status === 429 ? '已达到使用上限' : '出错了'}</strong>{' '}
-      {e ? e.message : String(error)}
+      {error instanceof Error ? error.message : String(error)}
       {e?.requestId && <span className="muted"> （请求编号 {e.requestId}）</span>}
     </div>
   );
