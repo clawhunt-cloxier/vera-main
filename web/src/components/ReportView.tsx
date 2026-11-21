@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   fmtDataTime,
   fmtTime,
@@ -12,6 +12,7 @@ import {
 } from '../api/client';
 import { Chart } from './Chart';
 import { Tag } from './ui';
+import './evidence.css';
 
 export type Loaders = {
   series: (id: string) => Promise<ChartSeries>;
@@ -97,6 +98,23 @@ function EvidencePanel({
   const [ev, setEv] = useState<Record<string, Evidence | 'err'>>({});
   const [calc, setCalc] = useState<Record<string, Calculation | 'err'>>({});
   const [page, setPage] = useState(0);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const drawer = window.matchMedia('(max-width: 1099px)');
+    const show = () => {
+      if (dialog.open) dialog.close();
+      if (drawer.matches) dialog.showModal();
+      else dialog.show();
+    };
+    show();
+    drawer.addEventListener('change', show);
+    return () => {
+      drawer.removeEventListener('change', show);
+      dialog.close();
+    };
+  }, []);
   const pageRefs = useMemo(
     () => claim.evidence_refs.slice(page * evidencePageSize, (page + 1) * evidencePageSize),
     [claim.evidence_refs, page]
@@ -122,7 +140,19 @@ function EvidencePanel({
     );
   }, [claim.calculation_refs, loaders.calculation]);
   return (
-    <aside className="evidence" aria-label="证据" data-testid="evidence-panel">
+    <dialog
+      ref={dialogRef}
+      className="evidence"
+      aria-label="证据"
+      data-testid="evidence-panel"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !event.currentTarget.matches(':modal')) onClose();
+      }}
+    >
       <div className="dialog-head">
         <h2>证据 {claim.ref}</h2>
         <button className="ghost" onClick={onClose} aria-label="关闭证据">
@@ -259,7 +289,7 @@ function EvidencePanel({
           </button>
         </nav>
       )}
-    </aside>
+    </dialog>
   );
 }
 
@@ -280,7 +310,6 @@ export function ReportView({
     () => Object.fromEntries(report.claims.map((c, i) => [c.ref, i + 1])),
     [report]
   );
-  const series = useCallback((id: string) => () => loaders.series(id), [loaders]);
   const additionalSources = report.sources.filter(
     (source) =>
       !report.source_freshness?.some(
@@ -415,7 +444,12 @@ export function ReportView({
               </div>
             ))}
             {s.charts.map((c) => (
-              <Chart key={c.series_id} title={c.title} load={series(c.series_id)} />
+              <Chart
+                key={c.series_id}
+                title={c.title}
+                seriesId={c.series_id}
+                load={loaders.series}
+              />
             ))}
           </section>
         ))}
