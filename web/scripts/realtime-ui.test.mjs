@@ -741,6 +741,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           { ...entity, id: 'petro', name: '中国石油', symbol: '601857.SH' },
         ];
         let selected, selectedMedia;
+        let preparedStock;
         const searches = [];
         const confirmations = [];
         await page.route(origin + '/app**', (route) =>
@@ -768,9 +769,15 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
             // The registered result is a near hit for two names. It must not
             // hide the exact discovery hit or be duplicated in the list.
             body = { items: accept === json ? [stocks[0]] : [stocks[0], item] };
+          } else if (path === 'research-subjects/petro/prepare') {
+            assert.equal(accept, json);
+            preparedStock = 'petro';
+            body = { status: 'ready' };
           } else if (path === 'research-plans') {
             selected = stocks.find((stock) => stock.id === req.postDataJSON().subject_id);
-            selectedMedia = selected.id === 'maotai' ? json : observationMedia;
+            selectedMedia = ['maotai', preparedStock].includes(selected.id)
+              ? json
+              : observationMedia;
             assert.equal(accept, selectedMedia);
             assert.equal(req.headers()['content-type'], selectedMedia);
             body = { kind: 'plan', plan: { ...plan, subject: selected } };
@@ -809,8 +816,10 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           await input.press('Enter');
           const notice = page.getByText(/本次将使用 Choice 行情生成成交简报/);
           if (stock.id === 'maotai') assert.equal(await notice.count(), 0);
-          else assert.match(await notice.innerText(), /TuShare.*资金动向.*深度研究/);
-          await create.click();
+          else assert.match(await notice.innerText(), /TuShare/);
+          if (stock.id === 'petro')
+            await page.getByRole('button', { name: '准备个股研究数据' }).click();
+          else await create.click();
           await page.getByRole('heading', { name: '研究计划：' + stock.name }).waitFor();
           await page.getByRole('button', { name: '提交任务' }).click();
           await page.getByRole('link', { name: '查看报告' }).waitFor();

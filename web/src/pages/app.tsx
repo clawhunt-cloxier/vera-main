@@ -287,7 +287,6 @@ export function Quick({ skill }: { skill: SkillId }) {
   const searchObservation =
     !!me.data?.closing_research_available &&
     (me.data.research_protocol === 'observation.v1' || me.data.research_protocol === 'v0.4');
-  const prepareClose = searchObservation && skill !== 'stock_analysis';
   const active = useRef<AbortController | null>(null);
   const [preparing, setPreparing] = useState('');
   useEffect(() => () => active.current?.abort(), []);
@@ -301,7 +300,13 @@ export function Quick({ skill }: { skill: SkillId }) {
   const available = !!s.data?.available;
   const nav = useNavigate();
   const plan = useMutation({
-    mutationFn: async (signal: AbortSignal) => {
+    mutationFn: async ({
+      signal,
+      prepareClose,
+    }: {
+      signal: AbortSignal;
+      prepareClose: boolean;
+    }) => {
       if (!subject || !available || !s.data?.subject_kinds.includes(subject.kind)) return;
       if (prepareClose) {
         await waitForCloseData(subject, signal, setPreparing);
@@ -321,13 +326,18 @@ export function Quick({ skill }: { skill: SkillId }) {
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
       return r;
     },
-    onSettled: (_result, _error, signal) => {
+    onSettled: (_result, _error, { signal }) => {
       if (active.current?.signal === signal && !signal.aborted) {
         active.current = null;
         setPreparing('');
       }
     },
   });
+  const startPlan = (prepareClose: boolean) => {
+    if (active.current) return;
+    active.current = new AbortController();
+    plan.mutate({ signal: active.current.signal, prepareClose });
+  };
   const clearSelection = () => {
     active.current?.abort();
     active.current = null;
@@ -352,9 +362,7 @@ export function Quick({ skill }: { skill: SkillId }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (active.current) return;
-            active.current = new AbortController();
-            plan.mutate(active.current.signal);
+            startPlan(searchObservation && skill !== 'stock_analysis');
           }}
         >
           <label>
@@ -371,10 +379,15 @@ export function Quick({ skill }: { skill: SkillId }) {
           {searchObservation &&
             skill === 'stock_analysis' &&
             selection?.protocol === 'observation.v1' && (
-              <p className="muted small">
-                本次将使用 Choice 行情生成成交简报。要为{subject?.name}准备 TuShare
-                研究数据，可在“资金动向”或“深度研究”中选择这只股票并发起研究。
-              </p>
+              <div>
+                <p className="muted small">
+                  本次将使用 Choice 行情生成成交简报。也可以为{subject?.name}采集 TuShare
+                  数据后进行个股分析。
+                </p>
+                <button type="button" disabled={plan.isPending} onClick={() => startPlan(true)}>
+                  准备个股研究数据
+                </button>
+              </div>
             )}
           {skill === 'deep_research' && available && (
             <label>
