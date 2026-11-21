@@ -35,6 +35,7 @@
 | --- | --- | --- |
 | invites | 邀请码哈希、额度、过期时间、创建者 | identity |
 | entities / entity_aliases | 实体、类型、代码、名称、拼音、曾用名、生效区间 | catalog |
+| tushare_requested_subjects | 以证券代码关联实体，记录该股按需完成 TuShare 数据发布的时间。与正式数据同事务提交，供各进程判断研究准入及是否需要重新采集。 | dataservice |
 | capabilities | 数据集 × 厂商 × 市场的启用状态、覆盖区间、许可用途、更新时间 | catalog |
 | providers / provider_datasets | 厂商与产品、口径说明、许可、限流、凭证引用 | dataservice |
 | raw_objects | 请求指纹、对象键、sha256、received_at | dataservice |

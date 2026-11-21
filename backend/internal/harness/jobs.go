@@ -104,9 +104,11 @@ func (e *Engine) NewRiver(pool *pgxpool.Pool, work bool, concurrency int, extra 
 	river.AddWorker(ws, &runWorker{e: e})
 	river.AddWorker(ws, &deadlineWorker{e: e})
 	river.AddWorker(ws, &cancelWorker{e: e})
+	river.AddWorker(ws, &prepareSubjectWorker{e: e})
 	cfg := &river.Config{Workers: ws, Logger: slog.Default()}
 	if work {
 		cfg.Queues = map[string]river.QueueConfig{"research": {MaxWorkers: max(1, concurrency)}, river.QueueDefault: {MaxWorkers: 2}}
+		cfg.Queues[prepareQueue] = river.QueueConfig{MaxWorkers: 1}
 	}
 	for _, f := range extra {
 		f(ws, cfg)

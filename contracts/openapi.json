@@ -391,6 +391,22 @@
         ]
       }
     },
+    "/api/v1/research-subjects/{id}/prepare": {
+      "post": {
+        "operationId": "prepareResearchSubject",
+        "summary": "为已选 A 股准备 TuShare 收盘研究数据，重复请求返回当前状态",
+        "parameters": [
+          {"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
+          {"name":"X-CSRF-Token","in":"header","required":true,"schema":{"type":"string"}}
+        ],
+        "requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false}}}},
+        "responses": {
+          "200":{"description":"准备完成或失败","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ResearchSubjectPreparation"}}}},
+          "202":{"description":"正在排队或采集，可再次请求状态","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ResearchSubjectPreparation"}}}},
+          "default":{"description":"Structured error","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}
+        }
+      }
+    },
     "/api/v1/research-tasks": {
       "post": {
         "operationId": "createTask",
@@ -2864,6 +2880,15 @@
           "disclaimer",
           "delivered_at"
         ]
+      },
+      "ResearchSubjectPreparation": {
+        "type":"object",
+        "additionalProperties":false,
+        "required":["status"],
+        "properties":{
+          "status":{"type":"string","enum":["pending","ready","failed"]},
+          "message":{"type":"string"}
+        }
       },
       "SkillId": {
         "enum": [

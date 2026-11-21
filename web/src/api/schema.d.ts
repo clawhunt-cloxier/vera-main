@@ -73,6 +73,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research-subjects/{id}/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 为已选 A 股准备 TuShare 收盘研究数据，重复请求返回当前状态 */
+        post: operations["prepareResearchSubject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research-tasks": {
         parameters: {
             query?: never;
@@ -624,6 +641,11 @@ export interface components {
             snapshot_as_of?: string | null;
             /** @description Per-source data times and limitations; required for collect_latest reports. */
             source_freshness?: components["schemas"]["SourceFreshness"][];
+        };
+        ResearchSubjectPreparation: {
+            /** @enum {string} */
+            status: "pending" | "ready" | "failed";
+            message?: string;
         };
         /** @enum {unknown} */
         SkillId: "deep_research" | "stock_analysis" | "capital_flow";
@@ -1198,6 +1220,52 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                     "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    prepareResearchSubject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description 准备完成或失败 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSubjectPreparation"];
+                };
+            };
+            /** @description 正在排队或采集，可再次请求状态 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSubjectPreparation"];
+                };
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

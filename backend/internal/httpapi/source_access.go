@@ -145,6 +145,11 @@ func (s *Server) responseGrant(r *http.Request) (responseGrant, error) {
 		if s.FullVendorResearch {
 			return s.closeGrant(r), nil
 		}
+	case r.Pattern == "POST /api/v1/research-subjects/{id}/prepare":
+		if !s.combined() {
+			return nil, errs.NotFound()
+		}
+		return s.mixedGrant(r), nil
 	case r.PathValue("id") != "" || r.Pattern == "POST /api/v1/research-tasks":
 		task, version, err := s.resourceVersion(r)
 		if err != nil {
