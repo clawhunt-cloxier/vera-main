@@ -609,7 +609,6 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           } else if (path === `research-subjects/${entity.id}/prepare`) {
             assert.equal(req.method(), 'POST');
             assert.equal(accept, json);
-            assert.notEqual(expected.id, 'stock_analysis');
             body = { status: 'ready' };
           } else if (path === 'research-plans') {
             assert.equal(accept, json);
@@ -741,7 +740,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           { ...entity, id: 'petro', name: '中国石油', symbol: '601857.SH' },
         ];
         let selected, selectedMedia;
-        let preparedStock;
+        const preparedStocks = [];
         const searches = [];
         const confirmations = [];
         await page.route(origin + '/app**', (route) =>
@@ -769,15 +768,13 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
             // The registered result is a near hit for two names. It must not
             // hide the exact discovery hit or be duplicated in the list.
             body = { items: accept === json ? [stocks[0]] : [stocks[0], item] };
-          } else if (path === 'research-subjects/petro/prepare') {
+          } else if (/^research-subjects\/(petro|maotai)\/prepare$/.test(path)) {
             assert.equal(accept, json);
-            preparedStock = 'petro';
+            preparedStocks.push(path.split('/')[1]);
             body = { status: 'ready' };
           } else if (path === 'research-plans') {
             selected = stocks.find((stock) => stock.id === req.postDataJSON().subject_id);
-            selectedMedia = ['maotai', preparedStock].includes(selected.id)
-              ? json
-              : observationMedia;
+            selectedMedia = preparedStocks.includes(selected.id) ? json : observationMedia;
             assert.equal(accept, selectedMedia);
             assert.equal(req.headers()['content-type'], selectedMedia);
             body = { kind: 'plan', plan: { ...plan, subject: selected } };
@@ -824,6 +821,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           await page.getByRole('button', { name: '提交任务' }).click();
           await page.getByRole('link', { name: '查看报告' }).waitFor();
         }
+        assert.deepEqual(preparedStocks, ['maotai', 'petro']);
         assert.deepEqual(searches, [
           ['贵州茅台', json],
           ['中国移动', json],

@@ -362,7 +362,10 @@ export function Quick({ skill }: { skill: SkillId }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            startPlan(searchObservation && skill !== 'stock_analysis');
+            const closingStock =
+              subject?.kind === 'stock' &&
+              (skill !== 'stock_analysis' || selection?.protocol !== 'observation.v1');
+            startPlan(searchObservation && closingStock);
           }}
         >
           <label>
