@@ -108,6 +108,9 @@ func (a *App) build(ctx context.Context) error {
 		// Choice retains its registered SDK collector and bound archive reader.
 		a.Primary = a.TuShare
 		a.Store = dataservice.NewResearchStore(a.Pool, cat, a.TuShare.ID(), a.TuShare.SubjectCodes(), a.TuShare.AllowModelProcessing())
+		if a.Brief != nil {
+			a.Store = dataservice.NewOnDemandResearchStore(a.Pool, cat, a.TuShare.SubjectCodes(), a.TuShare.AllowModelProcessing())
+		}
 	}
 	if a.Primary == nil {
 		if a.Primary, err = newProvider(c); err != nil {
@@ -172,10 +175,24 @@ func (a *App) build(ctx context.Context) error {
 		a.Engine.CloseResearchCutoff = a.Store.PublicationCutoff
 		if a.Brief != nil {
 			a.Engine.ResearchSupplements = []dataservice.ResearchSupplementSource{a.Brief}
+			a.Engine.PrepareTuShareSubject = a.PrepareTuShareSubject
 		}
 	}
 	a.Watch = &watchlist.Service{Pool: a.Pool, Store: a.Store, Now: a.Primary.Now, ProviderID: a.Primary.ID()}
 	return nil
+}
+
+// PrepareTuShareSubject publishes a selected stock before the plan fixes its data cutoff.
+// Run from a worker, since a cold observation includes history, filings and peers.
+func (a *App) PrepareTuShareSubject(ctx context.Context, code string) error {
+	if a.TuShare == nil || a.Brief == nil || !a.Cfg.RealResearch {
+		return &dataservice.ProviderError{Class: dataservice.ErrAuthFailed, Err: fmt.Errorf("未启用双来源收盘研究")}
+	}
+	_, err := a.Store.PrepareRequestedSubject(ctx, code, func(ctx context.Context) (dataservice.Provider, error) {
+		batch, _, err := a.TuShare.CollectRequested(ctx, code, a.TuShare.Now())
+		return batch, err
+	})
+	return err
 }
 
 // Sync loads provider data into the store (idempotent).

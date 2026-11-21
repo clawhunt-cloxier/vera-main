@@ -45,9 +45,10 @@ type Engine struct {
 	// RealResearch is VERA_REAL_RESEARCH_ENABLED: required before plans and tasks run on real data or real models.
 	RealResearch bool
 	// WithCloseResearchUse holds current TuShare usage rights for the callback.
-	WithCloseResearchUse func(context.Context, func() error) error
-	CloseResearchCutoff  func(context.Context) (time.Time, error)
-	ResearchSupplements  []dataservice.ResearchSupplementSource
+	WithCloseResearchUse  func(context.Context, func() error) error
+	CloseResearchCutoff   func(context.Context) (time.Time, error)
+	PrepareTuShareSubject func(context.Context, string) error
+	ResearchSupplements   []dataservice.ResearchSupplementSource
 }
 
 const PromptVersion = "1.1.0"
@@ -113,8 +114,14 @@ func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 	if !ok {
 		return nil, errs.Unprocessable("UNKNOWN_SKILL", "不支持的研究技能")
 	}
-	if IsCloseResearchVersion(sk.Version) && e.Store != nil && !e.Store.RegisteredResearchSubject(subject.Code) {
-		return nil, errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "本技能仅支持已登记的 A 股个股")
+	if IsCloseResearchVersion(sk.Version) && e.Store != nil {
+		registered, err := e.Store.ResearchSubjectRegistered(ctx, subject.Code)
+		if err != nil {
+			return nil, err
+		}
+		if !registered {
+			return nil, errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "本技能仅支持已登记的 A 股个股")
+		}
 	}
 	return e.buildSkillPlan(ctx, ws, sk, subject, raw)
 }

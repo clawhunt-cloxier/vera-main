@@ -63,7 +63,15 @@ func (e *Engine) BuildObservationPlan(ctx context.Context, ws uuid.UUID, skillID
 	if skillID != "stock_analysis" {
 		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "成交简报仅支持单只 A 股")
 	}
-	if e.hasCloseSkills() && e.Store != nil && e.Store.RegisteredResearchSubject(subject.Code) {
+	var registered bool
+	if e.hasCloseSkills() && e.Store != nil {
+		var err error
+		registered, err = e.Store.ResearchSubjectRegistered(ctx, subject.Code)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if registered {
 		p, err := e.buildSkillPlan(ctx, ws, MixedObservationSkill(), subject, raw)
 		if err == nil || errs.As(err).Code != "MIXED_SOURCE_UNAVAILABLE" {
 			return p, err
