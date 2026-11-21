@@ -267,7 +267,6 @@ func (b *builder) vendorFlow(e uuid.UUID, n int, group string) bool {
 	days := b.B.Window(n)
 	wl := windowLabel(n, days)
 	subj := b.name(e)
-	basis := b.basis["flow.order_size"]
 	by := map[string]dataservice.StoredRecord{}
 	for _, r := range rs {
 		by[str(r, "trade_date")] = r
@@ -283,7 +282,7 @@ func (b *builder) vendorFlow(e uuid.UUID, n int, group string) bool {
 			pts = append(pts, numericPoint(r, d, fld.f))
 		}
 		c := facts.SumWindow("F21.sum_over_window", pts, len(days), "CNY", false)
-		f := b.S.Computed(group, subj, "厂商口径"+fld.label+"累计", wl, c, b.B.Entities[e].Code+"|vendor|"+fld.f).Vendor(basis)
+		f := b.vendorComputed(group, subj, "厂商口径"+fld.label+"累计", wl, c, b.B.Entities[e].Code+"|vendor|"+fld.f, "flow.order_size", fld.f, "CNY")
 		f.Change = true
 	}
 	return true

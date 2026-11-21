@@ -16,10 +16,11 @@ import (
 type builder struct {
 	S                      *facts.Sheet
 	B                      *Bundle
-	basis                  map[string]string // provider basis by dataset
-	disclosedSeats         bool              // read per-day, revision-bound TuShare seat disclosures
-	paidDividendEvents     bool              // read paid dividend events in the stock analysis
-	disclosedFundPositions bool              // read individual disclosed fund positions in capital flow
+	basis                  map[string]string                      // provider basis by dataset
+	vendorRecords          map[uuid.UUID]dataservice.StoredRecord // frozen rows for field-level evidence
+	disclosedSeats         bool                                   // read per-day, revision-bound TuShare seat disclosures
+	paidDividendEvents     bool                                   // read paid dividend events in the stock analysis
+	disclosedFundPositions bool                                   // read individual disclosed fund positions in capital flow
 }
 
 func input(r dataservice.StoredRecord, f, unit string) (facts.Input, bool) {
@@ -33,6 +34,12 @@ func (b *builder) name(e uuid.UUID) string {
 }
 
 func (b *builder) source(r dataservice.StoredRecord) {
+	if r.DatasetID == "flow.order_size" || r.DatasetID == "mkt.valuation_daily" {
+		if b.vendorRecords == nil {
+			b.vendorRecords = make(map[uuid.UUID]dataservice.StoredRecord)
+		}
+		b.vendorRecords[r.ID] = r
+	}
 	at := r.AvailableAt.UTC().Format("2006-01-02T15:04:05Z07:00")
 	if cur := b.S.Sources[r.DatasetID]; at > cur {
 		b.S.Sources[r.DatasetID] = at
@@ -48,6 +55,25 @@ func (b *builder) source(r dataservice.StoredRecord) {
 			b.S.SourceProviders[r.DatasetID][r.ProviderID] = at
 		}
 	}
+}
+
+// Bind the evidence using the frozen source row, independently of the formula
+// operands. One source row can contain several order sizes or valuation ratios.
+func (b *builder) vendorComputed(group, subject, label, period string, c facts.Calc, key, dataset, field, unit string) *facts.Fact {
+	f := b.S.Computed(group, subject, label, period, c, key).Vendor(b.basis[dataset])
+	f.VendorField = dataset + "." + field
+	if c.OK() {
+		for _, id := range f.Evidence {
+			row := b.vendorRecords[id]
+			if row.DatasetID != dataset {
+				continue
+			}
+			if original, ok := input(row, field, unit); ok {
+				b.S.RecordVendorInput(f.VendorField, original)
+			}
+		}
+	}
+	return f
 }
 
 func (b *builder) sources(rs []dataservice.StoredRecord) {
