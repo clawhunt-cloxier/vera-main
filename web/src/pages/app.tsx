@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  ApiError,
   fmtTime,
   get,
   newKey,
@@ -284,9 +285,11 @@ export function Quick({ skill }: { skill: SkillId }) {
   );
   const subject = selection?.entity;
   const searchObservation =
-    skill === 'stock_analysis' &&
     !!me.data?.closing_research_available &&
     (me.data.research_protocol === 'observation.v1' || me.data.research_protocol === 'v0.4');
+  const active = useRef<AbortController | null>(null);
+  const [preparing, setPreparing] = useState('');
+  useEffect(() => () => active.current?.abort(), []);
   const [mode, setMode] = useState('');
   const stockOnly = s.data?.subject_kinds.length === 1 && s.data.subject_kinds[0] === 'stock';
   const allowComparison =
@@ -297,8 +300,19 @@ export function Quick({ skill }: { skill: SkillId }) {
   const available = !!s.data?.available;
   const nav = useNavigate();
   const plan = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({
+      signal,
+      prepareClose,
+    }: {
+      signal: AbortSignal;
+      prepareClose: boolean;
+    }) => {
       if (!subject || !available || !s.data?.subject_kinds.includes(subject.kind)) return;
+      if (prepareClose) {
+        await waitForCloseData(subject, signal, setPreparing);
+        setPreparing('');
+      }
+      signal.throwIfAborted();
       const r = await post<PlanResult>(
         '/api/v1/research-plans',
         {
@@ -306,12 +320,31 @@ export function Quick({ skill }: { skill: SkillId }) {
           subject_id: subject.id,
           params: selectedMode ? { mode: selectedMode } : {},
         },
-        { idem: newKey(), protocol: selection.protocol }
+        { idem: newKey(), protocol: prepareClose ? 'legacy' : selection.protocol, signal }
       );
+      signal.throwIfAborted();
       if (r.kind === 'plan' && r.plan) nav({ to: '/app/plan/$id', params: { id: r.plan.id } });
       return r;
     },
+    onSettled: (_result, _error, { signal }) => {
+      if (active.current?.signal === signal && !signal.aborted) {
+        active.current = null;
+        setPreparing('');
+      }
+    },
   });
+  const startPlan = (prepareClose: boolean) => {
+    if (active.current) return;
+    active.current = new AbortController();
+    plan.mutate({ signal: active.current.signal, prepareClose });
+  };
+  const clearSelection = () => {
+    active.current?.abort();
+    active.current = null;
+    plan.reset();
+    setPreparing('');
+    setSelection(null);
+  };
   return (
     <main>
       {me.data?.synthetic && <SyntheticBanner />}
@@ -329,7 +362,10 @@ export function Quick({ skill }: { skill: SkillId }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            plan.mutate();
+            const closingStock =
+              subject?.kind === 'stock' &&
+              (skill !== 'stock_analysis' || selection?.protocol !== 'observation.v1');
+            startPlan(searchObservation && closingStock);
           }}
         >
           <label>
@@ -337,12 +373,25 @@ export function Quick({ skill }: { skill: SkillId }) {
             <EntitySearch
               kinds={s.data?.subject_kinds}
               onPick={(entity, source) => setSelection({ entity, protocol: source ?? protocol })}
-              onEdit={() => setSelection(null)}
+              onEdit={clearSelection}
               protocol={protocol}
               searchObservation={searchObservation}
               placeholder={stockOnly ? '输入 A 股简称或代码' : undefined}
             />
           </label>
+          {searchObservation &&
+            skill === 'stock_analysis' &&
+            selection?.protocol === 'observation.v1' && (
+              <div>
+                <p className="muted small">
+                  本次将使用 Choice 行情生成成交简报。也可以为{subject?.name}采集 TuShare
+                  数据后进行个股分析。
+                </p>
+                <button type="button" disabled={plan.isPending} onClick={() => startPlan(true)}>
+                  准备个股研究数据
+                </button>
+              </div>
+            )}
           {skill === 'deep_research' && available && (
             <label>
               模式
@@ -371,12 +420,63 @@ export function Quick({ skill }: { skill: SkillId }) {
           </button>
         </form>
       )}
+      {preparing && <p role="status">{preparing}</p>}
       {plan.error && <ErrorBox error={plan.error} />}
       {plan.data?.kind === 'unsupported' && (
         <p className="muted">这个对象暂不支持：{plan.data.unsupported_reason}</p>
       )}
     </main>
   );
+}
+
+async function waitForCloseData(
+  subject: Entity,
+  signal: AbortSignal,
+  onPending: (message: string) => void
+) {
+  const endpoint = '/api/v1/research-subjects/' + encodeURIComponent(subject.id) + '/prepare';
+  let delay = 5000;
+  for (;;) {
+    try {
+      const result = await post<{ status: 'pending' | 'ready' | 'failed'; message?: string }>(
+        endpoint,
+        {},
+        { protocol: 'legacy', signal }
+      );
+      signal.throwIfAborted();
+      if (result.status === 'ready') return;
+      if (result.status !== 'pending')
+        throw new Error(result.message || '未能准备这只股票的 TuShare 数据，请稍后重新发起研究。');
+      delay = 5000;
+      onPending(result.message || `正在同步${subject.name}的 TuShare 研究数据，完成后将打开计划。`);
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!(error instanceof ApiError && error.status === 429 && error.retryable)) throw error;
+      const retryAfter = error.retryAfter;
+      const retryDelay =
+        retryAfter && /^\d+$/.test(retryAfter)
+          ? Number(retryAfter) * 1000
+          : Date.parse(retryAfter ?? '') - Date.now();
+      delay = Number.isFinite(retryDelay)
+        ? Math.max(5000, retryDelay)
+        : Math.min(delay * 2, 60_000);
+      // Browsers treat delays above the signed 32-bit timer range as immediate.
+      delay = Math.min(delay, 2_147_483_647);
+      onPending(`${subject.name}的研究数据请求暂时限频，页面将自动重试。`);
+    }
+    await new Promise<void>((resolve) => {
+      const abort = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', abort);
+        resolve();
+      }, delay);
+      signal.addEventListener('abort', abort, { once: true });
+    });
+    signal.throwIfAborted();
+  }
 }
 
 function CapitalFlowAlternative({ subject }: { subject: Entity }) {

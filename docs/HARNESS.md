@@ -322,6 +322,7 @@ DELIVERING 只能由交付步骤在一个事务中完成：锁任务行，校验
 | `research.deadline` | 截止时刻触发，执行超时规则 | 按 task_id |
 | `data.refresh` | 定时刷新公共数据（行情日线、资金统计）| 按数据集 + 交易日 |
 | `watchlist.snapshot` | 收盘后计算自选股快照与提醒 | 按交易日 |
+| `tushare_subject_prepare` | 用户选中股票后在独立队列准备收盘研究数据 | 相同证券共享在途作业，首次入队计入准备配额。成功发布后才返回 ready 并进入计划阶段。 |
 | `usage.reconcile` | 对账结果未知的模型调用 | 按调用 ID |
 
 任务创建在同一事务中写任务行和 `research.run` 作业。River 的 at-least-once 投递由步骤台账保证幂等。

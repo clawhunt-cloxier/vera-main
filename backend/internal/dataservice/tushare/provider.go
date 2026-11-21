@@ -129,7 +129,36 @@ func (p *Provider) Collect(ctx context.Context, code string, end time.Time) (ds.
 	if !slices.Contains(p.codes, code) {
 		return nil, nil, errors.New("tushare: unregistered research subject")
 	}
-	batch, err := collectMarket(ctx, p.source, code, end)
+	return p.collect(ctx, code, end, nil)
+}
+
+// CollectRequested validates the selected identity at the source before starting the
+// full observation. The directory that supplied a candidate cannot authorize a TuShare record.
+func (p *Provider) CollectRequested(ctx context.Context, code string, end time.Time) (ds.Provider, []string, error) {
+	if !instrument.MatchString(code) {
+		return nil, nil, classified(ds.ErrNotCovered, "stock_basic")
+	}
+	rows, err := p.source.Rows(ctx, "stock_basic", map[string]string{"ts_code": code, "list_status": "L"},
+		strings.Fields(securityFields+" curr_type"), 1000)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil, classified(ds.ErrNotCovered, "stock_basic")
+	}
+	v := rows[0].Values
+	exchange := map[string]string{"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}[code[7:]]
+	if len(rows) != 1 || v["ts_code"] != code || v["symbol"] != code[:6] || v["list_status"] != "L" || v["exchange"] != exchange || v["name"] == "" {
+		return nil, nil, marketBad("stock_basic", "listed stock identity")
+	}
+	if v["curr_type"] != "CNY" {
+		return nil, nil, classified(ds.ErrNotCovered, "stock_basic")
+	}
+	return p.collect(ctx, code, end, &rows[0])
+}
+
+func (p *Provider) collect(ctx context.Context, code string, end time.Time, requestedIdentity *Row) (ds.Provider, []string, error) {
+	batch, err := collectMarket(ctx, p.source, code, end, requestedIdentity)
 	if err != nil {
 		return nil, nil, err
 	}

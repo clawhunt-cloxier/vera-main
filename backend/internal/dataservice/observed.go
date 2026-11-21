@@ -15,6 +15,19 @@ import (
 // SyncObserved serializes collection and publication per provider. Different
 // research subjects can fetch the same indexes, trading calendar and peers.
 func (s *Store) SyncObserved(ctx context.Context, provider string, collect func(context.Context) (Provider, error)) (int, error) {
+	return s.syncObserved(ctx, provider, "", collect)
+}
+
+// PrepareRequestedSubject performs an atomic cold publish, serializing with all other
+// TuShare publications. A waiting process rechecks the successful publication after acquiring the lock.
+func (s *Store) PrepareRequestedSubject(ctx context.Context, code string, collect func(context.Context) (Provider, error)) (int, error) {
+	if !s.onDemandSubjects || code == "" {
+		return 0, errors.New("TuShare 按需研究未启用")
+	}
+	return s.syncObserved(ctx, "tushare", code, collect)
+}
+
+func (s *Store) syncObserved(ctx context.Context, provider, requestedCode string, collect func(context.Context) (Provider, error)) (int, error) {
 	if !s.excludeSynthetic || provider == "" || (s.providerID != "" && provider != s.providerID) {
 		return 0, errors.New("observation requires its configured vendor store")
 	}
@@ -23,6 +36,17 @@ func (s *Store) SyncObserved(ctx context.Context, provider string, collect func(
 		return 0, err
 	}
 	defer closeObservationSession(conn)
+	if requestedCode != "" {
+		// Do not hold a provider read lock over slow network work. Rights are
+		// rechecked in the actual publication transaction below.
+		if err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error { return s.RequireResearchUseTx(ctx, tx) }); err != nil {
+			return 0, err
+		}
+		prepared, err := s.researchSubjectPrepared(ctx, conn, requestedCode)
+		if err != nil || prepared {
+			return 0, err
+		}
+	}
 	batch, err := collect(ctx)
 	if err != nil {
 		return 0, err
@@ -32,7 +56,7 @@ func (s *Store) SyncObserved(ctx context.Context, provider string, collect func(
 	}
 	// Use the session that owns the lock for the write. A collector whose
 	// session died during a fetch cannot publish after another process takes over.
-	return s.sync(ctx, conn, batch, true)
+	return s.sync(ctx, conn, batch, true, requestedCode)
 }
 
 func (s *Store) acquireObservationSession(ctx context.Context, provider string) (*pgx.Conn, error) {

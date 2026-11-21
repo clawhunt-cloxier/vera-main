@@ -26,7 +26,14 @@ func (s *Store) RequireTuShareResearch(ctx context.Context, tx pgx.Tx) error {
 // ObservationBar locks the current research permission and the chosen canonical row
 // in the caller's transaction. Replays require the original ID and content hash.
 func (s *Store) ObservationBar(ctx context.Context, tx pgx.Tx, subject uuid.UUID, code string, cutoff time.Time, frozen *ObservationRef) (StoredRecord, error) {
-	if s == nil || !s.RegisteredResearchSubject(code) || !s.allowResearch {
+	if s == nil || !s.allowResearch {
+		return StoredRecord{}, errors.New("TuShare 研究对象或用途未启用")
+	}
+	registered, err := s.researchSubjectRegistered(ctx, tx, code)
+	if err != nil {
+		return StoredRecord{}, err
+	}
+	if !registered {
 		return StoredRecord{}, errors.New("TuShare 研究对象或用途未启用")
 	}
 	if err := s.RequireTuShareResearch(ctx, tx); err != nil {

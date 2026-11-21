@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	m.Handle("PATCH /api/v1/me", authNoWS(h(s.patchMe)))
 	m.Handle("POST /api/v1/onboarding", authNoWS(h(s.onboard)))
 	m.Handle("GET /api/v1/entities", auth(h(s.searchEntities)))
+	m.Handle("POST /api/v1/research-subjects/{id}/prepare", auth(h(s.prepareSubject)))
 	m.Handle("GET /api/v1/skills", auth(h(s.skills)))
 	m.Handle("POST /api/v1/research-plans", auth(h(s.createPlan)))
 	m.Handle("GET /api/v1/research-plans/{id}", auth(h(s.getPlan)))

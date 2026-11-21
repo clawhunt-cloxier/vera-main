@@ -606,6 +606,10 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           else if (path === 'entities') {
             assert.equal(accept, json);
             body = { items: [entity] };
+          } else if (path === `research-subjects/${entity.id}/prepare`) {
+            assert.equal(req.method(), 'POST');
+            assert.equal(accept, json);
+            body = { status: 'ready' };
           } else if (path === 'research-plans') {
             assert.equal(accept, json);
             assert.equal(req.headers()['content-type'], json);
@@ -736,6 +740,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           { ...entity, id: 'petro', name: '中国石油', symbol: '601857.SH' },
         ];
         let selected, selectedMedia;
+        const preparedStocks = [];
         const searches = [];
         const confirmations = [];
         await page.route(origin + '/app**', (route) =>
@@ -763,9 +768,13 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
             // The registered result is a near hit for two names. It must not
             // hide the exact discovery hit or be duplicated in the list.
             body = { items: accept === json ? [stocks[0]] : [stocks[0], item] };
+          } else if (/^research-subjects\/(petro|maotai)\/prepare$/.test(path)) {
+            assert.equal(accept, json);
+            preparedStocks.push(path.split('/')[1]);
+            body = { status: 'ready' };
           } else if (path === 'research-plans') {
             selected = stocks.find((stock) => stock.id === req.postDataJSON().subject_id);
-            selectedMedia = selected.id === 'maotai' ? json : observationMedia;
+            selectedMedia = preparedStocks.includes(selected.id) ? json : observationMedia;
             assert.equal(accept, selectedMedia);
             assert.equal(req.headers()['content-type'], selectedMedia);
             body = { kind: 'plan', plan: { ...plan, subject: selected } };
@@ -802,11 +811,17 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           assert.match(await options.first().innerText(), new RegExp(stock.name));
           assert.equal(await options.count(), stock.id === 'maotai' ? 1 : 2);
           await input.press('Enter');
-          await create.click();
+          const notice = page.getByText(/本次将使用 Choice 行情生成成交简报/);
+          if (stock.id === 'maotai') assert.equal(await notice.count(), 0);
+          else assert.match(await notice.innerText(), /TuShare/);
+          if (stock.id === 'petro')
+            await page.getByRole('button', { name: '准备个股研究数据' }).click();
+          else await create.click();
           await page.getByRole('heading', { name: '研究计划：' + stock.name }).waitFor();
           await page.getByRole('button', { name: '提交任务' }).click();
           await page.getByRole('link', { name: '查看报告' }).waitFor();
         }
+        assert.deepEqual(preparedStocks, ['maotai', 'petro']);
         assert.deepEqual(searches, [
           ['贵州茅台', json],
           ['中国移动', json],
@@ -824,6 +839,143 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
       }
     }
   );
+
+  await t.test('capital flow and deep research prepare new A-shares before planning', async () => {
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      const json = 'application/json';
+      const stocks = [
+        { ...entity, id: 'mobile', name: '中国移动', symbol: '600941.SH' },
+        { ...entity, id: 'petro', name: '中国石油', symbol: '601857.SH' },
+      ];
+      const skills = [
+        { ...stockSkill, id: 'capital_flow', title: '资金动向' },
+        { ...stockSkill, id: 'deep_research', title: '深度研究' },
+      ];
+      let prepares = [];
+      let searches = [];
+      let plans = [];
+      let status = 'pending';
+      let selected;
+      await page.route(origin + '/app**', (route) =>
+        route.fulfill({ contentType: 'text/html', body: appHTML })
+      );
+      await page.route(origin + '/api/v1/**', async (route) => {
+        const req = route.request();
+        const { pathname, searchParams } = new URL(req.url());
+        const path = pathname.slice('/api/v1/'.length);
+        const headers = req.headers();
+        let body;
+        if (path === 'me') {
+          body = {
+            onboarded: true,
+            csrf_token: 'mock',
+            closing_research_available: true,
+            research_protocol: 'v0.4',
+          };
+        } else if (path === 'skills') {
+          body = { items: skills };
+        } else if (path === 'entities') {
+          const q = searchParams.get('q');
+          searches.push([q, headers.accept]);
+          body = {
+            items:
+              headers.accept === json
+                ? []
+                : stocks.filter((stock) => stock.name === q || stock.symbol.startsWith(q)),
+          };
+        } else if (path.endsWith('/prepare')) {
+          assert.equal(headers.accept, json);
+          assert.equal(headers['x-csrf-token'], 'mock');
+          assert.equal(req.method(), 'POST');
+          assert.deepEqual(req.postDataJSON(), {});
+          prepares.push(path.split('/')[1]);
+          if (status === 'limited') {
+            await route.fulfill({
+              status: 429,
+              headers: { 'retry-after': '5' },
+              contentType: json,
+              json: { error: { code: 'RATE_LIMITED', message: '测试限频', retryable: true } },
+            });
+            return;
+          }
+          body = {
+            status,
+            message: { pending: '正在同步测试证券', failed: '此账号缺少数据权限' }[status],
+          };
+        } else if (path === 'research-plans') {
+          assert.equal(headers.accept, json);
+          assert.equal(headers['content-type'], json);
+          const { skill_id, subject_id } = req.postDataJSON();
+          plans.push([skill_id, subject_id]);
+          selected = stocks.find((stock) => stock.id === subject_id);
+          body = { kind: 'plan', plan: { ...plan, subject: selected } };
+        } else if (path === 'research-plans/mock-plan') {
+          body = {
+            ...plan,
+            subject: selected,
+            snapshot_mode: 'fixed_legacy',
+            quote_requirement: undefined,
+          };
+        } else throw new Error('Unexpected research preparation request ' + path);
+        await route.fulfill({
+          contentType: headers.accept.includes(',') ? media : headers.accept,
+          json: body,
+        });
+      });
+      for (const skill of skills) {
+        prepares = [];
+        searches = [];
+        plans = [];
+        status = 'pending';
+        await page.goto(origin + '/app/quick/' + skill.id);
+        const input = page.getByRole('combobox', { name: '搜索研究对象' });
+        const start = page.getByRole('button', { name: '发起研究' });
+        await input.fill(stocks[0].name);
+        await page.getByRole('option', { name: /中国移动/ }).click();
+        assert.deepEqual(prepares, []);
+        await start.click();
+        await page.getByText('正在同步测试证券').waitFor();
+        assert.deepEqual(plans, []);
+        if (skill.id === 'deep_research') {
+          await input.fill('601857');
+          await page.getByRole('option', { name: /中国石油/ }).click();
+          status = 'failed';
+          await start.click();
+          await page.getByRole('alert').filter({ hasText: '此账号缺少数据权限' }).waitFor();
+          assert.deepEqual(plans, []);
+          status = 'ready';
+          await start.click();
+        } else {
+          status = 'limited';
+          await page.getByRole('status').filter({ hasText: '限频' }).waitFor();
+          assert.deepEqual(plans, []);
+          status = 'ready';
+        }
+        const stock = stocks[skill.id === 'capital_flow' ? 0 : 1];
+        await page
+          .getByRole('heading', { name: '研究计划：' + stock.name })
+          .waitFor({ timeout: 9000 });
+        assert.deepEqual(plans, [[skill.id, stock.id]]);
+        assert.deepEqual(
+          prepares,
+          skill.id === 'capital_flow'
+            ? ['mobile', 'mobile', 'mobile']
+            : ['mobile', 'petro', 'petro']
+        );
+        assert.deepEqual(
+          searches,
+          [stocks[0].name, ...(skill.id === 'deep_research' ? ['601857'] : [])].flatMap((q) => [
+            [q, json],
+            [q, observationMedia],
+          ])
+        );
+      }
+    } finally {
+      await context.close();
+    }
+  });
 
   await t.test('quick research distinguishes loading from an unavailable skill', async () => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });

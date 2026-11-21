@@ -26,6 +26,7 @@
 | GET | /api/v1/me | 用户、workspace、CSRF token、配额剩余 |
 | GET | /api/v1/skills | 技能列表、版本、参数 Schema、当前可用性 |
 | GET | /api/v1/entities | `q` 搜索；`kind` 过滤 stock/industry/market；返回各技能可用性 |
+| POST | /api/v1/research-subjects/{id}/prepare | 双厂商部署为选中的 A 股准备 TuShare 数据。普通 JSON、登录和 CSRF 校验。排队返回 202 及 Retry-After，成功或失败返回 200 及 ready/failed。相同证券的轮询共用在途采集。 |
 | POST | /api/v1/research-plans | 一句话或结构化输入生成计划；返回计划或候选列表；不预留配额 |
 | GET | /api/v1/research-plans/{id} | 读取未过期计划 |
 | POST | /api/v1/research-tasks | 用 `plan_id` + `plan_hash` 确认计划并创建任务，幂等，202 |

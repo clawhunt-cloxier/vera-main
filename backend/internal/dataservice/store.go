@@ -24,12 +24,20 @@ type Store struct {
 	providerID       string
 	researchSubjects []string
 	allowResearch    bool
+	onDemandSubjects bool
 }
 
 // NewResearchStore restricts the full research path to its configured source.
 // Identities used only for peer calculations remain available to the loader.
 func NewResearchStore(pool *pgxpool.Pool, cat *Catalog, provider string, subjects []string, allowResearch bool) *Store {
 	return &Store{pool: pool, cat: cat, excludeSynthetic: true, providerID: provider, researchSubjects: slices.Clone(subjects), allowResearch: allowResearch}
+}
+
+// NewOnDemandResearchStore also admits TuShare batches requested on a dual-source deployment.
+func NewOnDemandResearchStore(pool *pgxpool.Pool, cat *Catalog, subjects []string, allowResearch bool) *Store {
+	s := NewResearchStore(pool, cat, "tushare", subjects, allowResearch)
+	s.onDemandSubjects = true
+	return s
 }
 
 func NewStore(pool *pgxpool.Pool, cat *Catalog) *Store { return &Store{pool: pool, cat: cat} }
@@ -52,14 +60,14 @@ func (s *Store) RegisteredResearchSubject(code string) bool {
 // Existing record keys are idempotent only when their content and provenance
 // agree; a conflicting key fails the entire sync without replacing either.
 func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
-	return s.sync(ctx, s.pool, p, false)
+	return s.sync(ctx, s.pool, p, false, "")
 }
 
 type txBeginner interface {
 	Begin(context.Context) (pgx.Tx, error)
 }
 
-func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bool) (int, error) {
+func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bool, requestedCode string) (int, error) {
 	if s.excludeSynthetic && p.Synthetic() {
 		return 0, fmt.Errorf("synthetic provider not permitted in vendor store")
 	}
@@ -88,6 +96,21 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 	ids := map[string]uuid.UUID{}
 	n := 0
 	err = pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		if requestedCode != "" {
+			if err := s.RequireResearchUseTx(ctx, tx); err != nil {
+				return err
+			}
+			validTarget := slices.ContainsFunc(ents, func(e Entity) bool {
+				return e.Kind == "stock" && e.Code == requestedCode && e.Attrs["tushare_research_subject"] == true
+			})
+			validBar := slices.ContainsFunc(recs, func(r Record) bool {
+				return r.DatasetID == "mkt.daily_bar" && r.EntityCode == requestedCode && r.Period != nil &&
+					(r.QualityState == "" || r.QualityState == "PASS" || r.QualityState == "WARN")
+			})
+			if !validTarget || !validBar {
+				return &ProviderError{Class: ErrNotCovered, Err: fmt.Errorf("TuShare %s 缺少已验证证券信息或可用日线", requestedCode)}
+			}
+		}
 		if observed {
 			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 508417))`, p.ID()); err != nil {
 				return err
@@ -114,9 +137,11 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 			var id uuid.UUID
 			err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
 				VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
-				ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status, is_financial=excluded.is_financial, classification=excluded.classification, attrs=excluded.attrs
+				ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status, is_financial=excluded.is_financial, classification=excluded.classification,
+                attrs=CASE WHEN $10 AND EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
+                    THEN excluded.attrs || '{"tushare_research_subject":true}'::jsonb ELSE excluded.attrs END
                 WHERE entities.synthetic=excluded.synthetic AND entities.kind=excluded.kind
-				RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs).Scan(&id)
+				RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs, p.ID() == "tushare").Scan(&id)
 			if err != nil {
 				return fmt.Errorf("entity %s: %w", e.Code, err)
 			}
@@ -191,6 +216,11 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 				p.ID(), c.DatasetID, eid, c.From, c.To); err != nil {
 				return err
 			}
+		}
+		if requestedCode != "" {
+			_, err := tx.Exec(ctx, `INSERT INTO tushare_requested_subjects(code,published_at) VALUES($1,clock_timestamp())
+				ON CONFLICT (code) DO UPDATE SET published_at=excluded.published_at`, requestedCode)
+			return err
 		}
 		return nil
 	})
@@ -530,10 +560,11 @@ func (s *Store) EntitiesByKind(ctx context.Context, kind string) ([]EntityRow, e
 // Search matches names, codes and aliases (trigram similarity plus substring), best first.
 func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]EntityRow, error) {
 	q = strings.ToLower(strings.TrimSpace(q))
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2 = '' OR kind = $2) AND (NOT $4::bool OR NOT e.synthetic) AND ($5::text[] IS NULL OR code=ANY($5)) AND EXISTS (
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2 = '' OR kind = $2) AND (NOT $4::bool OR NOT e.synthetic) AND
+		($5::text[] IS NULL OR code=ANY($5) OR ($6 AND EXISTS (SELECT 1 FROM tushare_requested_subjects t WHERE t.code=e.code))) AND EXISTS (
 		SELECT 1 FROM entity_aliases a WHERE a.entity_id = e.id AND (a.alias LIKE '%' || $1 || '%' OR similarity(a.alias, $1) > 0.3))
 		ORDER BY (SELECT max(CASE WHEN a.alias = $1 THEN 2 ELSE similarity(a.alias, $1) END) FROM entity_aliases a WHERE a.entity_id = e.id) DESC, code
-		LIMIT $3`, q, kind, limit, s.excludeSynthetic, s.searchableCodes())
+		LIMIT $3`, q, kind, limit, s.excludeSynthetic, s.searchableCodes(), s.onDemandSubjects)
 	if err != nil {
 		return nil, err
 	}
@@ -544,8 +575,9 @@ func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]Entity
 func (s *Store) Mentioned(ctx context.Context, text string) ([]EntityRow, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e JOIN LATERAL (
 		SELECT max(length(alias)) AS l FROM entity_aliases a WHERE a.entity_id = e.id AND length(a.alias) >= 2 AND strpos(lower($1), a.alias) > 0) m ON m.l IS NOT NULL
-        WHERE (NOT $2::bool OR NOT e.synthetic) AND ($3::text[] IS NULL OR code=ANY($3))
-		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic, s.searchableCodes())
+        WHERE (NOT $2::bool OR NOT e.synthetic) AND
+		($3::text[] IS NULL OR code=ANY($3) OR ($4 AND EXISTS (SELECT 1 FROM tushare_requested_subjects t WHERE t.code=e.code)))
+		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic, s.searchableCodes(), s.onDemandSubjects)
 	if err != nil {
 		return nil, err
 	}
