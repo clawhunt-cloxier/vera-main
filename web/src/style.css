@@ -839,6 +839,10 @@ main.reader-sample {
   font-variant-numeric: tabular-nums;
 }
 
+.reader-dateline {
+  font-weight: 500;
+}
+
 .rsec {
   margin-bottom: clamp(24px, 2.4vw, 34px);
   scroll-margin-top: calc(var(--reader-sticky-top) + 16px);
@@ -1337,9 +1341,30 @@ main.reader-sample {
     scroll-margin-top: calc(var(--reader-sticky-top) + 52px);
   }
 
+  .report-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 8px;
+  }
+
   .reader-title {
-    flex-wrap: wrap;
-    align-items: baseline;
+    display: contents;
+  }
+
+  .reader-title h1,
+  .report-head > p {
+    grid-column: 1 / -1;
+  }
+
+  .report-head .meta,
+  .reader-title .actions {
+    grid-row: 2;
+    margin: 8px 0 4px;
+  }
+
+  .reader-title .actions {
+    grid-column: 2;
   }
 
   .claim,

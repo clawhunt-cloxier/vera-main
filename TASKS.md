@@ -44,7 +44,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 
 | T038 | 优化工作台与研究等待体验 | T036、T037（已部署） | REVIEW | Codex / agent/codex/T038-workspace | 2026-11-21T12:09Z 接续开发。工作台、研究计划与任务页已接通，新增桌面与手机浏览器验收。[交接](docs/handoffs/2026-11-21-T038-codex.md) |
 
-| T039 | 优化研报阅读布局 | T038（已部署） | IN_PROGRESS | Codex / agent/codex/T039-report-layout | 2026-11-21T13:04Z 领取。范围为研报目录、正文排版、响应式证据栏、图表尺寸与浏览器验收。 |
+| T039 | 优化研报阅读布局 | T038（已部署） | REVIEW | Codex / agent/codex/T039-report-layout | 2026-11-21T13:04Z 领取。窄目录、正文层级、证据抽屉与图表重排已接通，并在真实报告上对照桌面与手机布局。[交接](docs/handoffs/2026-11-21-T039-codex.md) |
 
 ## 里程碑
 
