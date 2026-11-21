@@ -1,17 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChartSeries } from '../api/client';
 
-export function Chart({ load, title }: { load: () => Promise<ChartSeries>; title: string }) {
+export function Chart({
+  load,
+  seriesId,
+  title,
+}: {
+  load: (id: string) => Promise<ChartSeries>;
+  seriesId: string;
+  title: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState('');
   const [data, setData] = useState<ChartSeries | null>(null);
   useEffect(() => {
     let disposed = false;
     let chart: { dispose: () => void; resize: () => void } | null = null;
-    const onResize = () => chart?.resize();
+    let observer: ResizeObserver | undefined;
     (async () => {
       try {
-        const [s, echarts] = await Promise.all([load(), import('echarts')]);
+        const [s, echarts] = await Promise.all([load(seriesId), import('echarts')]);
         if (disposed || !ref.current) return;
         setData(s);
         const c = echarts.init(ref.current, undefined, { renderer: 'svg' });
@@ -33,17 +41,18 @@ export function Chart({ load, title }: { load: () => Promise<ChartSeries>; title
             data: l.points.map((p) => (p[1] === null ? null : Number(p[1]))),
           })),
         });
-        window.addEventListener('resize', onResize);
+        observer = new ResizeObserver(() => c.resize());
+        observer.observe(ref.current);
       } catch {
-        setErr('图表加载失败');
+        if (!disposed) setErr('图表加载失败');
       }
     })();
     return () => {
       disposed = true;
-      window.removeEventListener('resize', onResize);
+      observer?.disconnect();
       chart?.dispose();
     };
-  }, [load]);
+  }, [load, seriesId]);
   return (
     <figure className="chart">
       <figcaption>

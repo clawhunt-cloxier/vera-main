@@ -1,0 +1,66 @@
+.report dialog.evidence {
+  --evidence-inset: 16px;
+  --evidence-top: 16px;
+  position: sticky;
+  inset: var(--evidence-top) auto auto;
+  align-self: start;
+  margin: 0;
+  padding: 0 var(--evidence-inset) var(--evidence-inset);
+  width: 100%;
+  max-width: none;
+  max-height: calc(100dvh - var(--evidence-top) - 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  color: inherit;
+}
+
+.site-header ~ .content .report dialog.evidence {
+  --evidence-top: 64px;
+}
+
+.report .evidence .dialog-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  gap: 8px;
+  margin: 0 calc(-1 * var(--evidence-inset)) 12px;
+  padding: 10px var(--evidence-inset);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-0);
+}
+
+.report .evidence .dialog-head button {
+  flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  font-size: 20px;
+}
+
+@media screen and (max-width: 1099px) {
+  html:has(.report dialog.evidence:modal) {
+    overflow: hidden;
+  }
+
+  .report dialog.evidence {
+    position: fixed;
+    inset: auto 0 0;
+    width: min(100%, 44rem);
+    margin-inline: auto;
+    max-height: 86dvh;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+
+  .report dialog.evidence::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+  }
+}
+
+@media print {
+  .report dialog.evidence,
+  .report dialog.evidence::backdrop {
+    display: none;
+  }
+}
