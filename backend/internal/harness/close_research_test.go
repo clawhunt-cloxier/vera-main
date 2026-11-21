@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/check"
@@ -66,6 +67,14 @@ func TestVendorFlowCumulativeClaimsFromFrozenSheet(t *testing.T) {
 		if failure := check.Check(claim, cx); failure == nil || failure.Rule != "R-07" {
 			t.Errorf("%s without vendor attribution: got %v, want R-07", f.ID, failure)
 		}
+	}
+	// All three fields in a row share its evidence UUID. Substituting a value
+	// from another field must fail even when the two-day total stays the same.
+	calc := &restored.Calcs[0]
+	calc.Inputs[0].Value = decimal.NewFromInt(30_000) // s_net in the first row
+	calc.Inputs[1].Value = decimal.NewFromInt(-10_000)
+	if restored.SupportsComputedClaim(restored.Facts[0]) {
+		t.Fatal("accepted altered per-row inputs after ledger restore")
 	}
 }
 
