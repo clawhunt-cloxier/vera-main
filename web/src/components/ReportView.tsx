@@ -50,6 +50,39 @@ const publishedSources = new Set([
 
 const evidencePageSize = 12;
 
+function ReportContents({ sections }: { sections: Report['sections'] }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <nav className="toc" aria-label="章节目录">
+      <strong className="toc-heading">章节目录</strong>
+      <button
+        className="toc-toggle"
+        type="button"
+        aria-expanded={expanded}
+        aria-controls="reader-chapters"
+        onClick={() => setExpanded(!expanded)}
+      >
+        章节目录 <span aria-hidden="true">{expanded ? '▴' : '▾'}</span>
+      </button>
+      <div id="reader-chapters" className="toc-links">
+        {sections.map((s) => (
+          <a
+            key={s.id}
+            href={'#' + s.id}
+            className={s.status !== 'ok' ? 'muted' : undefined}
+            onClick={() => setExpanded(false)}
+          >
+            <span className="section-id">{s.id}</span> <span>{s.title}</span>
+          </a>
+        ))}
+        <a className="toc-limits" href="#limits" onClick={() => setExpanded(false)}>
+          数据与限制
+        </a>
+      </div>
+    </nav>
+  );
+}
+
 function EvidencePanel({
   claim,
   showClaimText,
@@ -256,17 +289,13 @@ export function ReportView({
   );
   return (
     <div className={'report' + (open ? ' with-panel' : '')}>
-      <nav className="toc" aria-label="章节目录">
-        {report.sections.map((s) => (
-          <a key={s.id} href={'#' + s.id} className={s.status !== 'ok' ? 'muted' : ''}>
-            {s.id} {s.title}
-          </a>
-        ))}
-        <a href="#limits">数据与限制</a>
-      </nav>
+      <ReportContents sections={report.sections} />
       <article className="report-body">
         <header className="report-head">
-          <h1>{report.title}</h1>
+          <div className="reader-title">
+            <h1>{report.title}</h1>
+            {actions && <div className="actions">{actions}</div>}
+          </div>
           <div className="meta">
             <Tag>{skillTitle[report.skill_id]}</Tag>
             <Tag tone={report.result_kind === 'full' ? 'ok' : 'warn'}>
@@ -274,24 +303,29 @@ export function ReportView({
             </Tag>
             <Tag tone="info">AI 生成</Tag>
             {report.synthetic && <Tag tone="bad">模拟数据</Tag>}
-            <span className="muted">
-              {report.snapshot_mode === 'collect_latest'
-                ? `快照截止 ${sourceTime(report.snapshot_as_of)}（北京时间）`
-                : `数据截止 ${report.data_as_of}`}{' '}
-              · 版本 {report.version} · 交付 {fmtTime(report.delivered_at)}
-            </span>
           </div>
+          <p className="reader-dateline muted">
+            {report.snapshot_mode === 'collect_latest'
+              ? `快照截止 ${sourceTime(report.snapshot_as_of)}（北京时间）`
+              : `数据截止 ${report.data_as_of}`}{' '}
+            · 版本 {report.version} · 交付 {fmtTime(report.delivered_at)}
+          </p>
           {report.snapshot_mode === 'collect_latest' && (
             <p className="muted">
               快照截止是本次研究冻结数据的时间；各来源的实际事件与披露时间见“数据与限制”。
             </p>
           )}
-          {actions && <div className="actions">{actions}</div>}
         </header>
         {report.sections.map((s) => (
-          <section key={s.id} id={s.id} className="rsec" aria-labelledby={'h-' + s.id}>
+          <section
+            key={s.id}
+            id={s.id}
+            className="rsec"
+            tabIndex={-1}
+            aria-labelledby={'h-' + s.id}
+          >
             <h2 id={'h-' + s.id}>
-              {s.id} {s.title}{' '}
+              <span className="section-id">{s.id}</span> {s.title}{' '}
               {s.status !== 'ok' && (
                 <Tag tone="warn">{s.status === 'limited' ? '受限' : '未生成'}</Tag>
               )}
@@ -305,23 +339,27 @@ export function ReportView({
                   <Tag tone={c.kind === 'inference' || c.kind === 'scenario' ? 'info' : undefined}>
                     {kindLabel[c.kind]}
                   </Tag>{' '}
-                  {c.text}{' '}
-                  <button
-                    className="cite"
-                    onClick={() => setOpen(c)}
-                    aria-label={'查看证据 ' + num[r]}
-                  >
-                    [{num[r]}]
-                  </button>
-                  {onFeedback && (
-                    <button
-                      className="ghost small"
-                      onClick={() => onFeedback(c.ref)}
-                      aria-label={'反馈结论 ' + c.ref}
-                    >
-                      反馈
-                    </button>
-                  )}
+                  <span>
+                    {c.text}{' '}
+                    <span className="claim-tools">
+                      <button
+                        className="cite"
+                        onClick={() => setOpen(c)}
+                        aria-label={'查看证据 ' + num[r]}
+                      >
+                        [{num[r]}]
+                      </button>
+                      {onFeedback && (
+                        <button
+                          className="ghost small"
+                          onClick={() => onFeedback(c.ref)}
+                          aria-label={'反馈结论 ' + c.ref}
+                        >
+                          反馈
+                        </button>
+                      )}
+                    </span>
+                  </span>
                 </>
               );
               return c.kind === 'scenario' && c.scenario ? (
@@ -381,8 +419,8 @@ export function ReportView({
             ))}
           </section>
         ))}
-        <section id="limits" className="rsec">
-          <h2>数据与限制</h2>
+        <section id="limits" className="rsec" tabIndex={-1} aria-labelledby="h-limits">
+          <h2 id="h-limits">数据与限制</h2>
           <ul>
             {report.limitations.map((l, i) => (
               <li key={i}>{l}</li>

@@ -105,9 +105,9 @@ export function ReportPage({ id }: { id: string }) {
     ),
   };
   return (
-    <main>
+    <main className="reader-page">
       {me.data?.synthetic && <SyntheticBanner />}
-      <p>
+      <p className="reader-back">
         <Link to="/app/reports">← 返回报告列表</Link>
       </p>
       {r.isLoading && <Loading />}

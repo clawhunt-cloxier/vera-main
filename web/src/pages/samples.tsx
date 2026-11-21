@@ -24,7 +24,7 @@ export function Sample({ skill }: { skill: string }) {
   };
 
   return (
-    <main>
+    <main className="reader-page reader-sample">
       <header className="site-header">
         <div className="site-header__inner">
           <Link to="/" className="site-header__brand">
