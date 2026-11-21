@@ -41,9 +41,9 @@ func (s *Store) researchSubjectPrepared(ctx context.Context, q subjectQuery, cod
 		return false, nil
 	}
 	// Ordinary prewarm publishes daily bars only for its primary stock. Its per-stock
-	// capability timestamp advances on every commit, even if the market was closed
-	// and all record versions were reused. A peer or Choice directory entry can
-	// carry the configured stock's identity before its own batch has committed.
+	// capability row proves that this stock's own batch committed, even if the market
+	// was closed and all record versions were reused. A peer or Choice directory entry
+	// can carry the configured stock's identity before its own batch has committed.
 	var ok bool
 	err := q.QueryRow(ctx, `SELECT EXISTS (
 		SELECT 1 FROM tushare_requested_subjects WHERE $2 AND code=$1
@@ -53,7 +53,6 @@ func (s *Store) researchSubjectPrepared(ctx context.Context, q subjectQuery, cod
 		JOIN records r ON r.entity_id=c.entity_id AND r.dataset_id=c.dataset_id AND r.provider_id=c.provider_id
 		WHERE $3 AND e.code=$1 AND e.kind='stock' AND NOT e.synthetic AND e.attrs->>'tushare_research_subject'='true'
 			AND c.provider_id='tushare' AND c.dataset_id='mkt.daily_bar'
-			AND c.updated_at > statement_timestamp() - interval '24 hours'
 			AND r.quality_state IN ('PASS','WARN') AND r.available_at <= statement_timestamp()
 			AND (r.published_at IS NULL OR r.published_at <= statement_timestamp())
 			AND r.period <= (statement_timestamp() AT TIME ZONE 'Asia/Shanghai')::date

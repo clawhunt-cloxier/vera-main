@@ -86,7 +86,7 @@ func TestRequestedSubjectPrewarmRequiresPublishedBars(t *testing.T) {
 	if _, err := api.UpsertSearchEntity(ctx, "stock", coldTarget, "模拟目录简称", nil); err != nil {
 		t.Fatal(err)
 	}
-	assertRequestedState(t, api, coldTarget, true, false)
+	assertRequestedState(t, api, coldTarget, true, true)
 	batch := syntheticRequestedBatch()
 	// The real collector also marks configured stocks encountered as peers.
 	batch.entities[1].Attrs["tushare_research_subject"] = true
