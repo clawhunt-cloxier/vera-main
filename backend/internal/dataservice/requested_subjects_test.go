@@ -28,6 +28,14 @@ type requestedBatch struct {
 
 func (p requestedBatch) Entities(context.Context) ([]ds.Entity, error) { return p.entities, nil }
 
+func (p requestedBatch) Capabilities(context.Context) ([]ds.Capability, error) {
+	var caps []ds.Capability
+	for _, row := range p.records {
+		caps = append(caps, ds.Capability{DatasetID: row.DatasetID, EntityCode: row.EntityCode})
+	}
+	return caps, nil
+}
+
 // Explicitly simulated vendor rows for testing atomic publication and shared catalog identity.
 func syntheticRequestedBatch() requestedBatch {
 	day := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -69,6 +77,47 @@ func assertRequestedState(t *testing.T, store *ds.Store, code string, registered
 	if err != nil || got != prepared {
 		t.Fatalf("%s prepared=%v, want %v: %v", code, got, prepared, err)
 	}
+}
+
+func TestRequestedSubjectPrewarmRequiresPublishedBars(t *testing.T) {
+	ctx := t.Context()
+	_, worker, pool := requestedStores(t)
+	api := ds.NewOnDemandResearchStore(pool, worker.Catalog(), []string{coldTarget, coldPeer}, true)
+	if _, err := api.UpsertSearchEntity(ctx, "stock", coldTarget, "模拟目录简称", nil); err != nil {
+		t.Fatal(err)
+	}
+	assertRequestedState(t, api, coldTarget, true, false)
+	batch := syntheticRequestedBatch()
+	// The real collector also marks configured stocks encountered as peers.
+	batch.entities[1].Attrs["tushare_research_subject"] = true
+	syncPrewarm := func() int {
+		t.Helper()
+		n, err := worker.SyncObserved(ctx, "tushare", func(context.Context) (ds.Provider, error) { return batch, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	syncPrewarm()
+	assertRequestedState(t, api, coldTarget, true, true)
+	assertRequestedState(t, api, coldPeer, true, false)
+	if _, err := api.PrepareRequestedSubject(ctx, coldTarget, func(context.Context) (ds.Provider, error) {
+		return nil, errors.New("duplicate collection after normal prewarm")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE capabilities SET updated_at=now()-interval '25 hours'`); err != nil {
+		t.Fatal(err)
+	}
+	assertRequestedState(t, api, coldTarget, true, false)
+	if n := syncPrewarm(); n != 0 {
+		t.Fatalf("unchanged market inserted %d records", n)
+	}
+	assertRequestedState(t, api, coldTarget, true, true)
+	if _, err := pool.Exec(ctx, `UPDATE records SET quality_state='QUARANTINED' WHERE dataset_id='mkt.daily_bar'`); err != nil {
+		t.Fatal(err)
+	}
+	assertRequestedState(t, api, coldTarget, true, false)
 }
 
 func TestRequestedSubjectAcrossProcesses(t *testing.T) {

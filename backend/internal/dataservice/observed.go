@@ -42,7 +42,7 @@ func (s *Store) syncObserved(ctx context.Context, provider, requestedCode string
 		if err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error { return s.RequireResearchUseTx(ctx, tx) }); err != nil {
 			return 0, err
 		}
-		prepared, err := s.researchSubject(ctx, conn, requestedCode, true)
+		prepared, err := s.researchSubjectPrepared(ctx, conn, requestedCode)
 		if err != nil || prepared {
 			return 0, err
 		}

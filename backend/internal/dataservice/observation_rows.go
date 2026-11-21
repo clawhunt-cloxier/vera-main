@@ -29,7 +29,7 @@ func (s *Store) ObservationBar(ctx context.Context, tx pgx.Tx, subject uuid.UUID
 	if s == nil || !s.allowResearch {
 		return StoredRecord{}, errors.New("TuShare 研究对象或用途未启用")
 	}
-	registered, err := s.researchSubject(ctx, tx, code, false)
+	registered, err := s.researchSubjectRegistered(ctx, tx, code)
 	if err != nil {
 		return StoredRecord{}, err
 	}

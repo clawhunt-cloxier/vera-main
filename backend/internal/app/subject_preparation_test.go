@@ -54,7 +54,7 @@ func TestPrepareSubjectHTTPPublishesBeforeClosingPlans(t *testing.T) {
 	})
 	defer func() { http.DefaultTransport = transport }()
 	settings := map[string]string{
-		"TUSHARE_SUBJECTS": "000001.SZ", "TUSHARE_TOKEN": "synthetic", "TUSHARE_ALLOW_MODEL_PROCESSING": "true",
+		"TUSHARE_SUBJECTS": "000001.SZ,600999.SH", "TUSHARE_TOKEN": "synthetic", "TUSHARE_ALLOW_MODEL_PROCESSING": "true",
 		"TUSHARE_S3_ENDPOINT": archive.URL, "TUSHARE_S3_BUCKET": "test", "TUSHARE_S3_REGION": "test",
 		"TUSHARE_S3_ACCESS_KEY": "synthetic", "TUSHARE_S3_SECRET_KEY": "synthetic", "TUSHARE_MIN_INTERVAL": "100ms",
 	}
@@ -93,6 +93,7 @@ func TestPrepareSubjectHTTPPublishesBeforeClosingPlans(t *testing.T) {
 		return item
 	}
 	target := candidate(tsTestSubject)
+	// Configured for prewarm, but previously seen only in the Choice directory.
 	uncovered := candidate("600999.SH")
 	var uid, ws uuid.UUID
 	if err := pool.QueryRow(ctx, `INSERT INTO users(issuer,subject) VALUES('synthetic','prepare') RETURNING id`).Scan(&uid); err != nil {
