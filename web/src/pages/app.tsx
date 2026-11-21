@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ApiError,
   fmtTime,
   get,
   newKey,
@@ -16,7 +17,6 @@ import {
   type PlanResult,
   type ResearchPlan,
   type ResearchProtocol,
-  type S,
   type Skill,
   type SkillId,
   type Task,
@@ -368,6 +368,14 @@ export function Quick({ skill }: { skill: SkillId }) {
               placeholder={stockOnly ? '输入 A 股简称或代码' : undefined}
             />
           </label>
+          {searchObservation &&
+            skill === 'stock_analysis' &&
+            selection?.protocol === 'observation.v1' && (
+              <p className="muted small">
+                本次将使用 Choice 行情生成成交简报。要为{subject?.name}准备 TuShare
+                研究数据，可在“资金动向”或“深度研究”中选择这只股票并发起研究。
+              </p>
+            )}
           {skill === 'deep_research' && available && (
             <label>
               模式
@@ -411,17 +419,35 @@ async function waitForCloseData(
   onPending: (message: string) => void
 ) {
   const endpoint = '/api/v1/research-subjects/' + encodeURIComponent(subject.id) + '/prepare';
+  let delay = 5000;
   for (;;) {
-    const result = await post<S<'ResearchSubjectPreparation'>>(
-      endpoint,
-      {},
-      { protocol: 'legacy', signal }
-    );
-    signal.throwIfAborted();
-    if (result.status === 'ready') return;
-    if (result.status !== 'pending')
-      throw new Error(result.message || '未能准备这只股票的 TuShare 数据，请稍后重新发起研究。');
-    onPending(result.message || `正在同步${subject.name}的 TuShare 研究数据，完成后将打开计划。`);
+    try {
+      const result = await post<{ status: 'pending' | 'ready' | 'failed'; message?: string }>(
+        endpoint,
+        {},
+        { protocol: 'legacy', signal }
+      );
+      signal.throwIfAborted();
+      if (result.status === 'ready') return;
+      if (result.status !== 'pending')
+        throw new Error(result.message || '未能准备这只股票的 TuShare 数据，请稍后重新发起研究。');
+      delay = 5000;
+      onPending(result.message || `正在同步${subject.name}的 TuShare 研究数据，完成后将打开计划。`);
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!(error instanceof ApiError && error.status === 429 && error.retryable)) throw error;
+      const retryAfter = error.retryAfter;
+      const retryDelay =
+        retryAfter && /^\d+$/.test(retryAfter)
+          ? Number(retryAfter) * 1000
+          : Date.parse(retryAfter ?? '') - Date.now();
+      delay = Number.isFinite(retryDelay)
+        ? Math.max(5000, retryDelay)
+        : Math.min(delay * 2, 60_000);
+      // Browsers treat delays above the signed 32-bit timer range as immediate.
+      delay = Math.min(delay, 2_147_483_647);
+      onPending(`${subject.name}的研究数据请求暂时限频，页面将自动重试。`);
+    }
     await new Promise<void>((resolve) => {
       const abort = () => {
         clearTimeout(timer);
@@ -430,7 +456,7 @@ async function waitForCloseData(
       const timer = setTimeout(() => {
         signal.removeEventListener('abort', abort);
         resolve();
-      }, 5000);
+      }, delay);
       signal.addEventListener('abort', abort, { once: true });
     });
     signal.throwIfAborted();

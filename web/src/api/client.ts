@@ -49,7 +49,8 @@ export class ApiError extends Error {
     message: string,
     public requestId: string,
     public retryable = false,
-    public details?: Record<string, unknown>
+    public details?: Record<string, unknown>,
+    public retryAfter?: string | null
   ) {
     super(message);
   }
@@ -111,7 +112,8 @@ export async function api<T>(
       e.message ?? '请求失败',
       data?.request_id ?? '',
       e.retryable,
-      e.details
+      e.details,
+      res.headers.get('Retry-After')
     );
     if (!opts.noRedirect) {
       if (res.status === 401) {

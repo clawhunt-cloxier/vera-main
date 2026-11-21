@@ -807,6 +807,9 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           assert.match(await options.first().innerText(), new RegExp(stock.name));
           assert.equal(await options.count(), stock.id === 'maotai' ? 1 : 2);
           await input.press('Enter');
+          const notice = page.getByText(/本次将使用 Choice 行情生成成交简报/);
+          if (stock.id === 'maotai') assert.equal(await notice.count(), 0);
+          else assert.match(await notice.innerText(), /TuShare.*资金动向.*深度研究/);
           await create.click();
           await page.getByRole('heading', { name: '研究计划：' + stock.name }).waitFor();
           await page.getByRole('button', { name: '提交任务' }).click();
@@ -881,6 +884,15 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           assert.equal(req.method(), 'POST');
           assert.deepEqual(req.postDataJSON(), {});
           prepares.push(path.split('/')[1]);
+          if (status === 'limited') {
+            await route.fulfill({
+              status: 429,
+              headers: { 'retry-after': '5' },
+              contentType: json,
+              json: { error: { code: 'RATE_LIMITED', message: '测试限频', retryable: true } },
+            });
+            return;
+          }
           body = {
             status,
             message: { pending: '正在同步测试证券', failed: '此账号缺少数据权限' }[status],
@@ -929,6 +941,9 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           status = 'ready';
           await start.click();
         } else {
+          status = 'limited';
+          await page.getByRole('status').filter({ hasText: '限频' }).waitFor();
+          assert.deepEqual(plans, []);
           status = 'ready';
         }
         const stock = stocks[skill.id === 'capital_flow' ? 0 : 1];
@@ -938,7 +953,9 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
         assert.deepEqual(plans, [[skill.id, stock.id]]);
         assert.deepEqual(
           prepares,
-          skill.id === 'capital_flow' ? ['mobile', 'mobile'] : ['mobile', 'petro', 'petro']
+          skill.id === 'capital_flow'
+            ? ['mobile', 'mobile', 'mobile']
+            : ['mobile', 'petro', 'petro']
         );
         assert.deepEqual(
           searches,
