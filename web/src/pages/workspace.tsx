@@ -16,6 +16,7 @@ import {
   type WatchItem,
 } from '../api/client';
 import { useMe } from '../api/hooks';
+import { researchError, researchText } from '../api/researchPresentation';
 import { Empty, ErrorBox, Loading, Tag } from '../components/ui';
 import { WorkspaceFrame } from '../components/WorkspaceFrame';
 
@@ -85,7 +86,7 @@ function ResearchComposer({ skills }: { skills: Skill[] }) {
           </button>
         </div>
       </form>
-      {plan.error && <ErrorBox error={plan.error} />}
+      {plan.error && <ErrorBox error={researchError(plan.error)} />}
       {plan.data?.kind === 'choose' && (
         <div className="desk-choice">
           <strong>请选择研究对象和研究类型。</strong>
@@ -106,7 +107,8 @@ function ResearchComposer({ skills }: { skills: Skill[] }) {
       )}
       {plan.data?.kind === 'unsupported' && (
         <p role="status" className="notice">
-          不支持的需求：{plan.data.unsupported_reason}
+          不支持的需求：
+          {researchText(plan.data.unsupported_reason || '请选择快速启动中的研究类型。')}
         </p>
       )}
     </section>

@@ -11,6 +11,7 @@ import {
   type WatchItem,
 } from '../api/client';
 import { useMe } from '../api/hooks';
+import { researchError } from '../api/researchPresentation';
 import { EntitySearch } from '../components/EntitySearch';
 import { Empty, ErrorBox, Loading, Tag } from '../components/ui';
 import { WorkspaceFrame } from '../components/WorkspaceFrame';
@@ -79,7 +80,7 @@ export function Watchlist() {
       <section className="desk-sheet" aria-label="自选股列表">
         {items.isLoading && <Loading />}
         {items.error && <ErrorBox error={items.error} />}
-        {analyze.error && <ErrorBox error={analyze.error} />}
+        {analyze.error && <ErrorBox error={researchError(analyze.error)} />}
         {items.data?.items.length === 0 && <Empty>自选股为空。</Empty>}
         {items.data && items.data.items.length > 0 && (
           <div className="desk-table">
