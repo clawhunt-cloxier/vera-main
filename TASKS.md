@@ -40,7 +40,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T035 | 个股分析按简称或代码查找 A 股 | T030、T033、T034 | REVIEW | Codex / agent/codex/T035-any-a-share | 2026-11-20T15:35Z 领取。个股分析选择器按已授权来源发现证券，并按对应的收盘研究或成交简报协议创建及确认计划。[交接与验收](docs/handoffs/2026-11-20-T035-codex.md) |
 | T036 | 资金动向和深研按需准备 A 股数据 | T033、T035（已部署） | DONE | Codex / agent/codex/T036-multisource-search | PR #48（`ea2fa82`）已部署至测试站。2026-11-21 经网页搜索、准备数据并交付中国移动资金动向及中国石油公司深研。两份受限报告的 Choice、TuShare 证据读取及 PDF 下载均通过。[验证与交接](docs/handoffs/2026-11-21-T036-codex.md) |
 
-| T037 | 保留厂商分档资金汇总的计算依据 | T036（已部署） | REVIEW | Codex / agent/codex/T037-flow-calculation | 2026-11-21T05:18Z 领取。Harness 规则 1.0.1 核对厂商累计净额的计算与证据，覆盖三档净额及缺失、错配记录回归。[交接](docs/handoffs/2026-11-21-T037-codex.md) |
+| T037 | 保留厂商分档资金汇总的计算依据 | T036（已部署） | DONE | Codex / agent/codex/T037-flow-calculation | PR #50（`c08ed1d`）已合入并部署。Verify `44873565726`、部署 `44873565707` 通过。2026-11-21 测试站真实验收任务 `01a1fcc8-3882-7f3e-b81f-db4d475b820b`、报告 `a7689c4f-fdf1-54e0-a17d-a92e7d63a7cf`、PDF `中国移动-资金动向-T037-a7689c4f.pdf` 通过三档 `F21.sum_over_window`、20 条/档冻结 TuShare 证据、Choice/TuShare 证据读取及正文金额核对。[交接](docs/handoffs/2026-11-21-T037-codex.md) |
 
 ## 里程碑
 
