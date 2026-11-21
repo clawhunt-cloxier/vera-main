@@ -20,8 +20,10 @@ import {
   type Task,
 } from '../api/client';
 import { useMe } from '../api/hooks';
+import { preparationFailure, researchError, researchText } from '../api/researchPresentation';
 import { EntitySearch } from '../components/EntitySearch';
 import { ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
+import './research.css';
 
 function supportsMode(schema: unknown, mode: string): boolean {
   const field = (obj: unknown, key: string): unknown =>
@@ -98,34 +100,36 @@ export function Quick({ skill }: { skill: SkillId }) {
     active.current = new AbortController();
     plan.mutate({ signal: active.current.signal, prepareClose });
   };
-  const clearSelection = () => {
+  const stopWaiting = () => {
     active.current?.abort();
     active.current = null;
     plan.reset();
     setPreparing('');
-    setSelection(null);
   };
+  const canOfferBrief =
+    searchObservation && skill === 'stock_analysis' && selection?.protocol === 'observation.v1';
   return (
-    <main>
+    <main className="research-page">
       {me.data?.synthetic && <SyntheticBanner />}
-      <p>
-        <Link to="/app">← 返回工作台</Link>
-      </p>
-      <h1>{skillTitle[skill]}</h1>
+      <Link to="/app" className="research-back">
+        ← 返回工作台
+      </Link>
+      <header className="research-intro">
+        <h1>{skillTitle[skill]}</h1>
+        <p>选择研究对象后，可在计划中查看资料覆盖范围并确认章节。</p>
+      </header>
       {(me.isPending || (me.data && s.isPending)) && <Loading label="加载研究能力…" />}
-      {me.error && <ErrorBox error={me.error} />}
-      {s.error && <ErrorBox error={s.error} />}
+      {me.error && <ErrorBox error={researchError(me.error)} />}
+      {s.error && <ErrorBox error={researchError(s.error)} />}
       {me.data && s.isSuccess && !s.isFetching && !available && (
         <p className="notice">当前部署未开放这项研究。</p>
       )}
       {available && (
         <form
+          className="research-panel"
           onSubmit={(e) => {
             e.preventDefault();
-            const closingStock =
-              subject?.kind === 'stock' &&
-              (skill !== 'stock_analysis' || selection?.protocol !== 'observation.v1');
-            startPlan(searchObservation && closingStock);
+            startPlan(searchObservation && subject?.kind === 'stock');
           }}
         >
           <label>
@@ -133,29 +137,23 @@ export function Quick({ skill }: { skill: SkillId }) {
             <EntitySearch
               kinds={s.data?.subject_kinds}
               onPick={(entity, source) => setSelection({ entity, protocol: source ?? protocol })}
-              onEdit={clearSelection}
+              onEdit={() => {
+                stopWaiting();
+                setSelection(null);
+              }}
               protocol={protocol}
               searchObservation={searchObservation}
               placeholder={stockOnly ? '输入 A 股简称或代码' : undefined}
             />
           </label>
-          {searchObservation &&
-            skill === 'stock_analysis' &&
-            selection?.protocol === 'observation.v1' && (
-              <div>
-                <p className="muted small">
-                  本次将使用 Choice 行情生成成交简报。也可以为{subject?.name}采集 TuShare
-                  数据后进行个股分析。
-                </p>
-                <button type="button" disabled={plan.isPending} onClick={() => startPlan(true)}>
-                  准备个股研究数据
-                </button>
-              </div>
-            )}
           {skill === 'deep_research' && available && (
             <label>
               模式
-              <select value={selectedMode} onChange={(e) => setMode(e.target.value)}>
+              <select
+                value={selectedMode}
+                disabled={plan.isPending}
+                onChange={(e) => setMode(e.target.value)}
+              >
                 <option value="">
                   {stockOnly || subject?.kind === 'stock'
                     ? '公司深度研究'
@@ -167,23 +165,56 @@ export function Quick({ skill }: { skill: SkillId }) {
               </select>
             </label>
           )}
-          <button
-            type="submit"
-            disabled={
-              !available ||
-              !subject ||
-              !s.data?.subject_kinds.includes(subject.kind) ||
-              plan.isPending
-            }
-          >
-            {plan.isPending ? '准备中…' : '发起研究'}
-          </button>
+          <div className="research-actions">
+            <button
+              className="research-primary"
+              type="submit"
+              disabled={
+                !available ||
+                !subject ||
+                !s.data?.subject_kinds.includes(subject.kind) ||
+                plan.isPending
+              }
+            >
+              {plan.isPending ? '准备中…' : '发起研究'}
+            </button>
+            {canOfferBrief && (
+              <button
+                type="button"
+                className="research-secondary"
+                disabled={plan.isPending}
+                onClick={() => startPlan(false)}
+              >
+                查看成交简报
+              </button>
+            )}
+          </div>
+          {canOfferBrief && !plan.isPending && (
+            <p className="research-help">只想了解近期成交情况？成交简报提供已核实的日成交数据。</p>
+          )}
+          {plan.isPending && (
+            <div className="research-wait">
+              <div role="status" aria-live="polite">
+                <span className="research-ring" aria-hidden="true" />
+                <div>
+                  <strong>
+                    {preparing || `正在为${subject?.name ?? '所选对象'}准备研究计划…`}
+                  </strong>
+                  {preparing && <p>首次准备可能需要几分钟，请保持页面打开。</p>}
+                </div>
+              </div>
+              <button type="button" onClick={stopWaiting}>
+                停止等待
+              </button>
+            </div>
+          )}
+          {plan.error && <ErrorBox error={researchError(plan.error)} />}
+          {plan.data?.kind === 'unsupported' && (
+            <p className="notice">
+              这个对象暂不支持本项研究。{researchText(plan.data.unsupported_reason ?? '')}
+            </p>
+          )}
         </form>
-      )}
-      {preparing && <p role="status">{preparing}</p>}
-      {plan.error && <ErrorBox error={plan.error} />}
-      {plan.data?.kind === 'unsupported' && (
-        <p className="muted">这个对象暂不支持：{plan.data.unsupported_reason}</p>
       )}
     </main>
   );
@@ -205,10 +236,9 @@ async function waitForCloseData(
       );
       signal.throwIfAborted();
       if (result.status === 'ready') return;
-      if (result.status !== 'pending')
-        throw new Error(result.message || '未能准备这只股票的 TuShare 数据，请稍后重新发起研究。');
+      if (result.status !== 'pending') throw new Error(preparationFailure(result.message));
       delay = 5000;
-      onPending(result.message || `正在同步${subject.name}的 TuShare 研究数据，完成后将打开计划。`);
+      onPending(`正在为${subject.name}准备研究计划…`);
     } catch (error) {
       signal.throwIfAborted();
       if (!(error instanceof ApiError && error.status === 429 && error.retryable)) throw error;
@@ -222,7 +252,7 @@ async function waitForCloseData(
         : Math.min(delay * 2, 60_000);
       // Browsers treat delays above the signed 32-bit timer range as immediate.
       delay = Math.min(delay, 2_147_483_647);
-      onPending(`${subject.name}的研究数据请求暂时限频，页面将自动重试。`);
+      onPending('当前研究请求较多，页面将自动重试。');
     }
     await new Promise<void>((resolve) => {
       const abort = () => {
@@ -265,13 +295,18 @@ function CapitalFlowAlternative({ subject }: { subject: Entity }) {
   );
   if (skills.isFetching || skills.isError || !supported) return null;
   return (
-    <div className="card">
+    <aside className="research-alternative">
       <p>你还可以查看{subject.name}的资金动向计划，核对行情和两融数据的可用情况。</p>
-      <button type="button" onClick={() => preview.mutate()} disabled={preview.isPending}>
+      <button
+        type="button"
+        className="research-secondary"
+        onClick={() => preview.mutate()}
+        disabled={preview.isPending}
+      >
         {preview.isPending ? '正在检查…' : '查看资金动向计划'}
       </button>
-      {preview.error && <ErrorBox error={preview.error} />}
-    </div>
+      {preview.error && <ErrorBox error={researchError(preview.error)} />}
+    </aside>
   );
 }
 
@@ -309,37 +344,42 @@ export function PlanReview({ id }: { id: string }) {
     setDisabled((d) => (d.includes(sid) ? d.filter((x) => x !== sid) : [...d, sid]));
   };
   return (
-    <main>
+    <main className="research-page">
       {me.data?.synthetic && <SyntheticBanner />}
-      <p>
-        <Link to="/app">← 返回工作台</Link>
-      </p>
+      <Link to="/app" className="research-back">
+        ← 返回工作台
+      </Link>
       {p.isLoading && <Loading />}
-      {p.error && <ErrorBox error={p.error} />}
+      {p.error && <ErrorBox error={researchError(p.error)} />}
       {p.data && (
         <>
-          <h1>研究计划：{p.data.subject.name}</h1>
-          <div className="meta">
-            <Tag>{skillTitle[p.data.skill_id]}</Tag>{' '}
-            <span className="muted">
-              {p.data.snapshot_mode === 'collect_latest' ? '计划预览时间' : '数据截止'}{' '}
-              {fmtTime(p.data.as_of)}
-            </span>
-            {p.data.quote_requirement && (
-              <Tag tone="info">{quoteRequirementLabel[p.data.quote_requirement]}</Tag>
-            )}
+          <header className="research-intro">
+            <h1>研究计划：{p.data.subject.name}</h1>
+            <p>确认要纳入报告的章节，然后提交研究。</p>
+          </header>
+          <div className="research-plan-summary">
+            <div className="research-plan-meta">
+              <Tag>{skillTitle[p.data.skill_id]}</Tag>
+              <span className="muted">
+                {p.data.snapshot_mode === 'collect_latest' ? '计划预览时间' : '数据截止'}{' '}
+                {fmtTime(p.data.as_of)}
+              </span>
+              {p.data.quote_requirement && (
+                <Tag tone="info">{quoteRequirementLabel[p.data.quote_requirement]}</Tag>
+              )}
+            </div>
             {p.data.snapshot_mode === 'collect_latest' && p.data.quote_requirement && (
               <p>
-                确认后采集数据，再冻结一次快照。报告分别标明行情事件、接收、可用时点和交易状态。
+                提交后获取行情，报告将标明交易、接收与数据可用的时间。
                 {p.data.quote_requirement === 'realtime_trade'
-                  ? '若无法核实交易中实时成交条件，任务将弃权。'
+                  ? '如果无法核实实时成交行情，本次研究将无法交付。'
                   : '最近可用行情可能是延迟、盘后或休市数据，具体性质将在报告中注明。'}
               </p>
             )}
             {p.data.snapshot_mode === 'collect_latest' && !p.data.quote_requirement && (
               <p>
                 {p.data.skill_version === '1.1.0-demo.4'
-                  ? '确认后采集 Choice 日成交数据，并按冻结时点取用已发布的 TuShare 数据。报告会列明各项数据的实际来源和期间。'
+                  ? '确认后获取日成交数据，并取用截止时已发布的收盘资料。报告会列明各项数据的来源和期间。'
                   : '确认后采集真实成交数据并冻结快照。这是非实时简报；实时行情和未核实字段不纳入分析。'}
               </p>
             )}
@@ -347,19 +387,20 @@ export function PlanReview({ id }: { id: string }) {
               <p className="muted">报告将列明各项数据的来源、日期和覆盖限制。</p>
             )}
           </div>
-          {coverage && (
-            <p className="coverage-summary">
-              <span>{coverage.available} 个可用</span>
-              <span>{coverage.limited} 个受限</span>
-              <span>{coverage.unavailable} 个不可用</span>
-            </p>
-          )}
           <form
+            className="research-panel"
             onSubmit={(e) => {
               e.preventDefault();
               submit.mutate();
             }}
           >
+            {coverage && (
+              <p className="coverage-summary">
+                <span>{coverage.available} 个可用</span>
+                <span>{coverage.limited} 个受限</span>
+                <span>{coverage.unavailable} 个不可用</span>
+              </p>
+            )}
             <fieldset className="sections">
               <legend>章节</legend>
               {p.data.sections.map((s) => (
@@ -376,14 +417,16 @@ export function PlanReview({ id }: { id: string }) {
                   <span className="section-option-body">
                     <span className="section-option-title">
                       <span>
-                        {s.id} {s.title}
+                        {s.id} {researchText(s.title)}
                       </span>
                       {s.required && <Tag>必需</Tag>}
                       {s.availability === 'limited' && <Tag tone="warn">受限</Tag>}
                       {s.availability === 'unavailable' && <Tag tone="bad">不可用</Tag>}
                     </span>
                     {s.reason && (
-                      <span className="muted small section-option-reason">{s.reason}</span>
+                      <span className="muted small section-option-reason">
+                        {researchText(s.reason)}
+                      </span>
                     )}
                   </span>
                 </label>
@@ -393,14 +436,26 @@ export function PlanReview({ id }: { id: string }) {
               <p className="notice">
                 {p.data.reason_code === 'REQUIRED_SECTION_UNAVAILABLE'
                   ? '必需章节缺少可用数据，本次计划无法提交。'
-                  : `该计划当前无法执行${p.data.reason_code ? `（${p.data.reason_code}）` : ''}。`}
+                  : '暂时无法提交此计划。请检查章节说明，或返回工作台选择其他研究。'}
               </p>
             )}
-            <button type="submit" disabled={submit.isPending || !p.data.executable}>
-              {submit.isPending ? '提交中…' : '提交任务'}
-            </button>
+            <div className="research-plan-footer">
+              {p.data.estimate && (
+                <p>
+                  参考用时约 {Math.max(1, Math.ceil(p.data.estimate.p95_seconds / 60))} 分钟 · 配额{' '}
+                  {p.data.estimate.quota_cost} 次
+                </p>
+              )}
+              <button
+                type="submit"
+                className="research-primary"
+                disabled={submit.isPending || !p.data.executable}
+              >
+                {submit.isPending ? '提交中…' : '提交任务'}
+              </button>
+            </div>
           </form>
-          {submit.error && <ErrorBox error={submit.error} />}
+          {submit.error && <ErrorBox error={researchError(submit.error)} />}
           {me.data &&
             newResearchProtocol(me.data) === 'legacy' &&
             !p.data.executable &&
