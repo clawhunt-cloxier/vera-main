@@ -38,6 +38,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 
 | T034 | 浏览器确认研究计划 | T033（已部署） | REVIEW | Codex / agent/codex/T034-confirm-research-protocol | 2026-11-20T14:07Z 领取。浏览器按计划快照模式确认，客户端与桌面、手机浏览器回归通过。[复现与验收](docs/handoffs/2026-11-20-T034-codex.md) |
 | T035 | 个股分析按简称或代码查找 A 股 | T030、T033、T034 | REVIEW | Codex / agent/codex/T035-any-a-share | 2026-11-20T15:35Z 领取。个股分析选择器按已授权来源发现证券，并按对应的收盘研究或成交简报协议创建及确认计划。[交接与验收](docs/handoffs/2026-11-20-T035-codex.md) |
+| T036 | 资金动向和深研按需准备 A 股数据 | T033、T035（已部署） | IN_PROGRESS | Codex / agent/codex/T036-multisource-search | 2026-11-21T03:21Z 领取。负责工作台对象选择、准备接口及契约、River 作业、TuShare 发布登记与迁移 00022、验证及测试站诊断。[交接](docs/handoffs/2026-11-21-T036-codex.md) |
 
 ## 里程碑
 
