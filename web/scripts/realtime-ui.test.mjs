@@ -155,7 +155,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
     '/app',
     readFileSync(new URL('../app.html', import.meta.url), 'utf8')
   );
-  await testWorkspaceTasks(t, { browser, origin, appHTML, task, stockSkill });
+  await testWorkspaceTasks(t, { browser, origin, appHTML, task, stockSkill, plan });
 
   for (const viewport of [
     { width: 1280, height: 900 },

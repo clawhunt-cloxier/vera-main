@@ -18,7 +18,7 @@ const outcomes = {
   FAILED: '研究失败',
 };
 
-export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, stockSkill }) {
+export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, stockSkill, plan }) {
   for (const viewport of [
     { width: 1280, height: 900 },
     { width: 360, height: 800 },
@@ -35,6 +35,8 @@ export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, st
         let cancelPosts = 0;
         let taskReads = 0;
         let readUnavailable = true;
+        let logoutPosts = 0;
+        const watchName = '模拟关注股';
         const details = (id, status) => ({
           ...task,
           id,
@@ -54,6 +56,15 @@ export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, st
         await page.route(origin + '/app**', (route) =>
           route.fulfill({ contentType: 'text/html', body: appHTML })
         );
+        await page.route(origin + '/', (route) =>
+          route.fulfill({ contentType: 'text/html', body: '模拟公开页面' })
+        );
+        await page.route(origin + '/auth/logout', (route) => {
+          assert.equal(route.request().method(), 'POST');
+          assert.equal(route.request().headers()['x-csrf-token'], 'mock-csrf');
+          logoutPosts++;
+          return route.fulfill({ status: 204 });
+        });
         await page.route(origin + '/api/v1/**', async (route) => {
           const request = route.request();
           const path = new URL(request.url()).pathname.slice('/api/v1/'.length);
@@ -67,8 +78,47 @@ export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, st
               display_name: '模拟用户',
             };
           else if (path === 'skills') body = { items: [stockSkill] };
-          else if (path === 'watchlist') body = { items: [] };
-          else if (path === 'research-tasks')
+          else if (path === 'watchlist')
+            body = {
+              items: [
+                {
+                  id: 'mock-watch',
+                  version: 1,
+                  entity: { ...task.subject, name: watchName },
+                  snapshot: {
+                    trade_date: '2026-11-17',
+                    close: '10',
+                    change_pct: '1',
+                    triggered: ['price_above'],
+                  },
+                  tags: [],
+                  alerts: [],
+                  note: '',
+                  added_at: task.created_at,
+                  last_report: null,
+                },
+              ],
+            };
+          else if (path === 'reports') body = { items: [] };
+          else if (path === 'research-plans/mock-plan') body = plan;
+          else if (path === 'research-plans') {
+            const submitted = request.postDataJSON();
+            if (submitted.text === '未知需求')
+              body = { kind: 'unsupported', unsupported_reason: '模拟需求尚无可用研究类型' };
+            else if (submitted.text === '候选研究')
+              body = {
+                kind: 'choose',
+                candidates: [{ skill_id: stockSkill.id, subject: task.subject }],
+              };
+            else {
+              assert.deepEqual(submitted, {
+                skill_id: stockSkill.id,
+                subject_id: task.subject.id,
+                params: {},
+              });
+              body = { kind: 'plan', plan };
+            }
+          } else if (path === 'research-tasks')
             body = {
               items: [
                 details('active', 'ANALYZING'),
@@ -114,6 +164,26 @@ export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, st
         await page.goto(origin + '/app');
         await main.getByText('模拟证券甲', { exact: true }).waitFor();
         await checkVisible();
+        const summary = main.getByRole('complementary', { name: '自选股' });
+        await summary.getByText(watchName).waitFor();
+        await summary.getByText('有提醒').waitFor();
+        const nav = page.getByRole('navigation', { name: '工作区导航' });
+        await nav.getByRole('link', { name: '自选股' }).click();
+        await main.getByRole('heading', { name: '自选股', exact: true }).waitFor();
+        await nav.getByRole('link', { name: '报告' }).click();
+        await main.getByRole('heading', { name: '历史报告', exact: true }).waitFor();
+        await nav.getByRole('link', { name: '工作台' }).click();
+        const composer = main.getByLabel('描述你想要的研究');
+        const start = main.getByRole('button', { name: '开始研究', exact: true });
+        await composer.fill('未知需求');
+        await start.click();
+        await main.getByText(/模拟需求尚无可用研究类型/).waitFor();
+        await composer.fill('候选研究');
+        await start.click();
+        await main.getByRole('button', { name: new RegExp(task.subject.name) }).click();
+        await main.getByRole('heading', { name: '研究计划：' + task.subject.name }).waitFor();
+        await page.goto(origin + '/app');
+        await main.getByText('模拟证券甲', { exact: true }).waitFor();
         assert.equal(await main.locator('a[href="/app/reports/mock-report"]').count(), 1);
         assert.equal(await main.locator('a[href="/app/tasks/active"]').count(), 1);
         await main.locator('a[href="/app/tasks/abstained"]').click();
@@ -172,6 +242,11 @@ export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, st
         readUnavailable = false;
         await page.getByRole('button', { name: '重新加载' }).click();
         await viewReport.waitFor();
+        await page.goto(origin + '/app');
+        await page.getByLabel('账户菜单').click();
+        await page.getByRole('button', { name: '退出登录' }).click();
+        await page.waitForURL(origin + '/');
+        assert.equal(logoutPosts, 1);
         assert.deepEqual(errors, []);
       } finally {
         await context.close();
