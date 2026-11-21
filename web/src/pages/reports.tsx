@@ -15,31 +15,26 @@ import {
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { ReportView } from '../components/ReportView';
+import { WorkspaceFrame } from '../components/WorkspaceFrame';
 import { Dialog, Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
 
 export function Reports() {
-  const me = useMe();
   const reports = useQuery({
     queryKey: ['reports'],
     queryFn: () => get<{ items: ReportSummary[] }>('/api/v1/reports'),
     staleTime: 10_000,
   });
   return (
-    <main>
-      {me.data?.synthetic && <SyntheticBanner />}
-      <header className="app-head">
-        <strong className="logo">VERA</strong>
-        <nav>
-          <Link to="/app">工作台</Link>
-          <Link to="/app/watchlist">自选股</Link>
-        </nav>
-      </header>
-      <section className="content">
+    <WorkspaceFrame>
+      <header className="desk-title">
         <h1>历史报告</h1>
+      </header>
+      <section className="desk-sheet" aria-label="报告列表">
         {reports.isLoading && <Loading />}
+        {reports.error && <ErrorBox error={reports.error} />}
         {reports.data?.items.length === 0 && <Empty>尚未生成报告。</Empty>}
         {reports.data && reports.data.items.length > 0 && (
-          <div className="table-wrapper">
+          <div className="desk-table">
             <table>
               <thead>
                 <tr>
@@ -75,7 +70,7 @@ export function Reports() {
           </div>
         )}
       </section>
-    </main>
+    </WorkspaceFrame>
   );
 }
 

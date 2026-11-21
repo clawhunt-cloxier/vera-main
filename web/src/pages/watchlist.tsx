@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
   api,
@@ -12,7 +12,8 @@ import {
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { EntitySearch } from '../components/EntitySearch';
-import { Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
+import { Empty, ErrorBox, Loading, Tag } from '../components/ui';
+import { WorkspaceFrame } from '../components/WorkspaceFrame';
 
 const ruleLabel: Record<string, string> = {
   price_above: '价格高于阈值',
@@ -68,75 +69,75 @@ export function Watchlist() {
     }
   };
   return (
-    <main>
-      {me.data?.synthetic && <SyntheticBanner />}
-      <header className="app-head">
-        <strong className="logo">VERA</strong>
-        <nav>
-          <Link to="/app">工作台</Link>
-          <Link to="/app/reports">报告</Link>
-        </nav>
+    <WorkspaceFrame>
+      <header className="desk-title">
+        <h1>自选股</h1>
+        <button className="primary" onClick={() => setAdding(true)}>
+          添加
+        </button>
       </header>
-      <h1>自选股</h1>
-      <button onClick={() => setAdding(true)}>添加</button>
-      {items.isLoading && <Loading />}
-      {items.error && <ErrorBox error={items.error} />}
-      {analyze.error && <ErrorBox error={analyze.error} />}
-      {items.data?.items.length === 0 && <Empty>自选股为空。</Empty>}
-      {items.data && items.data.items.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>标的</th>
-              <th>最新价</th>
-              <th>涨跌幅</th>
-              <th>数据日期</th>
-              <th>已触发提醒</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.data.items.map((it) => {
-              const close = it.snapshot ? Number(it.snapshot.close) : null;
-              const chg = it.snapshot ? Number(it.snapshot.change_pct) : null;
-              return (
-                <tr key={it.id}>
-                  <td>
-                    <strong>{it.entity.name}</strong>{' '}
-                    <span className="muted">{it.entity.symbol}</span>
-                  </td>
-                  <td>{close !== null ? close.toFixed(2) : '—'}</td>
-                  <td className={chg === null ? '' : chg > 0 ? 'up' : chg < 0 ? 'down' : ''}>
-                    {chg !== null ? (chg > 0 ? '+' : '') + chg.toFixed(2) + '%' : '—'}
-                  </td>
-                  <td>{it.snapshot?.trade_date ?? '—'}</td>
-                  <td>
-                    {it.snapshot && it.snapshot.triggered.length > 0
-                      ? it.snapshot.triggered.map((k) => (
-                          <Tag key={k} tone="warn">
-                            {ruleLabel[k] ?? k}
-                          </Tag>
-                        ))
-                      : '—'}
-                  </td>
-                  <td>
-                    <button
-                      className="ghost small"
-                      disabled={!me.data || analyze.isPending}
-                      onClick={() => analyze.mutate(it.entity.id)}
-                    >
-                      分析
-                    </button>
-                    <button className="ghost small" onClick={() => remove(it.id)}>
-                      移出
-                    </button>
-                  </td>
+      <section className="desk-sheet" aria-label="自选股列表">
+        {items.isLoading && <Loading />}
+        {items.error && <ErrorBox error={items.error} />}
+        {analyze.error && <ErrorBox error={analyze.error} />}
+        {items.data?.items.length === 0 && <Empty>自选股为空。</Empty>}
+        {items.data && items.data.items.length > 0 && (
+          <div className="desk-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>标的</th>
+                  <th>最新价</th>
+                  <th>涨跌幅</th>
+                  <th>数据日期</th>
+                  <th>已触发提醒</th>
+                  <th></th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
+              </thead>
+              <tbody>
+                {items.data.items.map((it) => {
+                  const close = it.snapshot ? Number(it.snapshot.close) : null;
+                  const chg = it.snapshot ? Number(it.snapshot.change_pct) : null;
+                  return (
+                    <tr key={it.id}>
+                      <td>
+                        <strong>{it.entity.name}</strong>{' '}
+                        <span className="muted">{it.entity.symbol}</span>
+                      </td>
+                      <td>{close !== null ? close.toFixed(2) : '—'}</td>
+                      <td className={chg === null ? '' : chg > 0 ? 'up' : chg < 0 ? 'down' : ''}>
+                        {chg !== null ? (chg > 0 ? '+' : '') + chg.toFixed(2) + '%' : '—'}
+                      </td>
+                      <td>{it.snapshot?.trade_date ?? '—'}</td>
+                      <td>
+                        {it.snapshot && it.snapshot.triggered.length > 0
+                          ? it.snapshot.triggered.map((k) => (
+                              <Tag key={k} tone="warn">
+                                {ruleLabel[k] ?? k}
+                              </Tag>
+                            ))
+                          : '—'}
+                      </td>
+                      <td>
+                        <button
+                          className="ghost small"
+                          disabled={!me.data || analyze.isPending}
+                          onClick={() => analyze.mutate(it.entity.id)}
+                        >
+                          分析
+                        </button>
+                        <button className="ghost small" onClick={() => remove(it.id)}>
+                          移出
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
       {adding && (
         <div className="overlay" onClick={() => setAdding(false)}>
           <div className="dialog" onClick={(e) => e.stopPropagation()}>
@@ -155,6 +156,6 @@ export function Watchlist() {
           </div>
         </div>
       )}
-    </main>
+    </WorkspaceFrame>
   );
 }
