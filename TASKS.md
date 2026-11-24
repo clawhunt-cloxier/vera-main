@@ -47,6 +47,8 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T039 | 优化研报阅读布局 | T038（已部署） | REVIEW | Codex / agent/codex/T039-report-layout | 2026-11-21T13:04Z 领取。窄目录、正文层级、证据抽屉与图表重排已接通，并在真实报告上对照桌面与手机布局。[交接](docs/handoffs/2026-11-21-T039-codex.md) |
 | T040 | 工作台、研报阅读与 PDF 排版 | T038、T039（已合入） | REVIEW | Codex / agent/codex/T040-product-ui | 2026-11-24T20:07Z 领取。工作台接入 Vera 头像，研报与 PDF 优化图表和日成交单位，下载入口固定在研报工具栏。20 项 Chromium 回归、三页样报和十二页长表验收通过，介绍首页产物与基线一致。PR #53 首次 CI 因 GitHub Actions 账单限制未启动。[交接与验收](docs/handoffs/2026-11-24-T040-codex.md) |
 
+| T041 | 长研报图表与证据栏动效收尾 | T040（已合入） | IN_PROGRESS | Codex / agent/codex/T041-reader-motion | 2026-11-24T22:32Z 领取。范围为阅读器图表、浏览器回归和 T040 验收记录。[交接](docs/handoffs/2026-11-24-T041-codex.md) |
+
 ## 里程碑
 
 M1 本地演示：T011–T018、T019a、T022（M1 范围）、T024。M2 测试环境：T014b、T019b、T021、T022、T023。M3 PILOT：T020。详见 ADR-0003 D12。
