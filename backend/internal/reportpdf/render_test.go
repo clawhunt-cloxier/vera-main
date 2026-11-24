@@ -3,6 +3,8 @@ package reportpdf
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"slices"
 	"testing"
 )
 
@@ -79,4 +81,21 @@ func TestRenderEmptyReport(t *testing.T) {
 func TestRenderMissingSeriesAndNilCells(t *testing.T) {
 	r, _ := sampleReport(3)
 	mustRender(t, r, nil) // charts without data are skipped, nil table cells print as a dash
+}
+
+func TestChartValuesAlignPeriodsAndPreserveMissingValues(t *testing.T) {
+	dates, values, low, high := chartValues(Series{Lines: []SeriesLine{
+		{Points: [][2]*string{{sp("2025-12-31"), sp("19.50")}, {sp("2024-12-31"), sp("0")}}},
+		{Points: [][2]*string{{sp("2023-12-31"), sp("-2.80")}, {sp("2025-12-31"), sp("999")}, {sp("2025-12-31"), nil}}},
+	}})
+	if !slices.Equal(dates, []string{"2023-12-31", "2024-12-31", "2025-12-31"}) {
+		t.Fatalf("periods: %v", dates)
+	}
+	if !math.IsNaN(values[0][0]) || values[0][1] != 0 || values[0][2] != 19.50 ||
+		values[1][0] != -2.80 || !math.IsNaN(values[1][1]) || !math.IsNaN(values[1][2]) {
+		t.Fatalf("aligned values: %v", values)
+	}
+	if low != -2.80 || high != 19.50 {
+		t.Fatalf("chart domain: %v to %v", low, high)
+	}
 }

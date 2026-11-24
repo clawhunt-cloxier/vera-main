@@ -26,18 +26,41 @@ const (
 	yuanToWanShift    = -4
 )
 
-func observationDisplayValue(raw string, shift int32) (string, error) {
+func dailyTradeDisplayValue(raw string, shift int32, historical bool) (string, error) {
 	v, err := decimal.NewFromString(raw)
 	if err != nil {
 		return "", err
 	}
-	return v.Shift(shift).StringFixed(2), nil
+	scaled := v.Shift(shift)
+	if historical || scaled.Equal(scaled.Round(2)) {
+		return scaled.StringFixed(2), nil
+	}
+	return scaled.String(), nil
 }
 
-// Convert the frozen table only for display. HTML and PDF share this path
-// for both historical and newly delivered reports.
-func formatObservationTable(t *facts.Table) error {
-	if t.Title != "Choice 日成交观察（非实时）" || !slices.Equal(t.Columns, []string{"厂商返回日期", "成交量（股）", "成交额（元）", "换手率（%）"}) {
+// Scale the known A-share daily observation columns for both report formats.
+// Historical briefs keep their existing two-decimal presentation.
+func formatDailyTradeTables(d *harness.Document) error {
+	historical := d.SkillVersion == emquant.ObservationBriefVersion || d.SkillVersion == harness.MixedObservationVersion
+	if !historical && d.SkillVersion != harness.CloseUnifiedVersion {
+		return nil
+	}
+	for _, section := range d.Sections {
+		for i := range section.Tables {
+			table := &section.Tables[i]
+			if historical && table.Title != "Choice 日成交观察（非实时）" {
+				continue
+			}
+			if err := formatDailyTradeTable(table, historical); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func formatDailyTradeTable(t *facts.Table, historical bool) error {
+	if !slices.Equal(t.Columns, []string{"厂商返回日期", "成交量（股）", "成交额（元）", "换手率（%）"}) {
 		return nil
 	}
 	for _, row := range t.Rows {
@@ -45,13 +68,15 @@ func formatObservationTable(t *facts.Table) error {
 			return errors.New("unexpected observation table row width")
 		}
 		for i, shift := range []int32{sharesToLotsShift, yuanToWanShift} {
-			if raw := row[i+1]; raw != nil {
-				v, err := observationDisplayValue(*raw, shift)
-				if err != nil {
-					return fmt.Errorf("invalid observation value in %s: %w", t.Columns[i+1], err)
-				}
-				row[i+1] = facts.Ptr(v)
+			raw := row[i+1]
+			if raw == nil {
+				continue
 			}
+			v, err := dailyTradeDisplayValue(*raw, shift, historical)
+			if err != nil {
+				return fmt.Errorf("invalid observation value in %s: %w", t.Columns[i+1], err)
+			}
+			row[i+1] = facts.Ptr(v)
 		}
 	}
 	t.Columns[1], t.Columns[2] = "成交量（手）", "成交额（万元）"
@@ -95,11 +120,11 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 			lines = []string{o.Manifest.Code + " · " + o.Name}
 		case o.Manifest.Liquidity.ID:
 			for _, row := range o.Rows {
-				volume, err := observationDisplayValue(row.VolumeShares, sharesToLotsShift)
+				volume, err := dailyTradeDisplayValue(row.VolumeShares, sharesToLotsShift, true)
 				if err != nil {
 					return err
 				}
-				amount, err := observationDisplayValue(row.AmountCNY, yuanToWanShift)
+				amount, err := dailyTradeDisplayValue(row.AmountCNY, yuanToWanShift, true)
 				if err != nil {
 					return err
 				}
