@@ -236,14 +236,14 @@ export async function testReportLayout(t, { browser, origin, appHTML, report, ev
           assert.equal(await svg.getAttribute('width'), fullWidth, 'offscreen plot skips reflow');
           await last.scrollIntoViewIfNeeded();
           await page.waitForFunction(() => {
-            const box = [...document.querySelectorAll('.chart-box')].at(-1);
+            const box = [...globalThis.document.querySelectorAll('.chart-box')].at(-1);
             return Number(box.querySelector('svg')?.getAttribute('width')) === box.clientWidth;
           });
           assert.ok(Number(await svg.getAttribute('width')) < Number(fullWidth));
           assert.equal(await legend.getAttribute('aria-pressed'), 'false');
           await page.emulateMedia({ media: 'print' });
           await page.waitForFunction(() =>
-            [...document.querySelectorAll('.chart-box')].every(
+            [...globalThis.document.querySelectorAll('.chart-box')].every(
               (box) => Number(box.querySelector('svg')?.getAttribute('width')) === box.clientWidth
             )
           );
