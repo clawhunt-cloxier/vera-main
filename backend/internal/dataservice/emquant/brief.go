@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,12 +24,13 @@ const MixedObservationVersion = "1.1.0-demo.4"
 const RealtimeBriefVersion = "1.1.0-demo.3"
 
 // BriefService publishes current observations from the Choice API.
-// It archives every vendor response for reproducibility; source_licenses
-// rows are not required — SDK credentials are the authorization mechanism.
+// It archives every vendor response for reproducibility; collection, display
+// and model use are each gated by a current source_licenses grant.
 type BriefService struct {
-	Runtime             *Runtime
-	Catalog             *dataservice.Catalog
-	ProviderID, Product string
+	Runtime                           *Runtime
+	Catalog                           *dataservice.Catalog
+	ProviderID, Product               string
+	SecurityLicense, LiquidityLicense uuid.UUID
 }
 
 type BriefManifest struct {
@@ -47,8 +49,8 @@ type BriefObservation struct {
 
 var briefCode = regexp.MustCompile(`^[0-9]{6}\.(SH|SZ|BJ)$`)
 
-func (b *BriefService) collector() (RegisteredCollector, error) {
-	return b.Runtime.RegisteredCollector(b.Catalog, b.ProviderID, b.Product, uuid.Nil)
+func (b *BriefService) collector(id uuid.UUID) (RegisteredCollector, error) {
+	return b.Runtime.RegisteredCollector(b.Catalog, b.ProviderID, b.Product, id)
 }
 
 // validBriefCode reports whether code is a well-formed A-share code.
@@ -57,6 +59,14 @@ func validBriefCode(code string) bool { return briefCode.MatchString(code) }
 func (b *BriefService) Ready(ctx context.Context, tx pgx.Tx, code string, use dataservice.SourceUse) error {
 	if !validBriefCode(code) {
 		return errors.New("emquant: invalid A-share code format")
+	}
+	for _, g := range []dataservice.SourceUseRequest{
+		{LicenseID: b.SecurityLicense, ProviderID: b.ProviderID, Product: b.Product, DatasetID: "ref.security", Method: "CSS", Fields: strings.Split(securityIndicators, ","), Codes: []string{code}, Use: use},
+		{LicenseID: b.LiquidityLicense, ProviderID: b.ProviderID, Product: b.Product, DatasetID: "mkt.daily_bar", Method: "CSD", Fields: strings.Split(dailyIndicators, ","), Codes: []string{code}, Use: use},
+	} {
+		if err := dataservice.RequireSourceUse(ctx, tx, g); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -91,15 +101,19 @@ func (b *BriefService) Collect(ctx context.Context, code string) (BriefManifest,
 	today := time.Now().In(zone)
 	m.To = today.AddDate(0, 0, -1).Format("2006-01-02")
 	m.From = today.AddDate(0, 0, -45).Format("2006-01-02")
-	c, err := b.collector()
+	security, err := b.collector(b.SecurityLicense)
 	if err != nil {
 		return m, err
 	}
-	_, m.Security, err = c.CollectSecurityBasics(ctx, code)
+	_, m.Security, err = security.CollectSecurityBasics(ctx, code)
 	if err != nil {
 		return m, err
 	}
-	rows, raw, err := c.CollectDailyLiquidity(ctx, code, m.From, m.To)
+	liquidity, err := b.collector(b.LiquidityLicense)
+	if err != nil {
+		return m, err
+	}
+	rows, raw, err := liquidity.CollectDailyLiquidity(ctx, code, m.From, m.To)
 	if err != nil {
 		return m, err
 	}
@@ -114,8 +128,8 @@ func (b *BriefService) Collect(ctx context.Context, code string) (BriefManifest,
 func (b *BriefService) verifyArchive(ctx context.Context, tx pgx.Tx, raw RegisteredArchive, cutoff time.Time) error {
 	var ok bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM raw_objects WHERE id=$1 AND provider_id=$2 AND dataset_id=$3
-  AND stored_path=$4 AND content_hash=$5 AND request_fingerprint=$6
-  AND fetched_at=$7 AND archived_at=$8 AND registered_at<=$9)`, raw.ID, b.ProviderID, raw.DatasetID,
+  AND source_license_id=$4 AND stored_path=$5 AND content_hash=$6 AND request_fingerprint=$7
+  AND fetched_at=$8 AND archived_at=$9 AND registered_at<=$10)`, raw.ID, b.ProviderID, raw.DatasetID, raw.LicenseID,
 		raw.Source.BodyRef, raw.Source.BodySHA256, raw.Source.RequestFingerprint, raw.Source.ReceivedAt.Truncate(time.Microsecond), raw.Source.ArchivedAt.Truncate(time.Microsecond), cutoff).Scan(&ok)
 	if err != nil {
 		return err
@@ -127,7 +141,7 @@ func (b *BriefService) verifyArchive(ctx context.Context, tx pgx.Tx, raw Registe
 }
 func (b *BriefService) Replay(ctx context.Context, tx pgx.Tx, m BriefManifest, cutoff time.Time, use dataservice.SourceUse) (BriefObservation, error) {
 	out := BriefObservation{Manifest: m, Cutoff: cutoff}
-	if m.Version != ObservationBriefVersion || len(m.Supplement) != 0 || m.Security.DatasetID != "ref.security" || m.Liquidity.DatasetID != "mkt.daily_bar" {
+	if m.Version != ObservationBriefVersion || len(m.Supplement) != 0 || m.Security.DatasetID != "ref.security" || m.Liquidity.DatasetID != "mkt.daily_bar" || m.Security.LicenseID != b.SecurityLicense || m.Liquidity.LicenseID != b.LiquidityLicense || m.Security.Product != b.Product || m.Liquidity.Product != b.Product {
 		return out, errors.New("emquant: brief scope mismatch")
 	}
 	if err := b.Ready(ctx, tx, m.Code, use); err != nil {
@@ -317,8 +331,28 @@ func (b *BriefService) WithSnapshot(ctx context.Context, ws, task uuid.UUID, use
 	})
 }
 
-// WithDisplayCatalog runs fn within the display permission context.
-// Source authorization is handled at the SDK credential level.
+// WithDisplayCatalog holds current display permissions while an API renders
+// cached identities and report titles. Any removed or revoked display scope
+// fails closed.
 func (b *BriefService) WithDisplayCatalog(ctx context.Context, fn func() error) error {
-	return fn()
+	return pgx.BeginFunc(ctx, b.Runtime.database, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT code FROM entities WHERE NOT synthetic`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var code string
+			if err := rows.Scan(&code); err != nil {
+				return err
+			}
+			if err := b.Ready(ctx, tx, code, dataservice.SourceDisplay); err != nil {
+				return err
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return fn()
+	})
 }

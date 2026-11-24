@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,6 +28,16 @@ func emquantInitBrief(ctx context.Context, out io.Writer, get func(string) strin
 		return errors.New("invalid license expiry")
 	}
 	codes := strings.Split(get("EMQUANT_BRIEF_CODES"), ",")
+	var briefCodePattern = regexp.MustCompile(`^[0-9]{6}\.(SH|SZ|BJ)$`)
+	seen := map[string]bool{}
+	for i, code := range codes {
+		code = strings.ToUpper(strings.TrimSpace(code))
+		if !briefCodePattern.MatchString(code) || seen[code] {
+			return errors.New("EMQUANT_BRIEF_CODES must list explicit A-share securities; wildcard full-market scope is not auto-granted")
+		}
+		seen[code] = true
+		codes[i] = code
+	}
 	pool, err := db.Open(ctx, get("DATABASE_URL"))
 	if err != nil {
 		return err

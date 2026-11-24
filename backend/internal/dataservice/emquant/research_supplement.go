@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,7 +34,7 @@ func (b *BriefService) CollectResearchSupplement(ctx context.Context, code strin
 	if b == nil || b.Runtime == nil || !validBriefCode(code) {
 		return nil, errors.New("emquant: invalid research supplement source or security")
 	}
-	collector, err := b.collector()
+	collector, err := b.collector(b.LiquidityLicense)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +57,7 @@ func (b *BriefService) CollectResearchSupplement(ctx context.Context, code strin
 	return json.Marshal(m)
 }
 
-func decodeLiquiditySupplement(body json.RawMessage, code, product string, cutoff time.Time) (liquiditySupplementManifest, time.Time, time.Time, error) {
+func decodeLiquiditySupplement(body json.RawMessage, code, product string, licenseID uuid.UUID, cutoff time.Time) (liquiditySupplementManifest, time.Time, time.Time, error) {
 	var m liquiditySupplementManifest
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
@@ -65,7 +66,7 @@ func decodeLiquiditySupplement(body json.RawMessage, code, product string, cutof
 	}
 	raw := m.Liquidity
 	if m.Version != liquiditySupplementVersion || m.Code != code || !validBriefCode(code) ||
-		raw.ID == uuid.Nil || raw.DatasetID != liquidityArchiveDataset || raw.Product != product || product == "" || raw.LicenseID != uuid.Nil ||
+		raw.ID == uuid.Nil || raw.DatasetID != liquidityArchiveDataset || raw.Product != product || product == "" || raw.LicenseID != licenseID ||
 		cutoff.IsZero() || raw.Source.ReceivedAt.IsZero() || raw.Source.ArchivedAt.Before(raw.Source.ReceivedAt) || raw.Source.ArchivedAt.After(cutoff) {
 		return m, time.Time{}, time.Time{}, errors.New("emquant: research supplement manifest scope mismatch")
 	}
@@ -85,7 +86,7 @@ func (b *BriefService) ReplayResearchSupplement(ctx context.Context, tx pgx.Tx, 
 	if b == nil || tx == nil || (use != dataservice.SourceStorage && use != dataservice.SourceModel && use != dataservice.SourceDisplay) {
 		return out, errors.New("emquant: invalid research supplement replay")
 	}
-	m, start, end, err := decodeLiquiditySupplement(manifest, code, b.Product, cutoff)
+	m, start, end, err := decodeLiquiditySupplement(manifest, code, b.Product, b.LiquidityLicense, cutoff)
 	if err != nil {
 		return out, err
 	}
@@ -94,14 +95,20 @@ func (b *BriefService) ReplayResearchSupplement(ctx context.Context, tx pgx.Tx, 
 	if err := b.MixedProviderUse(ctx, tx, dataservice.SourceModel); err != nil {
 		return out, err
 	}
+	if err := dataservice.RequireSourceUse(ctx, tx, dataservice.SourceUseRequest{
+		LicenseID: b.LiquidityLicense, ProviderID: b.ProviderID, Product: b.Product,
+		DatasetID: liquidityArchiveDataset, Method: "CSD", Fields: strings.Split(dailyIndicators, ","),
+		Codes: []string{code}, Use: dataservice.SourceModel,
+	}); err != nil {
+		return out, err
+	}
 	raw := m.Liquidity
 	ref := raw.Source
 	var archiveID uuid.UUID
 	if err := tx.QueryRow(ctx, `SELECT id FROM raw_objects WHERE id=$1 AND provider_id=$2 AND dataset_id=$3
 		AND stored_path=$4 AND content_hash=$5 AND request_fingerprint=$6 AND fetched_at=$7 AND archived_at=$8
-		AND registered_at<=$9 AND archive_format='emquant-sdk-decoded-v2' AND source_license_id IS NULL
-		AND vendor_method IS NULL AND vendor_fields IS NULL AND vendor_codes IS NULL FOR SHARE`, raw.ID, b.ID(), raw.DatasetID,
-		ref.BodyRef, ref.BodySHA256, ref.RequestFingerprint, ref.ReceivedAt.Truncate(time.Microsecond), ref.ArchivedAt.Truncate(time.Microsecond), cutoff).Scan(&archiveID); err != nil {
+		AND registered_at<=$9 AND archive_format='emquant-sdk-decoded-v2' AND source_license_id=$10 FOR SHARE`, raw.ID, b.ID(), raw.DatasetID,
+		ref.BodyRef, ref.BodySHA256, ref.RequestFingerprint, ref.ReceivedAt.Truncate(time.Microsecond), ref.ArchivedAt.Truncate(time.Microsecond), cutoff, b.LiquidityLicense).Scan(&archiveID); err != nil {
 		return out, err
 	}
 	if archiveID != raw.ID {
