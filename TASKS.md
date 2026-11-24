@@ -47,9 +47,9 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T039 | 优化研报阅读布局 | T038（已部署） | REVIEW | Codex / agent/codex/T039-report-layout | 2026-11-21T13:04Z 领取。窄目录、正文层级、证据抽屉与图表重排已接通，并在真实报告上对照桌面与手机布局。[交接](docs/handoffs/2026-11-21-T039-codex.md) |
 | T040 | 工作台、研报阅读与 PDF 排版 | T038、T039（已合入） | DONE | Codex / agent/codex/T040-product-ui | PR #53 已合入 `dev@3ea02ee`，Verify 与测试站部署通过。20 项 Chromium 回归、三页样报和十二页长表验收通过，介绍首页产物与基线一致。[交接与验收](docs/handoffs/2026-11-24-T040-codex.md) |
 
-| T041 | 长研报图表与证据栏动效收尾 | T040（已合入） | REVIEW | Codex / agent/codex/T041-reader-motion | 2026-11-24T22:32Z 领取。八图模拟研报按视口绘制，打印时补齐全部图表。Chromium 20 项回归通过。[交接](docs/handoffs/2026-11-24-T041-codex.md) |
+| T041 | 长研报图表与证据栏动效收尾 | T040（已合入） | DONE | Codex / agent/codex/T041-reader-motion | PR #54 已合入 `dev@d8a39c6`，Verify 与测试站部署通过。八图模拟研报按视口绘制，打印时补齐全部图表。Chromium 20 项回归通过。[交接](docs/handoffs/2026-11-24-T041-codex.md) |
 
-| T042 | 数据治理与研究证据字段审计 | T036、T037、T041（已合入） | REVIEW | Codex / agent/codex/T042-governance | 2026-11-24T23:01Z 领取。已修正可见修订、跨日证券快照、日期及小数校验、计算输入单位和财报版本展示。数据库与映射针对性回归通过。[审计交接](docs/handoffs/2026-11-24-T042-codex.md) |
+| T042 | 数据治理与研究证据字段审计 | T036、T037、T041（已合入） | REVIEW | Codex / agent/codex/T042-governance | 2026-11-24T23:01Z 领取。PR #55 修正可见修订、证券快照和实体目录、日期及小数校验、计算输入单位及财报更正序号。数据库针对性回归和 20 项 Chromium 回归通过。[审计交接](docs/handoffs/2026-11-24-T042-codex.md) |
 
 ## 里程碑
 

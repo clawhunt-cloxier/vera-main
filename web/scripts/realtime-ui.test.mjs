@@ -1125,12 +1125,15 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
             };
           } else if (path === 'calculations/calc-a')
             data = {
-              formula_id: 'F01',
-              formula_version: '1.0',
-              result: '10.0',
-              unit: '亿元',
+              formula_id: 'F13',
+              formula_version: '1.1.1',
+              result: '0.02',
+              unit: 'ratio',
               applicability: 'APPLICABLE',
-              inputs: [],
+              inputs: [
+                { evidence_id: refs[0], value: '12.34', unit: 'CNY/share' },
+                { evidence_id: refs[1], value: '4321.25', unit: 'index_point' },
+              ],
             };
           else throw new Error('Unexpected close research request ' + path);
           await route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
@@ -1171,7 +1174,9 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           );
           await page.locator('.chart-box svg').waitFor();
           await page.getByRole('button', { name: '查看证据 1', exact: true }).click();
-          await page.getByText('F01', { exact: true }).waitFor();
+          await page.getByText('F13', { exact: true }).waitFor();
+          await page.getByText(/结果：0\.02\s*（小数比例）/).waitFor();
+          await page.getByText('输入 2 项：12.34 元/股，4321.25 点').waitFor();
           await page.getByText('模拟原文 source-11', { exact: true }).waitFor();
           assert.deepEqual([...requested].sort(), refs.slice(0, 12).sort());
           await page.getByRole('button', { name: '下一页' }).click();

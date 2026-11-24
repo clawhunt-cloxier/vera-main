@@ -96,6 +96,7 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 	ids := map[string]uuid.UUID{}
 	n := 0
 	err = pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		var directoryUpdates map[string]bool
 		if requestedCode != "" {
 			if err := s.RequireResearchUseTx(ctx, tx); err != nil {
 				return err
@@ -116,7 +117,7 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 				return err
 			}
 			var err error
-			recs, err = prepareObserved(ctx, tx, p.ID(), recs)
+			recs, directoryUpdates, err = prepareObserved(ctx, tx, p.ID(), recs)
 			if err != nil {
 				return err
 			}
@@ -133,15 +134,8 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 			return err
 		}
 		for _, e := range ents {
-			attrs, _ := json.Marshal(e.Attrs)
-			var id uuid.UUID
-			err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
-				VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
-				ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status, is_financial=excluded.is_financial, classification=excluded.classification,
-                attrs=CASE WHEN $10 AND EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
-                    THEN excluded.attrs || '{"tushare_research_subject":true}'::jsonb ELSE excluded.attrs END
-                WHERE entities.synthetic=excluded.synthetic AND entities.kind=excluded.kind
-				RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs, p.ID() == "tushare").Scan(&id)
+			protectDirectory := observed && p.ID() == "tushare" && e.Kind == "stock" && !directoryUpdates[e.Code]
+			id, err := syncEntity(ctx, tx, p, e, protectDirectory)
 			if err != nil {
 				return fmt.Errorf("entity %s: %w", e.Code, err)
 			}
@@ -228,6 +222,33 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 		return 0, err
 	}
 	return n, nil
+}
+
+func syncEntity(ctx context.Context, tx pgx.Tx, p Provider, e Entity, protectDirectory bool) (uuid.UUID, error) {
+	var id uuid.UUID
+	if protectDirectory {
+		// Preserve the fields from the dated snapshot while allowing the same
+		// security to be registered as a research subject in this batch.
+		err := tx.QueryRow(ctx, `UPDATE entities e
+			SET attrs=CASE WHEN $2 OR EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=e.code)
+				THEN e.attrs || '{"tushare_research_subject":true}'::jsonb ELSE e.attrs END
+			WHERE e.code=$1 AND e.kind='stock' AND NOT e.synthetic AND EXISTS (
+				SELECT 1 FROM records r WHERE r.entity_id=e.id AND r.provider_id='tushare'
+					AND r.dataset_id='ref.security' AND r.mapping_version >= 2 AND r.period IS NOT NULL)
+			RETURNING e.id`, e.Code, e.Attrs["tushare_research_subject"] == true).Scan(&id)
+		if err != pgx.ErrNoRows {
+			return id, err
+		}
+	}
+	attrs, _ := json.Marshal(e.Attrs)
+	err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
+		VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
+		ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status, is_financial=excluded.is_financial, classification=excluded.classification,
+		attrs=CASE WHEN $10 AND EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
+			THEN excluded.attrs || '{"tushare_research_subject":true}'::jsonb ELSE excluded.attrs END
+		WHERE entities.synthetic=excluded.synthetic AND entities.kind=excluded.kind
+		RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs, p.ID() == "tushare").Scan(&id)
+	return id, err
 }
 
 func nilIfEmpty(s string) *string {
