@@ -49,6 +49,8 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 
 | T041 | 长研报图表与证据栏动效收尾 | T040（已合入） | REVIEW | Codex / agent/codex/T041-reader-motion | 2026-11-24T22:32Z 领取。八图模拟研报按视口绘制，打印时补齐全部图表。Chromium 20 项回归通过。[交接](docs/handoffs/2026-11-24-T041-codex.md) |
 
+| T042 | 数据治理与研究证据字段审计 | T036、T037、T041（已合入） | IN_PROGRESS | Codex / agent/codex/T042-governance | 2026-11-24T23:01Z 领取。范围为统一记录校验、可见修订及快照、计算输入单位、证据展示和回归，使用已有目录与 API。[审计交接](docs/handoffs/2026-11-24-T042-codex.md) |
+
 ## 里程碑
 
 M1 本地演示：T011–T018、T019a、T022（M1 范围）、T024。M2 测试环境：T014b、T019b、T021、T022、T023。M3 PILOT：T020。详见 ADR-0003 D12。
