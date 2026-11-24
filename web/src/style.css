@@ -1299,6 +1299,7 @@ main.reader-document {
 .chart-box {
   width: 100%;
   height: clamp(240px, 26vw, 340px);
+  overflow: hidden;
 }
 
 .chart-note {

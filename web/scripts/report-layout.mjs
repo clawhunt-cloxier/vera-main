@@ -82,13 +82,31 @@ export async function testReportLayout(t, { browser, origin, appHTML, report, ev
         const page = await context.newPage();
         page.setDefaultTimeout(6000);
         const path = '/app/reports/' + report.id;
+        const extraSections =
+          width === 1440
+            ? Array.from({ length: 7 }, (_, i) => ({
+                ...details.sections[1],
+                id: 'S' + (i + 3),
+                title: '图表附录 ' + (i + 1),
+                charts: [{ ...chart, series_id: 'appendix-' + i, title: '附录图 ' + (i + 1) }],
+              }))
+            : [];
         await page.route(origin + path, (route) =>
           route.fulfill({ contentType: 'text/html', body: appHTML })
         );
         const responses = {
           me: { onboarded: true, csrf_token: 'mock-csrf', synthetic: true, quota: {} },
-          [`reports/${report.id}/versions/1`]: details,
+          [`reports/${report.id}/versions/1`]: {
+            ...details,
+            sections: [...details.sections, ...extraSections],
+          },
           [`reports/${report.id}/versions/1/series/${chart.series_id}`]: chart,
+          ...Object.fromEntries(
+            extraSections.map(({ charts: [item] }) => [
+              `reports/${report.id}/versions/1/series/${item.series_id}`,
+              item,
+            ])
+          ),
           [`evidence/${evidence.id}`]: evidence,
         };
         await page.route(origin + '/api/v1/**', (route) => {
@@ -99,8 +117,10 @@ export async function testReportLayout(t, { browser, origin, appHTML, report, ev
         await page.goto(origin + path);
         await page.getByRole('heading', { name: report.title, exact: true }).waitFor();
         const figure = page.locator('figure').filter({ hasText: chart.title });
+        await figure.scrollIntoViewIfNeeded();
         await figure.getByText('单位 亿元', { exact: true }).waitFor();
         await figure.getByText(chart.note, { exact: true }).waitFor();
+        await figure.locator('svg text').first().waitFor();
         const labels = await figure.locator('svg text').allTextContents();
         for (const label of ['2023', '2025', '0']) {
           assert.ok(labels.includes(label), `chart label is missing: ${label}`);
@@ -162,7 +182,9 @@ export async function testReportLayout(t, { browser, origin, appHTML, report, ev
         const heading = await page.getByRole('heading', { name: /样例摘要/ }).boundingBox();
         assert.ok(heading.y >= 0 && heading.y + heading.height <= 844, 'chapter is in view');
 
-        const citation = page.getByRole('button', { name: '查看证据 2', exact: true });
+        const citation = article
+          .locator('#S2')
+          .getByRole('button', { name: '查看证据 2', exact: true });
         const download = page.locator('.reader-back a[download]');
         assert.equal(await download.innerText(), 'PDF');
         await citation.scrollIntoViewIfNeeded();
@@ -198,6 +220,35 @@ export async function testReportLayout(t, { browser, origin, appHTML, report, ev
         await panel.waitFor({ state: 'detached' });
         assert.deepEqual(await download.boundingBox(), toolbarPosition);
         assert.ok(await citation.evaluate((el) => el === el.ownerDocument.activeElement));
+        if (extraSections.length) {
+          const last = page.locator('figure').last();
+          await last.getByRole('button', { name: '样例收入' }).waitFor();
+          assert.equal(await last.locator('svg').count(), 0);
+          await last.scrollIntoViewIfNeeded();
+          const svg = last.locator('.chart-box svg');
+          await svg.waitFor();
+          const fullWidth = await svg.getAttribute('width');
+          const legend = last.getByRole('button', { name: '样例收入' });
+          await legend.press('Space');
+          await citation.click();
+          await panel.getByText(evidence.title, { exact: true }).waitFor();
+          await finishTransitions(page.locator('.report'));
+          assert.equal(await svg.getAttribute('width'), fullWidth, 'offscreen plot skips reflow');
+          await last.scrollIntoViewIfNeeded();
+          await page.waitForFunction(() => {
+            const box = [...globalThis.document.querySelectorAll('.chart-box')].at(-1);
+            return Number(box.querySelector('svg')?.getAttribute('width')) === box.clientWidth;
+          });
+          assert.ok(Number(await svg.getAttribute('width')) < Number(fullWidth));
+          assert.equal(await legend.getAttribute('aria-pressed'), 'false');
+          await page.emulateMedia({ media: 'print' });
+          await page.waitForFunction(() =>
+            [...globalThis.document.querySelectorAll('.chart-box')].every(
+              (box) => Number(box.querySelector('svg')?.getAttribute('width')) === box.clientWidth
+            )
+          );
+          assert.equal(await page.locator('.chart-box svg').count(), 8);
+        }
       } finally {
         await context.close();
       }
