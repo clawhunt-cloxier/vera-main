@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -117,21 +118,20 @@ const (
 )
 
 var (
-	cNavy   = canvas.Hex("#0B3D5C")
-	cAccent = canvas.Hex("#1F7A8C")
-	cText   = canvas.Hex("#1F2933")
-	cMuted  = canvas.Hex("#6B7785")
-	cSoft   = canvas.Hex("#BFD3E0")
-	cLine   = canvas.Hex("#D5DCE3")
-	cPanel  = canvas.Hex("#F3F6F9")
-	cWhite  = canvas.Hex("#FFFFFF")
-	cWarn   = canvas.Hex("#B54708")
-	cWarnBg = canvas.Hex("#FEF3E2")
-	cBad    = canvas.Hex("#B42318")
-	cBadBg  = canvas.Hex("#FDE8E6")
-	cOk     = canvas.Hex("#067647")
-	cOkBg   = canvas.Hex("#DCF5E7")
-	palette = []color.RGBA{canvas.Hex("#0B3D5C"), canvas.Hex("#E07A1F"), canvas.Hex("#2A9D8F"), canvas.Hex("#7B61FF"), canvas.Hex("#C2410C")}
+	cAccent = canvas.Hex("#145EC5")
+	cBrand  = canvas.Hex("#30272C")
+	cInfoBg = canvas.Hex("#EAF2FD")
+	cText   = canvas.Hex("#222A34")
+	cMuted  = canvas.Hex("#586474")
+	cLine   = canvas.Hex("#DDE3EA")
+	cPanel  = canvas.Hex("#F5F7FA")
+	cWarn   = canvas.Hex("#785012")
+	cWarnBg = canvas.Hex("#F8EFE0")
+	cBad    = canvas.Hex("#A23631")
+	cBadBg  = canvas.Hex("#FBECEB")
+	cOk     = canvas.Hex("#216047")
+	cOkBg   = canvas.Hex("#E8F3EC")
+	palette = []color.RGBA{cAccent, canvas.Hex("#A85D28"), canvas.Hex("#1B7568"), canvas.Hex("#6B5797"), canvas.Hex("#A23631")}
 )
 
 type kindStyle struct {
@@ -316,7 +316,7 @@ func (d *doc) pill(x, top float64, label string, fg, bg color.RGBA, pt float64) 
 	f := d.face(pt, fg, true)
 	w := f.TextWidth(label) + 3.4
 	h := pt*0.3528 + 2.4
-	d.fill(bg, x, top, w, h, h/2)
+	d.fill(bg, x, top, w, h, 1)
 	d.cur.ctx.DrawText(x+1.7, ypos(top+h/2)-0.134*pt, canvas.NewTextLine(f, label, canvas.Left))
 	return w, h
 }
@@ -357,31 +357,32 @@ func isNumber(s string) bool {
 func (d *doc) cover() {
 	d.newPage()
 	d.mark("封面与目录", 0)
-	d.fill(cNavy, 0, 0, pageW, 78, 0)
-	d.fill(cAccent, 0, 78, pageW, 1.6, 0)
-	d.put(mL, 17, d.para(d.face(12, cWhite, true), "VERA", 60, canvas.Left))
-	d.put(mL, 25, d.para(d.face(8, cSoft, false), "可信金融研究 · AI 生成研究报告", 120, canvas.Left))
-	title := d.para(d.face(24, cWhite, true), d.r.Title, cw, canvas.Left)
-	d.put(mL, 38, title)
+	d.cur.ctx.DrawText(mL, ypos(22), canvas.NewTextLine(d.face(14, cBrand, true), "Vera", canvas.Left))
+	d.cur.ctx.DrawText(pageW-mR, ypos(22), canvas.NewTextLine(d.face(9, cMuted, false), "研究报告", canvas.Right))
+	d.hline(mL, 26, cw, cLine, 0.3)
+	d.hline(mL, 26, 14, cAccent, 0.55)
+	title := d.para(d.face(24, cText, true), d.r.Title, cw, canvas.Left)
+	d.put(mL, 35, title)
+	d.y = 35 + th(title) + 6
+
 	sub := d.r.Subject.Name
 	if d.r.Subject.Symbol != nil && *d.r.Subject.Symbol != "" {
 		sub += " · " + *d.r.Subject.Symbol
 	}
-	d.put(mL, 38+th(title)+3, d.para(d.face(11, cSoft, false), sub, cw, canvas.Left))
 
 	x := mL
-	w, _ := d.pill(x, 86, "AI 生成", cWhite, cNavy, 8)
+	w, h := d.pill(x, d.y, "AI 生成", cAccent, cInfoBg, 8)
 	x += w + 2.5
 	if d.r.ResultKind == "full" {
-		w, _ = d.pill(x, 86, "完整", cOk, cOkBg, 8)
+		w, _ = d.pill(x, d.y, "完整", cOk, cOkBg, 8)
 	} else {
-		w, _ = d.pill(x, 86, "受限", cWarn, cWarnBg, 8)
+		w, _ = d.pill(x, d.y, "受限", cWarn, cWarnBg, 8)
 	}
 	x += w + 2.5
 	if d.r.Synthetic {
-		d.pill(x, 86, "模拟数据", cBad, cBadBg, 8)
+		d.pill(x, d.y, "模拟数据", cBad, cBadBg, 8)
 	}
-	d.y = 100
+	d.y += h + 8
 
 	name := skillTitle[d.r.SkillID]
 	if name == "" {
@@ -391,7 +392,6 @@ func (d *doc) cover() {
 	d.kv("研究类型", name)
 	d.kv("数据截止", d.r.DataAsOf)
 	d.kv("报告版本", fmt.Sprintf("第 %d 版 · 交付于 %s（北京时间）", d.r.Version, d.fmtTime(d.r.DeliveredAt)))
-	d.kv("结论条数", fmt.Sprintf("%d 条（含核心要点）", len(d.r.Claims)))
 	d.y += 3
 	if d.r.ResultKind != "full" {
 		d.notice("本报告为受限版本：部分章节因数据不足或未通过核验而受限或未生成，原因见“数据与限制”。", cWarn, cWarnBg)
@@ -399,12 +399,14 @@ func (d *doc) cover() {
 	if d.r.Synthetic {
 		d.notice("本报告基于虚构的演示数据或模拟模型生成，不对应任何真实公司或市场，仅用于演示。", cBad, cBadBg)
 	}
-	d.y += 3
-	d.put(mL, d.y, d.para(d.face(12, cNavy, true), "目 录", 40, canvas.Left))
-	d.y += 9
+	d.y += 5
+	d.tocHeading()
 	for _, s := range d.r.Sections {
 		label := s.ID + "  " + s.Title
-		if s.Status == "omitted" {
+		switch s.Status {
+		case "limited":
+			label += "（受限）"
+		case "omitted":
 			label += "（未生成）"
 		}
 		d.tocRow(label, s.ID, s.Status == "omitted")
@@ -413,10 +415,11 @@ func (d *doc) cover() {
 }
 
 func (d *doc) kv(k, v string) {
-	t := d.para(d.face(10.5, cText, false), v, cw-30, canvas.Left)
-	d.put(mL, d.y, d.para(d.face(9, cMuted, false), k, 26, canvas.Left))
-	d.put(mL+30, d.y-0.3, t)
+	t := d.para(d.face(10, cText, false), v, cw-30, canvas.Left)
 	h := math.Max(th(t), 4.5) + 3.2
+	d.ensure(h)
+	d.put(mL, d.y, d.para(d.face(9, cMuted, false), k, 26, canvas.Left))
+	d.put(mL+30, d.y, t)
 	d.hline(mL, d.y+h-1.2, cw, cLine, 0.2)
 	d.y += h
 }
@@ -434,39 +437,60 @@ func (d *doc) notice(s string, accent, bg color.RGBA) {
 	d.y += h + 3
 }
 
+func (d *doc) tocHeading() {
+	d.ensure(20)
+	d.put(mL, d.y, d.para(d.face(13, cText, true), "目录", 40, canvas.Left))
+	d.hline(mL, d.y+7.5, cw, cLine, 0.25)
+	d.y += 11
+}
+
 func (d *doc) tocRow(label, key string, dim bool) {
 	col := cText
 	if dim {
 		col = cMuted
 	}
 	f := d.face(10, col, false)
-	d.put(mL, d.y, d.para(f, label, cw-14, canvas.Left))
+	t := d.para(f, label, cw-14, canvas.Left)
+	h := math.Max(7, th(t)+3.4)
+	if d.y+h > pageH-mBot {
+		d.newPage()
+		d.tocHeading()
+	}
+	d.put(mL, d.y, t)
 	pg := "—"
 	if n := d.tocIn[key]; n > 0 {
 		pg = strconv.Itoa(n)
 	}
 	d.cur.ctx.DrawText(mL+cw, ypos(d.y+3.5), canvas.NewTextLine(f, pg, canvas.Right))
-	d.dots(mL+f.TextWidth(label)+2, mL+cw-f.TextWidth(pg)-2, d.y+3.2)
-	d.y += 6.2
+	if t.Lines() == 1 {
+		d.dots(mL+f.TextWidth(label)+2, mL+cw-f.TextWidth(pg)-2, d.y+3.2)
+	}
+	d.y += h
 }
 
 // ---- sections ----
 
-func (d *doc) heading(text, status string) {
-	d.fill(cAccent, mL, d.y+0.8, 1.4, 7, 0)
-	d.cur.ctx.DrawText(mL+4, ypos(d.y+6.2), canvas.NewTextLine(d.face(14, cNavy, true), text, canvas.Left))
+func (d *doc) heading(key, text, status string) {
+	width := cw - 4
+	if status != "" {
+		width -= d.pillW(status, 8) + 4
+	}
+	t := d.para(d.face(14, cText, true), text, width, canvas.Left)
+	h := math.Max(6, th(t))
+	d.ensure(h + 18)
+	d.mark(text, 0)
+	d.tocOut[key] = len(d.pages)
+	d.fill(cAccent, mL, d.y+1, 0.9, 5, 0)
+	d.put(mL+4, d.y, t)
 	if status != "" {
 		w := d.pillW(status, 8)
-		d.pill(mL+cw-w, d.y+1.8, status, cWarn, cWarnBg, 8)
+		d.pill(mL+cw-w, d.y+0.5, status, cWarn, cWarnBg, 8)
 	}
-	d.hline(mL, d.y+10.4, cw, cLine, 0.25)
-	d.y += 14
+	d.hline(mL, d.y+h+3, cw, cLine, 0.25)
+	d.y += h + 6
 }
 
 func (d *doc) section(s Section) {
-	d.ensure(46)
-	d.mark(s.ID+" "+s.Title, 0)
-	d.tocOut[s.ID] = len(d.pages)
 	status := ""
 	switch s.Status {
 	case "limited":
@@ -474,7 +498,7 @@ func (d *doc) section(s Section) {
 	case "omitted":
 		status = "未生成"
 	}
-	d.heading(s.ID+"  "+s.Title, status)
+	d.heading(s.ID, s.ID+"  "+s.Title, status)
 	if s.Note != nil && *s.Note != "" {
 		d.notice(*s.Note, cWarn, cWarnBg)
 	}
@@ -501,7 +525,7 @@ func (d *doc) claim(c Claim) {
 	if !ok {
 		ks = kinds["fact"]
 	}
-	body := d.face(10, cText, false)
+	body := d.face(10.5, cText, false)
 	cite := d.face(8, cAccent, true)
 	rt := canvas.NewRichText(body)
 	rt.WriteFace(body, c.Text)
@@ -509,7 +533,7 @@ func (d *doc) claim(c Claim) {
 		rt.WriteFace(cite, " ["+strconv.Itoa(n)+"]")
 	}
 	const gut = 15.0
-	t := rt.ToText(cw-gut, 0, canvas.Justify, canvas.Top, &canvas.TextOptions{LineStretch: 0.35, PunctuationInMargins: true})
+	t := rt.ToText(cw-gut, 0, canvas.Left, canvas.Top, &canvas.TextOptions{LineStretch: 0.35})
 	h := th(t)
 	type row struct{ l, v *canvas.Text }
 	var rows []row
@@ -527,7 +551,7 @@ func (d *doc) claim(c Claim) {
 			panel += 2.6
 		}
 	}
-	total := h + 3.4
+	total := math.Max(5, h) + 3.4
 	if panel > 0 {
 		total += panel + 1.6
 	}
@@ -558,18 +582,17 @@ func (d *doc) table(t Table) {
 	if nc == 0 {
 		return
 	}
-	hf := d.face(8.5, cWhite, true)
+	hf := d.face(8.5, cText, true)
 	bf := d.face(8.5, cText, false)
-	capT := d.para(d.face(9, cNavy, true), t.Title, cw, canvas.Left)
-	d.ensure(th(capT) + 22)
-	d.put(mL, d.y, capT)
-	d.y += th(capT) + 2
 	const pad = 2.6
 	rows := make([][]string, len(t.Rows))
 	for i, row := range t.Rows {
 		rows[i] = make([]string, nc)
-		for j := 0; j < nc && j < len(row); j++ {
-			s := cell(row[j])
+		for j := range rows[i] {
+			s := "—"
+			if j < len(row) {
+				s = cell(row[j])
+			}
 			if v, ok := cellText[s]; ok {
 				s = v
 			}
@@ -621,53 +644,77 @@ func (d *doc) table(t Table) {
 			widths[j] = minW[j] + (nat[j]-minW[j])*(cw-totalMin)/spare
 		}
 	}
-	var draw func(cells []string, face *canvas.FontFace, bg *color.RGBA, header bool)
-	draw = func(cells []string, face *canvas.FontFace, bg *color.RGBA, header bool) {
-		boxes := make([]*canvas.Text, nc)
-		dx := make([]float64, nc)
-		h := 0.0
-		for j := 0; j < nc; j++ {
-			s := ""
-			if j < len(cells) {
-				s = cells[j]
-			}
-			avail := widths[j] - 2*pad
-			boxes[j] = d.para(face, s, avail, canvas.Left)
+	type rowLayout struct {
+		boxes   []*canvas.Text
+		offsets []float64
+		height  float64
+	}
+	layout := func(cells []string, face *canvas.FontFace) rowLayout {
+		row := rowLayout{boxes: make([]*canvas.Text, nc), offsets: make([]float64, nc)}
+		for j, s := range cells {
+			inset := math.Min(pad, widths[j]*0.15)
+			avail := widths[j] - 2*inset
+			row.boxes[j] = d.para(face, s, avail, canvas.Left)
+			row.offsets[j] = inset
 			if w := face.TextWidth(s); numeric[j] && w <= avail {
-				dx[j] = avail - w
+				row.offsets[j] += avail - w
 			}
-			h = math.Max(h, th(boxes[j]))
+			row.height = math.Max(row.height, th(row.boxes[j]))
 		}
-		h += 3.4
-		if d.y+h > pageH-mBot {
-			d.newPage()
-			if !header {
-				navy := cNavy
-				draw(t.Columns, hf, &navy, true)
-			}
-		}
-		if bg != nil {
-			d.fill(*bg, mL, d.y, cw, h, 0)
+		row.height += 4.4
+		return row
+	}
+	draw := func(row rowLayout, bg color.RGBA) {
+		if bg.A > 0 {
+			d.fill(bg, mL, d.y, cw, row.height, 0)
 		}
 		x := mL
-		for j := 0; j < nc; j++ {
-			d.put(x+pad+dx[j], d.y+1.7, boxes[j])
+		for j, box := range row.boxes {
+			d.put(x+row.offsets[j], d.y+2.2, box)
 			x += widths[j]
 		}
-		if !header {
-			d.hline(mL, d.y+h, cw, cLine, 0.2)
-		}
-		d.y += h
+		d.y += row.height
+		d.hline(mL, d.y, cw, cLine, 0.2)
 	}
-	navy := cNavy
-	draw(t.Columns, hf, &navy, true)
-	for i, row := range rows {
-		var bg *color.RGBA
-		if i%2 == 1 {
-			p := cPanel
-			bg = &p
+	header := layout(t.Columns, hf)
+	caption := func(continued bool) (*canvas.Text, float64) {
+		if t.Title == "" {
+			return nil, 0
 		}
-		draw(row, bf, bg, false)
+		title := t.Title
+		col := cText
+		if continued {
+			title += "（续）"
+			col = cMuted
+		}
+		text := d.para(d.face(9.5, col, true), title, cw, canvas.Left)
+		return text, th(text) + 2.8
+	}
+	start := func(continued bool, firstRowHeight float64) {
+		text, height := caption(continued)
+		d.ensure(height + header.height + firstRowHeight)
+		if text != nil {
+			d.put(mL, d.y, text)
+			d.y += height
+		}
+		d.hline(mL, d.y, cw, cLine, 0.25)
+		draw(header, cPanel)
+	}
+	if len(rows) == 0 {
+		start(false, 0)
+	}
+	for i, cells := range rows {
+		row := layout(cells, bf)
+		if i == 0 {
+			start(false, row.height)
+		} else if d.y+row.height > pageH-mBot {
+			start(true, row.height)
+		}
+		bg := canvas.Transparent
+		if i%2 == 1 {
+			bg = canvas.Hex("#FAFBFC")
+		}
+		draw(row, bg)
 	}
 }
 
@@ -707,8 +754,8 @@ func fmtTick(v, step float64) string {
 	if step < 1 {
 		dec = int(math.Ceil(-math.Log10(step) - 1e-9))
 	}
-	if dec > 3 {
-		dec = 3
+	if dec > 6 || math.Abs(v) >= 1e9 {
+		return strconv.FormatFloat(v, 'g', 6, 64)
 	}
 	if math.Abs(v) < step*1e-6 {
 		v = 0
@@ -717,7 +764,7 @@ func fmtTick(v, step float64) string {
 }
 
 func fmtX(kind, raw string) string {
-	if kind == "report_period" && len(raw) >= 4 && strings.HasSuffix(raw, "-12-31") {
+	if kind == "report_period" && len(raw) == 10 && strings.HasSuffix(raw, "-12-31") {
 		return raw[:4]
 	}
 	return raw
@@ -727,64 +774,163 @@ func alpha(c color.RGBA, a float64) color.RGBA {
 	return color.RGBA{uint8(float64(c.R) * a), uint8(float64(c.G) * a), uint8(float64(c.B) * a), uint8(255 * a)}
 }
 
-func (d *doc) chart(ch Chart, s Series) {
-	const h = 68.0
-	d.ensure(h + 4)
-	title := s.Title
-	if title == "" {
-		title = ch.Title
-	}
-	d.put(mL, d.y, d.para(d.face(9.5, cNavy, true), title, cw-45, canvas.Left))
-	if s.Unit != "" {
-		d.cur.ctx.DrawText(mL+cw, ypos(d.y+3.4), canvas.NewTextLine(d.face(7.5, cMuted, false), "单位："+s.Unit, canvas.Right))
-	}
-	lf := d.face(7.5, cText, false)
-	lx := mL
-	for i, ln := range s.Lines {
-		label := ln.Name
-		if k := len(ln.Points); k > 0 && ln.Points[k-1][1] != nil {
-			label += " " + *ln.Points[k-1][1]
+func chartValues(s Series) ([]string, [][]float64, float64, float64) {
+	index := make(map[string]int)
+	var dates []string
+	for _, line := range s.Lines {
+		for _, point := range line.Points {
+			if point[0] == nil || *point[0] == "" {
+				continue
+			}
+			if _, ok := index[*point[0]]; !ok {
+				index[*point[0]] = len(dates)
+				dates = append(dates, *point[0])
+			}
 		}
-		d.fill(palette[i%len(palette)], lx, d.y+7.2, 3.2, 1.4, 0.3)
-		d.cur.ctx.DrawText(lx+4.4, ypos(d.y+8.6), canvas.NewTextLine(lf, label, canvas.Left))
-		lx += 4.4 + lf.TextWidth(label) + 5
 	}
-	px0, px1 := mL+11.0, mL+cw-1.0
-	py0, py1 := d.y+13.0, d.y+h-7.0
-
-	n, longest := 0, 0
-	for i, ln := range s.Lines {
-		if len(ln.Points) > n {
-			n, longest = len(ln.Points), i
-		}
+	slices.Sort(dates)
+	for i, date := range dates {
+		index[date] = i
 	}
 	vals := make([][]float64, len(s.Lines))
 	lo, hi := math.Inf(1), math.Inf(-1)
-	for i, ln := range s.Lines {
-		vals[i] = make([]float64, n)
+	for i, line := range s.Lines {
+		vals[i] = make([]float64, len(dates))
 		for k := range vals[i] {
 			vals[i][k] = math.NaN()
 		}
-		for k, p := range ln.Points {
+		for _, p := range line.Points {
+			if p[0] == nil || *p[0] == "" {
+				continue
+			}
+			iDate := index[*p[0]]
+			vals[i][iDate] = math.NaN()
 			if p[1] == nil {
 				continue
 			}
 			v, err := strconv.ParseFloat(*p[1], 64)
-			if err != nil {
+			if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 				continue
 			}
-			vals[i][k] = v
-			lo, hi = math.Min(lo, v), math.Max(hi, v)
+			vals[i][iDate] = v
+		}
+		for _, v := range vals[i] {
+			if !math.IsNaN(v) {
+				lo, hi = math.Min(lo, v), math.Max(hi, v)
+			}
 		}
 	}
-	if n == 0 || math.IsInf(lo, 0) {
-		d.put(mL, d.y+h/2, d.para(d.face(9, cMuted, false), "暂无可绘制的数据", cw, canvas.Left))
-		d.y += h
+	return dates, vals, lo, hi
+}
+
+func chartDashes(series int) []float64 {
+	switch series % 3 {
+	case 1:
+		return []float64{2, 1}
+	case 2:
+		return []float64{0.6, 0.9}
+	default:
+		return nil
+	}
+}
+
+func (d *doc) chart(ch Chart, s Series) {
+	dates, vals, lo, hi := chartValues(s)
+	bars := s.Kind == "bar"
+	empty := math.IsInf(lo, 0)
+	const (
+		inset   = 4.0
+		plotH   = 46.0
+		legendW = 5.5
+		innerW  = cw - 2*inset
+	)
+	title := s.Title
+	if title == "" {
+		title = ch.Title
+	}
+	small := d.face(8, cMuted, false)
+	titleW := innerW
+	var unit *canvas.Text
+	unitW := 0.0
+	if s.Unit != "" {
+		label := "单位：" + s.Unit
+		unitW = math.Min(small.TextWidth(label)+1, innerW/3)
+		unit = d.para(small, label, unitW, canvas.Right)
+		titleW -= unitW + 5
+	}
+	titleText := d.para(d.face(10, cText, true), title, titleW, canvas.Left)
+	headH := math.Max(4.5, th(titleText))
+	if unit != nil {
+		headH = math.Max(headH, th(unit))
+	}
+
+	type legendItem struct {
+		text *canvas.Text
+		x, y float64
+	}
+	var legend []legendItem
+	x, y, lineH := 0.0, 5+headH+3, 0.0
+	if !empty {
+		for _, line := range s.Lines {
+			w := math.Min(small.TextWidth(line.Name)+1, innerW-legendW)
+			t := d.para(small, line.Name, w, canvas.Left)
+			if x > 0 && x+legendW+w > innerW {
+				x, y, lineH = 0, y+lineH+2, 0
+			}
+			legend = append(legend, legendItem{t, mL + inset + x, y})
+			x += legendW + w + 4
+			lineH = math.Max(lineH, th(t))
+		}
+	}
+	plotTop := y + lineH + 5
+	plotBottom := plotTop + plotH
+	if empty {
+		plotBottom = plotTop + 6
+	}
+	noteTop := plotBottom + 8
+	total := noteTop + 1
+	var note *canvas.Text
+	if s.Note != nil && *s.Note != "" {
+		note = d.para(small, *s.Note, innerW, canvas.Left)
+		total += th(note) + 3
+	}
+
+	d.ensure(total + 3)
+	d.hline(mL, d.y, cw, cLine, 0.25)
+	d.put(mL+inset, d.y+5, titleText)
+	if unit != nil {
+		d.put(mL+cw-inset-unitW, d.y+5, unit)
+	}
+	if note != nil {
+		d.put(mL+inset, d.y+noteTop, note)
+	}
+	if empty {
+		d.put(mL+inset, d.y+plotTop, d.para(small, "暂无可绘制的数据", innerW, canvas.Left))
+		d.y += total
 		return
 	}
-	isBar := s.Kind == "bar"
-	if isBar {
+	for i, item := range legend {
+		col := palette[i%len(palette)]
+		top := d.y + item.y
+		if bars {
+			d.fill(col, item.x, top+1, 3.3, 2, 0)
+		} else {
+			ctx := d.cur.ctx
+			ctx.SetStrokeColor(col)
+			ctx.SetStrokeWidth(0.55)
+			ctx.SetDashes(0, chartDashes(i)...)
+			ctx.DrawPath(item.x, ypos(top+2), canvas.Line(4, 0))
+			ctx.SetStrokeColor(canvas.Transparent)
+			ctx.SetDashes(0)
+		}
+		d.put(item.x+legendW, top, item.text)
+	}
+
+	if bars {
 		lo, hi = math.Min(lo, 0), math.Max(hi, 0)
+		if hi == lo {
+			hi = 1
+		}
 	} else {
 		span := hi - lo
 		if span == 0 {
@@ -802,10 +948,18 @@ func (d *doc) chart(ch Chart, s Series) {
 	if len(ticks) > 1 {
 		step = ticks[1] - ticks[0]
 	}
+	tf := d.face(7, cMuted, false)
+	labelW := 0.0
+	for _, tick := range ticks {
+		labelW = math.Max(labelW, tf.TextWidth(fmtTick(tick, step)))
+	}
+	px0, px1 := mL+inset+labelW+3, mL+cw-inset
+	py0, py1 := d.y+plotTop, d.y+plotBottom
 	yAt := func(v float64) float64 { return py1 - (v-lo)/(hi-lo)*(py1-py0) }
+	n := len(dates)
 	gw := (px1 - px0) / float64(n)
 	xAt := func(k int) float64 {
-		if isBar {
+		if bars {
 			return px0 + (float64(k)+0.5)*gw
 		}
 		if n == 1 {
@@ -813,117 +967,134 @@ func (d *doc) chart(ch Chart, s Series) {
 		}
 		return px0 + float64(k)/float64(n-1)*(px1-px0)
 	}
-	tf := d.face(6.5, cMuted, false)
 	for _, t := range ticks {
-		d.hline(px0, yAt(t), px1-px0, cLine, 0.15)
+		color, weight := cLine, 0.15
+		if bars && t == 0 {
+			color, weight = cMuted, 0.25
+		}
+		d.hline(px0, yAt(t), px1-px0, color, weight)
 		d.cur.ctx.DrawText(px0-1.6, ypos(yAt(t))-0.8, canvas.NewTextLine(tf, fmtTick(t, step), canvas.Right))
 	}
-	d.hline(px0, py1, px1-px0, cMuted, 0.25)
-
-	var idx []int
-	if isBar && n <= 10 {
-		for i := 0; i < n; i++ {
-			idx = append(idx, i)
-		}
-	} else {
-		k := 6
-		if n < k {
-			k = n
-		}
-		for j := 0; j < k; j++ {
-			if k == 1 {
-				idx = append(idx, 0)
-			} else {
-				idx = append(idx, int(math.Round(float64(j)*float64(n-1)/float64(k-1))))
-			}
-		}
+	xLabel := func(i int) (float64, float64, string) {
+		label := fmtX(s.X, dates[i])
+		w := tf.TextWidth(label)
+		left := math.Max(mL+inset, math.Min(xAt(i)-w/2, px1-w))
+		return left, w, label
 	}
-	for _, i := range idx {
-		if i < len(s.Lines[longest].Points) && s.Lines[longest].Points[i][0] != nil {
-			d.cur.ctx.DrawText(xAt(i), ypos(py1)-4.0, canvas.NewTextLine(tf, fmtX(s.X, *s.Lines[longest].Points[i][0]), canvas.Center))
+	lastLabel, _, _ := xLabel(n - 1)
+	lastRight := mL
+	interval := max(1, (n-1+4)/5)
+	for i := 0; i < n; i++ {
+		if i%interval != 0 && i != n-1 {
+			continue
 		}
+		left, w, label := xLabel(i)
+		if i > 0 && i < n-1 && (left < lastRight+2 || left+w > lastLabel-2) {
+			continue
+		}
+		d.cur.ctx.DrawText(left, ypos(py1)-4.4, canvas.NewTextLine(tf, label, canvas.Left))
+		lastRight = left + w
 	}
 
 	ctx := d.cur.ctx
-	if isBar {
+	if bars {
 		yz := yAt(0)
 		bw := gw * 0.7 / float64(len(s.Lines))
-		vf := d.face(6.5, cText, false)
-		for i := range s.Lines {
+		vf := d.face(7, cText, false)
+		for i, line := range s.Lines {
 			col := palette[i%len(palette)]
-			for k := 0; k < n; k++ {
-				v := vals[i][k]
+			raw := make(map[string]string, len(line.Points))
+			for _, point := range line.Points {
+				if point[0] != nil && point[1] != nil {
+					raw[*point[0]] = *point[1]
+				}
+			}
+			for k, v := range vals[i] {
 				if math.IsNaN(v) {
 					continue
 				}
 				x := px0 + float64(k)*gw + gw*0.15 + float64(i)*bw
-				ty := math.Min(yz, yAt(v))
-				d.fill(col, x, ty, bw*0.92, math.Max(math.Abs(yz-yAt(v)), 0.15), 0)
-				if n*len(s.Lines) <= 14 {
-					ctx.DrawText(x+bw*0.46, ypos(ty)+1.0, canvas.NewTextLine(vf, *s.Lines[i].Points[k][1], canvas.Center))
+				y := yAt(v)
+				if h := math.Abs(yz - y); h > 0 {
+					d.fill(col, x, math.Min(yz, y), bw*0.92, h, 0)
+				}
+				label := raw[dates[k]]
+				if n*len(s.Lines) <= 14 && vf.TextWidth(label) < bw-1.2 {
+					dy := 1.0
+					if v < 0 {
+						dy = -3.1
+					}
+					ctx.DrawText(x+bw*0.46, ypos(y)+dy, canvas.NewTextLine(vf, label, canvas.Center))
 				}
 			}
 		}
 	} else {
 		for i := range s.Lines {
-			col := palette[i%len(palette)]
-			line := &canvas.Path{}
-			area := &canvas.Path{}
-			started := false
-			lastX, lastY := 0.0, 0.0
-			for k := 0; k < n; k++ {
-				v := vals[i][k]
-				if math.IsNaN(v) {
-					started = false
-					continue
-				}
-				x, y := xAt(k), ypos(yAt(v))
-				if !started {
-					line.MoveTo(x, y)
-					if s.Kind == "area" && i == 0 && area.Empty() {
-						area.MoveTo(x, ypos(py1))
-						area.LineTo(x, y)
-					}
-					started = true
-				} else {
-					line.LineTo(x, y)
-					if s.Kind == "area" && i == 0 {
-						area.LineTo(x, y)
-					}
-				}
-				lastX, lastY = x, y
-			}
-			if s.Kind == "area" && i == 0 && !area.Empty() {
-				area.LineTo(lastX, ypos(py1))
-				area.Close()
-				ctx.SetFillColor(alpha(col, 0.14))
-				ctx.SetStrokeColor(canvas.Transparent)
-				ctx.DrawPath(0, 0, area)
-			}
-			ctx.SetFillColor(canvas.Transparent)
-			ctx.SetStrokeColor(col)
-			ctx.SetStrokeWidth(0.55)
-			ctx.SetDashes(0)
-			ctx.DrawPath(0, 0, line)
-			ctx.SetFillColor(col)
-			ctx.SetStrokeColor(canvas.Transparent)
-			ctx.DrawPath(lastX, lastY, canvas.Circle(0.7))
+			d.chartLine(vals[i], xAt, yAt, py1, i, s.Kind == "area" && i == 0)
 		}
 	}
 	ctx.SetStrokeColor(canvas.Transparent)
-	if s.Note != nil && *s.Note != "" {
-		d.put(mL, d.y+h-3, d.para(d.face(7, cMuted, false), *s.Note, cw, canvas.Left))
+	d.y += total + 3
+}
+
+func (d *doc) chartLine(values []float64, xAt func(int) float64, yAt func(float64) float64, bottom float64, series int, shaded bool) {
+	col := palette[series%len(palette)]
+	line, area := &canvas.Path{}, &canvas.Path{}
+	last := -1
+	for i, v := range values {
+		if math.IsNaN(v) {
+			continue
+		}
+		x, y := xAt(i), ypos(yAt(v))
+		if last < 0 || i > last+1 {
+			line.MoveTo(x, y)
+			if shaded {
+				if last >= 0 {
+					area.LineTo(xAt(last), ypos(bottom))
+					area.Close()
+				}
+				area.MoveTo(x, ypos(bottom))
+			}
+		} else {
+			line.LineTo(x, y)
+		}
+		if shaded {
+			area.LineTo(x, y)
+		}
+		last = i
 	}
-	d.y += h + 2
+	if last < 0 {
+		return
+	}
+	ctx := d.cur.ctx
+	if shaded {
+		area.LineTo(xAt(last), ypos(bottom))
+		area.Close()
+		ctx.SetFillColor(alpha(col, 0.13))
+		ctx.SetStrokeColor(canvas.Transparent)
+		ctx.DrawPath(0, 0, area)
+	}
+	ctx.SetFillColor(canvas.Transparent)
+	ctx.SetStrokeColor(col)
+	ctx.SetStrokeWidth(0.55)
+	ctx.SetDashes(0, chartDashes(series)...)
+	ctx.DrawPath(0, 0, line)
+	ctx.SetDashes(0)
+	ctx.SetFillColor(col)
+	ctx.SetStrokeColor(canvas.Transparent)
+	for i, v := range values {
+		isolated := (i == 0 || math.IsNaN(values[i-1])) &&
+			(i == len(values)-1 || math.IsNaN(values[i+1]))
+		if !math.IsNaN(v) && (len(values) <= 10 || i == last || isolated) {
+			ctx.DrawPath(xAt(i), ypos(yAt(v)), canvas.Circle(0.75))
+		}
+	}
 }
 
 // ---- closing pages ----
 
 func (d *doc) limits() {
-	d.ensure(46)
-	d.mark("数据与限制", 0)
-	d.tocOut["limits"] = len(d.pages)
-	d.heading("数据与限制", "")
+	d.heading("limits", "数据与限制", "")
 	bf := d.face(9.5, cText, false)
 	for _, l := range d.r.Limitations {
 		t := d.para(bf, l, cw-5, canvas.Left)
@@ -966,7 +1137,7 @@ func (d *doc) limits() {
 
 func (d *doc) legend() {
 	d.ensure(72)
-	d.put(mL, d.y, d.para(d.face(10.5, cNavy, true), "阅读指引", 60, canvas.Left))
+	d.put(mL, d.y, d.para(d.face(10.5, cText, true), "阅读指引", 60, canvas.Left))
 	d.y += 8
 	desc := map[string]string{
 		"fact":       "披露数据的直接陈述，可对应到来源记录。",
@@ -996,14 +1167,14 @@ func (d *doc) chrome() {
 		d.cur = pg
 		ctx := pg.ctx
 		if i > 0 {
-			ctx.DrawText(mL, ypos(12.5), canvas.NewTextLine(small, "VERA · "+trunc(d.r.Title, 30), canvas.Left))
+			ctx.DrawText(mL, ypos(12.5), canvas.NewTextLine(small, "Vera · "+trunc(d.r.Title, 24), canvas.Left))
 			x := pageW - mR
 			if d.r.Synthetic {
 				w := d.pillW("模拟数据", 6.5)
 				d.pill(x-w, 8.6, "模拟数据", cBad, cBadBg, 6.5)
 				x -= w + 2
 			}
-			ctx.DrawText(x, ypos(12.5), canvas.NewTextLine(small, "数据截止 "+d.r.DataAsOf, canvas.Right))
+			ctx.DrawText(x, ypos(12.5), canvas.NewTextLine(small, "数据截止 "+trunc(d.r.DataAsOf, 32), canvas.Right))
 			d.hline(mL, 16, cw, cLine, 0.2)
 		}
 		d.hline(mL, pageH-15, cw, cLine, 0.2)

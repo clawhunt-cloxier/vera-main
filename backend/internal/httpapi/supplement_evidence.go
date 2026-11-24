@@ -52,10 +52,11 @@ func (s *Server) supplementEvidence(w http.ResponseWriter, r *http.Request, ws, 
 			if first != last {
 				label = source.Title + " · " + first + " 至 " + last
 			}
+			basis := e.Basis + " 报告按 100 股/手、10,000 元/万元换算成交量额。"
 			matched = true
 			httpx.JSON(w, r, http.StatusOK, Evidence{ID: e.ID, DatasetID: e.DatasetID, Provider: name,
 				Origin: "vendor_derived", SourceTier: "L2", Title: source.Title, Label: label, Period: &last,
-				Basis: &e.Basis, ReceivedAt: &e.ReceivedAt, AvailableAt: source.Cutoff, LatencyMode: "unknown",
+				Basis: &basis, ReceivedAt: &e.ReceivedAt, AvailableAt: source.Cutoff, LatencyMode: "unknown",
 				Locator: &e.Locator, ContentHash: e.ContentHash})
 			return nil
 		}

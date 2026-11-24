@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
+import { ArrowLeft, Download } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import {
   fmtTime,
@@ -16,7 +17,15 @@ import {
 import { useMe } from '../api/hooks';
 import { ReportView } from '../components/ReportView';
 import { WorkspaceFrame } from '../components/WorkspaceFrame';
-import { Dialog, Empty, ErrorBox, Loading, SyntheticBanner, Tag } from '../components/ui';
+import {
+  Dialog,
+  Empty,
+  ErrorBox,
+  Loading,
+  SyntheticBanner,
+  Tag,
+  VeraBrand,
+} from '../components/ui';
 
 export function Reports() {
   const reports = useQuery({
@@ -105,26 +114,36 @@ export function ReportPage({ id }: { id: string }) {
     ),
   };
   return (
-    <main className="reader-page">
+    <main className="reader-page reader-document">
       {me.data?.synthetic && <SyntheticBanner />}
-      <p className="reader-back">
-        <Link to="/app/reports">← 返回报告列表</Link>
-      </p>
+      <nav className="reader-back" aria-label="研报导航">
+        <Link to="/app" aria-label="Vera 工作台">
+          <VeraBrand size={30} />
+        </Link>
+        <div className="reader-tools">
+          <Link to="/app/reports" aria-label="返回报告列表">
+            <ArrowLeft size={16} aria-hidden="true" /> 报告列表
+          </Link>
+          {r.data && (
+            <a
+              className="reader-download"
+              href={`/api/v1/reports/${id}/versions/${r.data.version}/pdf`}
+              aria-label="下载 PDF"
+              title="下载 PDF"
+              download
+            >
+              <Download size={16} aria-hidden="true" />
+              <span>PDF</span>
+            </a>
+          )}
+        </div>
+      </nav>
       {r.isLoading && <Loading />}
       {r.error && <ErrorBox error={r.error} />}
       {r.data && (
         <ReportView
           report={r.data}
           loaders={loaders}
-          actions={
-            <a
-              className="btn-link"
-              href={`/api/v1/reports/${id}/versions/${r.data.version}/pdf`}
-              download
-            >
-              下载 PDF
-            </a>
-          }
           onFeedback={(ref) => {
             fb.reset();
             setFeedbackClaim(ref);

@@ -1,16 +1,16 @@
 /* The private research flow shares the desk's paper and ink palette. */
 .research-page {
-  --research-ink: #163831;
-  --research-muted: #53665f;
-  --research-accent: #175b51;
-  --research-line: #d5dfd8;
+  --research-ink: #1c252f;
+  --research-muted: #586474;
+  --research-accent: #145ec5;
+  --research-line: #dde2e8;
   width: min(100%, 850px);
   min-height: 100vh;
   padding: clamp(24px, 5vw, 64px) clamp(16px, 4vw, 36px);
   color: var(--research-ink);
 }
 body:has(.research-page) {
-  background: #f6f6f1;
+  background: #f5f6f8;
 }
 .research-page .research-back {
   display: inline-flex;
@@ -26,7 +26,8 @@ body:has(.research-page) {
 .research-intro h1 {
   margin: 0 0 8px;
   color: var(--research-ink);
-  font-size: clamp(28px, 4vw, 40px);
+  font-size: 32px;
+  letter-spacing: 0;
   line-height: 1.24;
   overflow-wrap: anywhere;
 }
@@ -45,13 +46,13 @@ body:has(.research-page) {
 .research-plan-summary,
 .research-alternative {
   border: 1px solid var(--research-line);
-  border-radius: 16px;
+  border-radius: 8px;
   padding: clamp(18px, 3.5vw, 32px);
   background: #fff;
 }
 .research-plan-summary,
 .research-alternative {
-  background: #edf2ec;
+  background: #f0f3f8;
 }
 .research-plan-summary {
   margin-bottom: 16px;
@@ -127,7 +128,7 @@ body:has(.research-page) {
   color: #fff;
 }
 .research-page .research-primary:hover:not(:disabled) {
-  background: #10463d;
+  background: #0e4da6;
 }
 .research-page .research-secondary,
 .research-wait button {
@@ -143,8 +144,8 @@ body:has(.research-page) {
   margin-top: 20px;
   padding: 16px;
   justify-content: space-between;
-  border-radius: 10px;
-  background: #edf3ef;
+  border-radius: 8px;
+  background: #eaf2fd;
 }
 .research-wait strong {
   font-size: 15px;
@@ -157,9 +158,15 @@ body:has(.research-page) {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 2px solid #b5cfc1;
+  border: 2px solid #bed4ef;
   border-top-color: var(--research-accent);
   animation: spin 1s linear infinite;
+}
+
+@media (max-width: 600px) {
+  .research-intro h1 {
+    font-size: 26px;
+  }
 }
 .research-page .coverage-summary {
   margin: 0 0 16px;
