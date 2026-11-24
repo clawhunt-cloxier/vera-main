@@ -125,6 +125,71 @@ func TestObservedSyncSerializesCollectionAndPublication(t *testing.T) {
 	}
 }
 
+func TestSecuritySnapshotSessionAndReplay(t *testing.T) {
+	ctx := t.Context()
+	api, worker, _ := requestedStores(t)
+	batch := syntheticRequestedBatch()
+	security := batch.records[0]
+	security.DatasetID, security.RecordKey = "ref.security", "mock-security"
+	security.Payload = map[string]any{"security_code": coldTarget, "short_name": "模拟", "exchange": "SH", "board": "main", "list_date": "2000-01-01",
+		"status": "listed", "is_financial": false, "margin_eligible": true, "total_shares": "1000", "float_shares": "900"}
+	day := func(v string) *time.Time {
+		d, err := time.Parse(time.DateOnly, v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &d
+	}
+	for _, tc := range []struct {
+		date           string
+		mapping, added int
+		current        bool
+	}{
+		{"2026-01-06", 1, 1, false},
+		{"2026-01-05", 2, 1, false},
+		{"2026-01-06", 2, 1, true},
+		{"2026-01-06", 2, 0, true},
+		{"2026-01-05", 2, 0, false},
+		{"2026-01-06", 1, 0, false},
+		{"", 0, 0, false},
+	} {
+		batch.records = nil
+		if tc.mapping > 0 {
+			security.MappingVersion, security.Period = tc.mapping, day(tc.date)
+			security.Payload["is_financial"] = tc.current
+			security.Payload["margin_eligible"] = tc.current
+			batch.records = []dataservice.Record{security}
+		}
+		entity := &batch.entities[0]
+		entity.Classification = "模拟旧行业"
+		entity.IsFinancial = tc.current
+		entity.Attrs["industry_code"] = "OLD.SI"
+		entity.Attrs["index_code"] = "OLD.SI"
+		entity.Attrs["margin_eligible"] = tc.current
+		if tc.current {
+			entity.Classification = "模拟当前行业"
+			entity.Attrs["industry_code"] = "NEW.SI"
+			entity.Attrs["index_code"] = "NEW.SI"
+		}
+		n, err := worker.SyncObserved(ctx, "tushare", func(context.Context) (dataservice.Provider, error) { return batch, nil })
+		if n != tc.added || err != nil {
+			t.Fatalf("sync %+v: %d, %v", tc, n, err)
+		}
+		if tc.current || tc.added == 0 {
+			got, err := api.EntityByCode(ctx, coldTarget)
+			if err != nil || got.Classification == nil || *got.Classification != "模拟当前行业" || !got.IsFinancial ||
+				got.Attrs["industry_code"] != "NEW.SI" || got.Attrs["index_code"] != "NEW.SI" ||
+				got.Attrs["margin_eligible"] != true || got.Attrs["tushare_research_subject"] != true {
+				t.Errorf("entity did not keep current session after %+v: %+v, %v", tc, got, err)
+			}
+		}
+	}
+	rows, err := api.Query(ctx, dataservice.Query{DatasetIDs: []string{"ref.security"}, AsOf: time.Now()})
+	if err != nil || len(rows) != 1 || rows[0].Period == nil || rows[0].Period.Format(time.DateOnly) != "2026-01-06" || rows[0].Version != 3 {
+		t.Fatalf("wrong session after replay: %+v, %v", rows, err)
+	}
+}
+
 func TestObservedSyncLostLockSessionCannotPublish(t *testing.T) {
 	store, pool := observedStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)

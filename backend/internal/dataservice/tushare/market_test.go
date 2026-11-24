@@ -195,6 +195,41 @@ func TestRequestedIdentityRejectsWrongCurrencyAndExchange(t *testing.T) {
 	}
 }
 
+func TestLaggingShareCapitalUsesMatchingRosterAndMembership(t *testing.T) {
+	const code = "600000.SH"
+	src := marketTestData()
+	for _, v := range src.data["daily_basic"] {
+		v["trade_date"] = "20261119"
+	}
+	// The subject joined a different industry and the margin roster on the 20th.
+	prev := src.data["index_member_all"][0]
+	next := maps.Clone(prev)
+	prev["is_new"], prev["out_date"] = "N", "20261120"
+	next["in_date"], next["l2_code"] = "20261120", "801012.SI"
+	src.data["index_member_all"] = append(src.data["index_member_all"], next)
+	src.data["margin_secs"] = append(src.data["margin_secs"], map[string]string{
+		"trade_date": "20261119", "ts_code": "600001.SH", "exchange": "SSE",
+	})
+	b, err := collectMarket(t.Context(), src, code, time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range b.Records {
+		if r.DatasetID != "ref.security" || r.EntityCode != code {
+			continue
+		}
+		if r.Period == nil || r.Period.Format(time.DateOnly) != "2026-11-19" || r.Payload["margin_eligible"] != false || r.MappingVersion != 2 {
+			t.Fatalf("mixed security snapshot: %+v", r)
+		}
+		entity := slices.IndexFunc(b.Entities, func(e dataservice.Entity) bool { return e.Code == code })
+		if entity < 0 || b.Entities[entity].Attrs["industry_code"] != prev["l2_code"] {
+			t.Fatal("industry from the wrong session")
+		}
+		return
+	}
+	t.Fatal("missing aligned security snapshot")
+}
+
 func TestMarketClosingResearch(t *testing.T) {
 	src := marketTestData()
 	const code = "600000.SH"

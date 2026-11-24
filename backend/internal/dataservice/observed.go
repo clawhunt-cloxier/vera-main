@@ -96,7 +96,7 @@ type observedIdentity struct{ dataset, logical string }
 type observedVersion struct {
 	key, hash, basis, origin, tier, quality string
 	mapping, version                        int
-	published                               *time.Time
+	published, period                       *time.Time
 }
 
 func sameInstant(a, b *time.Time) bool {
@@ -105,7 +105,7 @@ func sameInstant(a, b *time.Time) bool {
 
 // The caller owns the provider's publication lock. Source-defined financial
 // versions are ordered by disclosure, independently of the order of fetching.
-func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Record) ([]Record, error) {
+func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Record) ([]Record, map[string]bool, error) {
 	ordered := slices.Clone(input)
 	var keys []string
 	for i := range ordered {
@@ -113,39 +113,44 @@ func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Re
 		if r.LogicalKey == "" {
 			r.LogicalKey = r.RecordKey
 		}
+		if r.Period != nil {
+			year, month, day := r.Period.Date()
+			date := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+			r.Period = &date
+		}
 		if r.PublishedAt != nil {
 			// Conservative rounding to the next representable database instant.
 			at := r.PublishedAt.UTC().Add(time.Microsecond - time.Nanosecond).Truncate(time.Microsecond)
 			r.PublishedAt = &at
 		}
 		if r.RecordKey == "" || r.RawRef == "" || len(r.RawSHA256) != 64 || r.RawLocator == "" || r.MappingVersion < 1 {
-			return nil, fmt.Errorf("%s/%s: incomplete observed lineage", r.DatasetID, r.RecordKey)
+			return nil, nil, fmt.Errorf("%s/%s: incomplete observed lineage", r.DatasetID, r.RecordKey)
 		}
 		if _, err := hex.DecodeString(r.RawSHA256); err != nil {
-			return nil, errors.New("invalid observation hash")
+			return nil, nil, errors.New("invalid observation hash")
 		}
 		keys = append(keys, r.LogicalKey)
 	}
-	rows, err := tx.Query(ctx, `SELECT dataset_id,logical_key,record_key,content_hash,coalesce(basis,''),origin,source_tier,quality_state,coalesce(mapping_version,0),record_version,published_at FROM records WHERE provider_id=$1 AND logical_key=ANY($2) ORDER BY record_version`, provider, keys)
+	rows, err := tx.Query(ctx, `SELECT dataset_id,logical_key,record_key,content_hash,coalesce(basis,''),origin,source_tier,quality_state,coalesce(mapping_version,0),record_version,published_at,period FROM records WHERE provider_id=$1 AND logical_key=ANY($2) ORDER BY record_version`, provider, keys)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	history := map[observedIdentity][]observedVersion{}
 	for rows.Next() {
 		var k observedIdentity
 		var v observedVersion
-		if err := rows.Scan(&k.dataset, &k.logical, &v.key, &v.hash, &v.basis, &v.origin, &v.tier, &v.quality, &v.mapping, &v.version, &v.published); err != nil {
-			return nil, err
+		if err := rows.Scan(&k.dataset, &k.logical, &v.key, &v.hash, &v.basis, &v.origin, &v.tier, &v.quality, &v.mapping, &v.version, &v.published, &v.period); err != nil {
+			return nil, nil, err
 		}
 		history[k] = append(history[k], v)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var at time.Time
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	slices.SortStableFunc(ordered, func(a, b Record) int {
 		if n := strings.Compare(a.DatasetID, b.DatasetID); n != 0 {
@@ -168,35 +173,46 @@ func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Re
 		return strings.Compare(a.RecordKey, b.RecordKey)
 	})
 	result := make([]Record, 0, len(ordered))
+	directoryUpdates := map[string]bool{}
 	seen := map[observedIdentity]string{}
 	for _, r := range ordered {
 		k := observedIdentity{r.DatasetID, r.LogicalKey}
 		if r.QualityState == "" {
 			r.QualityState = "PASS"
 		}
-		v := observedVersion{key: r.RecordKey, hash: r.Hash(), basis: r.Basis, origin: r.Origin, tier: r.SourceTier, quality: r.QualityState, mapping: r.MappingVersion, published: r.PublishedAt}
+		v := observedVersion{key: r.RecordKey, hash: r.Hash(), basis: r.Basis, origin: r.Origin, tier: r.SourceTier, quality: r.QualityState, mapping: r.MappingVersion, published: r.PublishedAt, period: r.Period}
 		unique := observedIdentity{r.DatasetID, r.RecordKey}
 		if previous, exists := seen[unique]; exists && previous != v.hash {
-			return nil, fmt.Errorf("%s/%s: conflicting vendor rows in one observation", r.DatasetID, r.RecordKey)
+			return nil, nil, fmt.Errorf("%s/%s: conflicting vendor rows in one observation", r.DatasetID, r.RecordKey)
 		}
 		seen[unique] = v.hash
+		security := provider == "tushare" && r.DatasetID == "ref.security"
 		prior := history[k]
+		var latest observedVersion
 		if len(prior) > 0 {
-			latest := prior[len(prior)-1]
-			if r.PublishedAt != nil && latest.published != nil && r.PublishedAt.Before(*latest.published) {
-				// Do not let an earlier re-fetched filing replace a known later revision.
-				continue
-			}
-			if v.key == latest.key && v.hash == latest.hash && v.mapping == latest.mapping && v.quality == latest.quality && v.origin == latest.origin && v.tier == latest.tier && v.basis == latest.basis && sameInstant(v.published, latest.published) {
-				continue
-			}
-			if r.DatasetID == "fin.statement" && v.key == latest.key && v.mapping == latest.mapping {
-				return nil, fmt.Errorf("%s/%s: changed financial value without a distinct filing", r.DatasetID, r.RecordKey)
-			}
-			v.version = latest.version + 1
-		} else {
-			v.version = 1
+			latest = prior[len(prior)-1]
 		}
+		// A peer collection may have an older stock-capital session than the
+		// subject's own batch. The v2 join first corrects any v1 period.
+		if security && latest.mapping >= 2 &&
+			(v.mapping < latest.mapping || v.period == nil || (latest.period != nil && v.period.Before(*latest.period))) {
+			continue
+		}
+		if r.PublishedAt != nil && latest.published != nil && r.PublishedAt.Before(*latest.published) {
+			// Do not let an earlier re-fetched filing replace a known later revision.
+			continue
+		}
+		// An unchanged snapshot can still accompany a same-session directory update.
+		if security && v.mapping >= 2 && v.period != nil && (v.quality == "PASS" || v.quality == "WARN") {
+			directoryUpdates[r.EntityCode] = true
+		}
+		if v.key == latest.key && v.hash == latest.hash && v.mapping == latest.mapping && v.quality == latest.quality && v.origin == latest.origin && v.tier == latest.tier && v.basis == latest.basis && sameInstant(v.published, latest.published) && sameInstant(v.period, latest.period) {
+			continue
+		}
+		if r.DatasetID == "fin.statement" && v.key == latest.key && v.mapping == latest.mapping {
+			return nil, nil, fmt.Errorf("%s/%s: changed financial value without a distinct filing", r.DatasetID, r.RecordKey)
+		}
+		v.version = latest.version + 1
 		r.Version = v.version
 		if at.After(r.AvailableAt) {
 			r.AvailableAt = at
@@ -204,5 +220,5 @@ func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Re
 		history[k] = append(prior, v)
 		result = append(result, r)
 	}
-	return result, nil
+	return result, directoryUpdates, nil
 }

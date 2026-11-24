@@ -1022,8 +1022,13 @@ func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidenc
 		if str("item_code") == "IS.basic_eps" || str("item_code") == "IS.diluted_eps" {
 			u = "元/股"
 		}
-		ev.Value, ev.Unit = &v, &u
-		loc := "公告 " + str("filing_id") + fmt.Sprintf("，修订版本 %d", rec.Version)
+		if v != "" {
+			ev.Value, ev.Unit = &v, &u
+		}
+		loc := "公告 " + str("filing_id")
+		if revision := rec.Payload["revision"]; revision != nil {
+			loc += fmt.Sprintf("，公告更正序号 %v", revision)
+		}
 		ev.Locator = &loc
 	case "doc.periodic_text":
 		ev.Label = str("heading_path")
@@ -1046,7 +1051,7 @@ func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidenc
 		if ds != nil {
 			for _, f := range ds.Fields {
 				if v, ok := rec.Payload[f.Name]; ok && v != nil {
-					parts = append(parts, fmt.Sprintf("%s：%v", f.Description, v))
+					parts = append(parts, evidenceField(rec.DatasetID, f, v))
 				}
 			}
 		}

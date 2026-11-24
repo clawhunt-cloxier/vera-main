@@ -126,6 +126,16 @@ func TestApplyMappingFatalTransform(t *testing.T) {
 	}
 }
 
+func TestDecimalMappingRejectsNonDecimalLiterals(t *testing.T) {
+	for _, value := range []string{"NaN", "+Inf", "-Infinity", "0x1p2"} {
+		spec := &MappingSpec{Fields: []FieldMap{{Target: "amount", Source: "$.amount", Transform: "decimal"}}}
+		payload, issues, err := ApplyMapping(spec, map[string]any{"amount": value})
+		if err != nil || len(payload) != 0 || qualityStateFromIssues(issues) != "QUARANTINED" {
+			t.Errorf("%s: payload=%v, issues=%v, err=%v", value, payload, issues, err)
+		}
+	}
+}
+
 func TestApplyMappingIntegerRejectsNonInteger(t *testing.T) {
 	spec := &MappingSpec{
 		Fields: []FieldMap{

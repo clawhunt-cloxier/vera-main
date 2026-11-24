@@ -36,10 +36,10 @@ func TestFormulas(t *testing.T) {
 	if c := ROE(n("10"), n("-50"), n("-30")); c.OK() {
 		t.Fatal("negative equity ROE must be NOT_APPLICABLE")
 	}
-	if c := PeriodReturn(pts("10", "", "", "11"), 4); c.OK() {
+	if c := PeriodReturn(pts("10", "", "", "11"), 4, "CNY/share"); c.OK() {
 		t.Fatal("50% coverage must be NOT_APPLICABLE")
 	}
-	if c := PeriodReturn(pts("10", "10.5", "", "11", "12"), 5); !c.OK() || c.Result.String() != "0.2" {
+	if c := PeriodReturn(pts("10", "10.5", "", "11", "12"), 5, "CNY/share"); !c.OK() || c.Result.String() != "0.2" {
 		t.Fatalf("return %+v", c)
 	}
 	c, peak, trough := MaxDrawdown(pts("10", "12", "9", "11"), 4)

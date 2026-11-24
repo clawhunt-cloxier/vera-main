@@ -60,6 +60,74 @@ func TestVendorStoreWithholdsIntradayFromLegacyPath(t *testing.T) {
 	}
 }
 
+func TestQuarantinedRevisionDoesNotRestoreSupersededValues(t *testing.T) {
+	ctx := t.Context()
+	api, worker, pool := requestedStores(t)
+	batch := syntheticRequestedBatch()
+	collect := func(context.Context) (dataservice.Provider, error) { return batch, nil }
+	if _, err := worker.PrepareRequestedSubject(ctx, coldTarget, collect); err != nil {
+		t.Fatal(err)
+	}
+	entity, err := api.EntityByCode(ctx, coldTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := api.PublicationCutoff(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := dataservice.Query{DatasetIDs: []string{"mkt.daily_bar"}, EntityIDs: []uuid.UUID{entity.ID}, AsOf: before, ModelUse: true}
+	initial, err := api.Query(ctx, query)
+	if err != nil || len(initial) != 1 {
+		t.Fatalf("initial row: %v %v", initial, err)
+	}
+	ids := []uuid.UUID{initial[0].ID}
+	hash, err := api.Freeze(ctx, before, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch.records[0].QualityState = "QUARANTINED"
+	if _, err := worker.SyncObserved(ctx, "tushare", collect); err != nil {
+		t.Fatal(err)
+	}
+	now, err := api.PublicationCutoff(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query.AsOf = now
+	if rows, err := api.Query(ctx, query); err != nil || len(rows) != 0 {
+		t.Errorf("current research returned %d rows: %v", len(rows), err)
+	}
+	if coverage, err := api.Coverage(ctx, query.EntityIDs, now); err != nil || coverage[entity.ID]["mkt.daily_bar"] {
+		t.Errorf("superseded version counted for coverage: %v %v", coverage, err)
+	}
+	if _, err := api.Freeze(ctx, now, ids); err == nil {
+		t.Error("new snapshot accepted a superseded row")
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := api.ObservationBar(ctx, tx, entity.ID, coldTarget, now, nil); err == nil {
+		t.Error("mixed observation selected the superseded close")
+	}
+	if ok, err := api.ResearchSubjectPrepared(ctx, coldTarget); err != nil || ok {
+		t.Errorf("quarantined cold batch reported ready: %v %v", ok, err)
+	}
+	ref := &dataservice.ObservationRef{ID: ids[0], DatasetID: initial[0].DatasetID, ContentHash: initial[0].ContentHash}
+	if _, err := api.ObservationBar(ctx, tx, entity.ID, coldTarget, before, ref); err != nil {
+		t.Fatalf("could not replay original observation: %v", err)
+	}
+	if _, rows, err := api.Snapshot(ctx, hash); err != nil || len(rows) != 1 || rows[0].ID != ids[0] {
+		t.Fatalf("frozen snapshot changed: %v %v", rows, err)
+	}
+	query.AsOf = before
+	if rows, err := api.Query(ctx, query); err != nil || len(rows) != 1 || rows[0].ID != ids[0] {
+		t.Fatalf("later quarantine hid historical value: %v %v", rows, err)
+	}
+}
+
 func TestQueryRespectsDisclosureTimeBeforeSelectingRevision(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.New(t)

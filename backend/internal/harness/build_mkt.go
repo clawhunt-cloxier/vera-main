@@ -81,14 +81,14 @@ func (b *builder) indexPoints(code string, days []string) []facts.Point {
 
 // Both legs must cover the same dates. Missing observations in either series
 // exclude that session from both returns and from their joint coverage.
-func matchedExcess(a, b []facts.Point) facts.Calc {
+func matchedExcess(a, b []facts.Point, subjectUnit string) facts.Calc {
 	left, right := slices.Clone(a), slices.Clone(b)
 	for i := range left {
 		if left[i].Missing || right[i].Missing {
 			left[i].Missing, right[i].Missing = true, true
 		}
 	}
-	return facts.Excess(facts.PeriodReturn(left, len(left)), facts.PeriodReturn(right, len(right)))
+	return facts.Excess(facts.PeriodReturn(left, len(left), subjectUnit), facts.PeriodReturn(right, len(right), "index_point"))
 }
 
 func windowLabel(n int, days []string) string {
@@ -118,16 +118,16 @@ func (b *builder) market(e uuid.UUID, n int, group, section string) {
 	wl := windowLabel(n, days)
 	k := func(s string) string { return b.B.Entities[e].Code + "|mkt|" + s }
 	pts, by := b.closes(e, days)
-	stockRet := facts.PeriodReturn(pts, len(days))
+	stockRet := facts.PeriodReturn(pts, len(days), "CNY/share")
 	b.S.Computed(group, subj, "区间涨跌幅（复权）", wl, stockRet, k("ret"))
 	if idx := industryIndex(b.B.Entities[e]); idx != "" {
-		b.S.Computed(group, subj, "相对行业指数超额收益", wl, matchedExcess(pts, b.indexPoints(idx, days)), k("ex_ind"))
+		b.S.Computed(group, subj, "相对行业指数超额收益", wl, matchedExcess(pts, b.indexPoints(idx, days), "CNY/share"), k("ex_ind"))
 	}
 	benchmark, name := b.benchmark()
 	benchmarkPoints := b.indexPoints(benchmark, days)
-	br := facts.PeriodReturn(benchmarkPoints, len(days))
+	br := facts.PeriodReturn(benchmarkPoints, len(days), "index_point")
 	b.S.Computed(group, name, "基准指数区间涨跌幅", wl, br, k("bench"))
-	b.S.Computed(group, subj, "相对"+name+"超额收益", wl, matchedExcess(pts, benchmarkPoints), k("ex_bench"))
+	b.S.Computed(group, subj, "相对"+name+"超额收益", wl, matchedExcess(pts, benchmarkPoints, "CNY/share"), k("ex_bench"))
 	dd, peak, trough := facts.MaxDrawdown(pts, len(days))
 	period := wl
 	if peak != "" {
@@ -179,7 +179,7 @@ func (b *builder) market(e uuid.UUID, n int, group, section string) {
 }
 
 func (b *builder) priceCharts(e uuid.UUID, days []string, pts []facts.Point, section string) {
-	price := facts.Series{ID: "price_adj", Title: "复权收盘价", Kind: "line", X: "trade_date", Unit: "元", Section: section}
+	price := facts.Series{ID: "price_adj", Title: "复权收盘价", Kind: "line", X: "trade_date", Unit: "元/股", Section: section}
 	line := facts.SeriesLine{Name: b.B.Entities[e].Name}
 	for _, p := range pts {
 		x := p.Date

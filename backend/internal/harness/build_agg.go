@@ -278,12 +278,12 @@ func (b *builder) industryValuation(ind dataservice.EntityRow, members []uuid.UU
 		days := b.B.Window(n)
 		wl := windowLabel(n, days)
 		ip := b.indexPoints(idx, days)
-		ir := facts.PeriodReturn(ip, len(days))
+		ir := facts.PeriodReturn(ip, len(days), "index_point")
 		benchmark, benchName := b.benchmark()
-		br := facts.PeriodReturn(b.indexPoints(benchmark, days), len(days))
+		br := facts.PeriodReturn(b.indexPoints(benchmark, days), len(days), "index_point")
 		b.S.Computed(group, subj, "行业指数区间涨跌幅", wl, ir, ind.Code+"|idxret")
 		b.S.Computed(group, benchName, "基准指数区间涨跌幅", wl, br, ind.Code+"|bench")
-		b.S.Computed(group, subj, "行业指数相对"+benchName+"超额收益", wl, matchedExcess(ip, b.indexPoints(benchmark, days)), ind.Code+"|idxex")
+		b.S.Computed(group, subj, "行业指数相对"+benchName+"超额收益", wl, matchedExcess(ip, b.indexPoints(benchmark, days), "index_point"), ind.Code+"|idxex")
 		found = true
 		s := facts.Series{ID: "industry_index", Title: "行业指数与基准", Kind: "line", X: "trade_date", Unit: "点", Section: section}
 		for _, l := range []struct {
@@ -526,7 +526,7 @@ func (b *builder) marketOverview(n int, group, section string) bool {
 	wl := windowLabel(n, days)
 	benchmark, benchName := b.benchmark()
 	ip := b.indexPoints(benchmark, days)
-	b.S.Computed(group, benchName, "区间涨跌幅", wl, facts.PeriodReturn(ip, len(days)), "mkt|ret")
+	b.S.Computed(group, benchName, "区间涨跌幅", wl, facts.PeriodReturn(ip, len(days), "index_point"), "mkt|ret")
 	amt := func(ds []string) []facts.Point {
 		by := map[string]dataservice.StoredRecord{}
 		for _, r := range b.B.Index(benchmark) {
