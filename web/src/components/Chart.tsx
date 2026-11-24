@@ -1,4 +1,4 @@
-import type { ECharts, SeriesOption } from 'echarts';
+import type { ECharts, EChartsOption, SeriesOption } from 'echarts';
 import { useEffect, useRef, useState } from 'react';
 import type { ChartSeries } from '../api/client';
 
@@ -19,13 +19,14 @@ export function Chart({
   const [result, setResult] = useState<{
     seriesId: string;
     load: typeof load;
-    data: { series: ChartSeries; chart: ECharts | null } | null;
+    data: { series: ChartSeries; draw: (() => ECharts | undefined) | null } | null;
     selected?: Record<string, boolean>;
   } | null>(null);
   const current = result?.seriesId === seriesId && result.load === load ? result : null;
   const data = current?.data?.series;
-  const plot = current?.data?.chart;
+  const draw = current?.data?.draw;
   function toggleSeries(name: string) {
+    const plot = draw?.();
     if (!plot || !current) return;
     const selected = { ...current.selected, [name]: current.selected?.[name] === false };
     plot.setOption({ legend: { selected } });
@@ -34,11 +35,12 @@ export function Chart({
   useEffect(() => {
     let disposed = false;
     let chart: ECharts | undefined;
-    let observer: ResizeObserver | undefined;
+    let stopObserving: (() => void) | undefined;
     (async () => {
       try {
         const [s, echarts] = await Promise.all([load(seriesId), import('echarts')]);
         if (disposed || !ref.current) return;
+        const box = ref.current;
         const dates = [...new Set(s.series.flatMap((line) => line.points.map(([date]) => date)))]
           .filter(Boolean)
           .sort();
@@ -51,11 +53,9 @@ export function Chart({
           });
         });
         if (!values.some((line) => line.some((value) => value !== null))) {
-          setResult({ seriesId, load, data: { series: s, chart: null } });
+          setResult({ seriesId, load, data: { series: s, draw: null } });
           return;
         }
-        const c = echarts.init(ref.current, undefined, { renderer: 'svg' });
-        chart = c;
         const series = s.series.map((line, index): SeriesOption => {
           const points = values[index];
           const common = {
@@ -79,10 +79,10 @@ export function Chart({
             connectNulls: false,
           };
         });
-        c.setOption({
+        const options = {
           animation: false,
           color: colors,
-          textStyle: { fontFamily: getComputedStyle(ref.current).fontFamily },
+          textStyle: { fontFamily: getComputedStyle(box).fontFamily },
           tooltip: { trigger: 'axis', renderMode: 'richText', confine: true },
           legend: { show: false },
           grid: {
@@ -122,10 +122,57 @@ export function Chart({
             splitLine: { lineStyle: { color: '#dfe4eb' } },
           },
           series,
+        } satisfies EChartsOption;
+        function draw() {
+          if (disposed || chart) return chart;
+          try {
+            chart = echarts.init(box, undefined, { renderer: 'svg' });
+            chart.setOption(options);
+            return chart;
+          } catch {
+            chart?.dispose();
+            chart = undefined;
+            stopObserving?.();
+            setResult({ seriesId, load, data: null });
+          }
+        }
+        const fit = (width: number, height: number) => {
+          const plot = draw();
+          if (
+            plot &&
+            width > 0 &&
+            height > 0 &&
+            (width !== plot.getWidth() || height !== plot.getHeight())
+          ) {
+            plot.resize({ width, height });
+          }
+        };
+        const size = new ResizeObserver(([entry]) => {
+          fit(Math.round(entry.contentRect.width), Math.round(entry.contentRect.height));
         });
-        observer = new ResizeObserver(() => c.resize());
-        observer.observe(ref.current);
-        setResult({ seriesId, load, data: { series: s, chart: c } });
+        const view = new IntersectionObserver(
+          ([entry]) => {
+            if (entry.isIntersecting) size.observe(box);
+            else size.unobserve(box);
+          },
+          { rootMargin: '160px 0px' }
+        );
+        const print = () => fit(box.clientWidth, box.clientHeight);
+        const media = matchMedia('print');
+        const syncPrint = () => {
+          if (media.matches) print();
+        };
+        view.observe(box);
+        window.addEventListener('beforeprint', print);
+        media.addEventListener('change', syncPrint);
+        stopObserving = () => {
+          view.disconnect();
+          size.disconnect();
+          window.removeEventListener('beforeprint', print);
+          media.removeEventListener('change', syncPrint);
+        };
+        setResult({ seriesId, load, data: { series: s, draw } });
+        syncPrint();
       } catch {
         if (disposed) return;
         chart?.dispose();
@@ -135,7 +182,7 @@ export function Chart({
     })();
     return () => {
       disposed = true;
-      observer?.disconnect();
+      stopObserving?.();
       chart?.dispose();
     };
   }, [load, seriesId]);
@@ -145,7 +192,7 @@ export function Chart({
         <span>{title}</span>
         {data?.unit && <small>单位 {data.unit}</small>}
       </figcaption>
-      {plot && data && (
+      {draw && data && (
         <ul className="chart-legend" aria-label="图例" data-kind={data.kind}>
           {data.series.map((line, index) => (
             <li key={index}>
@@ -166,8 +213,8 @@ export function Chart({
         </ul>
       )}
       <div className="chart-plot">
-        <div ref={ref} className="chart-box" role="img" aria-label={title} aria-hidden={!plot} />
-        {!plot && (
+        <div ref={ref} className="chart-box" role="img" aria-label={title} aria-hidden={!draw} />
+        {!draw && (
           <p className="muted" role="status">
             {!current ? '正在读取图表…' : data ? '暂无可绘制的数据' : '图表加载失败'}
           </p>
