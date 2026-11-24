@@ -1,22 +1,44 @@
 .report dialog.evidence {
   --evidence-inset: 16px;
-  --evidence-top: 16px;
-  position: sticky;
-  inset: var(--evidence-top) auto auto;
+  --evidence-top: calc(var(--reader-sticky-top) + 16px);
+  --evidence-offset: translateX(16px);
+  position: relative;
   align-self: start;
-  margin: 0;
+  margin: 0 0 0 var(--reader-gap);
   padding: 0 var(--evidence-inset) var(--evidence-inset);
-  width: 100%;
+  width: var(--evidence-width);
   max-width: none;
   max-height: calc(100dvh - var(--evidence-top) - 16px);
   overflow: auto;
   overscroll-behavior: contain;
   overflow-wrap: anywhere;
   color: inherit;
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px #1c252f12;
+  opacity: 0;
+  transform: var(--evidence-offset);
+  transition:
+    transform var(--motion-panel-out) var(--motion-ease-out),
+    opacity var(--motion-menu-out) var(--motion-ease-in),
+    display var(--motion-panel-out) allow-discrete,
+    overlay var(--motion-panel-out) allow-discrete;
 }
 
-.site-header ~ .content .report dialog.evidence {
-  --evidence-top: 64px;
+.report dialog.evidence[open] {
+  opacity: 1;
+  transform: none;
+  transition-duration:
+    var(--motion-panel-in), var(--motion-menu-in), var(--motion-panel-in), var(--motion-panel-in);
+  transition-timing-function: var(--motion-ease-out);
+}
+
+@starting-style {
+  .report dialog.evidence[open] {
+    opacity: 0;
+    transform: var(--evidence-offset);
+  }
 }
 
 .report .evidence .dialog-head {
@@ -31,11 +53,30 @@
 }
 
 .report .evidence .dialog-head button {
+  display: grid;
+  place-items: center;
   flex: 0 0 auto;
   min-width: 40px;
   min-height: 40px;
   padding: 0;
-  font-size: 20px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+}
+
+.report .evidence .dialog-head h2 {
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
+.report .evidence .claim-text {
+  padding: 10px 12px;
+  margin: 12px 0;
+  border-left: 2px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  font-family: var(--reader-serif);
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 @media screen and (max-width: 1099px) {
@@ -44,17 +85,34 @@
   }
 
   .report dialog.evidence {
+    --evidence-offset: translateY(44px);
     position: fixed;
     inset: auto 0 0;
     width: min(100%, 44rem);
-    margin-inline: auto;
+    margin: 0 auto;
     max-height: 86dvh;
     padding-bottom: max(16px, env(safe-area-inset-bottom));
-    border-radius: var(--radius) var(--radius) 0 0;
+    border-radius: 8px 8px 0 0;
   }
 
   .report dialog.evidence::backdrop {
-    background: rgba(0, 0, 0, 0.5);
+    background: #17253866;
+    opacity: 0;
+    transition:
+      opacity var(--motion-panel-out) var(--motion-ease-out),
+      display var(--motion-panel-out) allow-discrete,
+      overlay var(--motion-panel-out) allow-discrete;
+  }
+
+  .report dialog.evidence[open]::backdrop {
+    opacity: 1;
+    transition-duration: var(--motion-panel-in);
+  }
+
+  @starting-style {
+    .report dialog.evidence[open]::backdrop {
+      opacity: 0;
+    }
   }
 }
 

@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown, List, MessageSquare, X } from 'lucide-react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   fmtDataTime,
   fmtTime,
@@ -50,50 +51,86 @@ const publishedSources = new Set([
 ]);
 
 const evidencePageSize = 12;
+const numericCell = /^[+\-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[%％]?$/;
+const dateCell = /^\d{4}-\d{2}-\d{2}$/;
+const compactContents = '(max-width: 759px)';
 
 function ReportContents({ sections }: { sections: Report['sections'] }) {
   const [expanded, setExpanded] = useState(false);
+  const [compact, setCompact] = useState(() => window.matchMedia(compactContents).matches);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const chapters = useId();
+  useEffect(() => {
+    const media = window.matchMedia(compactContents);
+    const update = () => setCompact(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
   return (
-    <nav className="toc" aria-label="章节目录">
+    <nav
+      className="toc"
+      aria-label="章节目录"
+      onBlur={(event) => {
+        if (compact && !event.currentTarget.contains(event.relatedTarget)) setExpanded(false);
+      }}
+      onKeyDown={(event) => {
+        if (compact && expanded && event.key === 'Escape') {
+          setExpanded(false);
+          toggle.current?.focus();
+        }
+      }}
+    >
       <strong className="toc-heading">章节目录</strong>
       <button
         className="toc-toggle"
+        ref={toggle}
         type="button"
         aria-expanded={expanded}
-        aria-controls="reader-chapters"
-        onClick={() => setExpanded(!expanded)}
+        aria-controls={chapters}
+        onClick={() => setExpanded((open) => !open)}
       >
-        章节目录 <span aria-hidden="true">{expanded ? '▴' : '▾'}</span>
+        <List size={16} aria-hidden="true" /> 章节目录 <ChevronDown size={16} aria-hidden="true" />
       </button>
-      <div id="reader-chapters" className="toc-links">
-        {sections.map((s) => (
-          <a
-            key={s.id}
-            href={'#' + s.id}
-            className={s.status !== 'ok' ? 'muted' : undefined}
-            onClick={() => setExpanded(false)}
-          >
-            <span className="section-id">{s.id}</span> <span>{s.title}</span>
+      <div id={chapters} className="toc-fold" inert={compact && !expanded}>
+        <div className="toc-links">
+          {sections.map((s) => (
+            <a
+              key={s.id}
+              href={'#' + s.id}
+              className={s.status !== 'ok' ? 'muted' : undefined}
+              onClick={() => setExpanded(false)}
+            >
+              <span className="section-id">{s.id}</span> <span>{s.title}</span>
+            </a>
+          ))}
+          <a className="toc-limits" href="#limits" onClick={() => setExpanded(false)}>
+            数据与限制
           </a>
-        ))}
-        <a className="toc-limits" href="#limits" onClick={() => setExpanded(false)}>
-          数据与限制
-        </a>
+        </div>
       </div>
     </nav>
   );
 }
 
 function EvidencePanel({
+  id,
   claim,
+  number,
+  visible,
   showClaimText,
   loaders,
   onClose,
+  onDismissed,
 }: {
+  id: string;
   claim: Claim;
+  number: number;
+  visible: boolean;
   showClaimText: boolean;
   loaders: Loaders;
   onClose: () => void;
+  onDismissed: (ref: string) => void;
 }) {
   const [ev, setEv] = useState<Record<string, Evidence | 'err'>>({});
   const [calc, setCalc] = useState<Record<string, Calculation | 'err'>>({});
@@ -102,19 +139,29 @@ function EvidencePanel({
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+    if (!visible) {
+      dialog.close();
+      let current = true;
+      void Promise.allSettled(dialog.getAnimations().map((animation) => animation.finished)).then(
+        () => {
+          if (current) onDismissed(claim.ref);
+        }
+      );
+      return () => {
+        current = false;
+      };
+    }
     const drawer = window.matchMedia('(max-width: 1099px)');
     const show = () => {
+      if (dialog.open && dialog.matches(':modal') === drawer.matches) return;
       if (dialog.open) dialog.close();
       if (drawer.matches) dialog.showModal();
       else dialog.show();
     };
     show();
     drawer.addEventListener('change', show);
-    return () => {
-      drawer.removeEventListener('change', show);
-      dialog.close();
-    };
-  }, []);
+    return () => drawer.removeEventListener('change', show);
+  }, [claim.ref, onDismissed, visible]);
   const pageRefs = useMemo(
     () => claim.evidence_refs.slice(page * evidencePageSize, (page + 1) * evidencePageSize),
     [claim.evidence_refs, page]
@@ -141,8 +188,10 @@ function EvidencePanel({
   }, [claim.calculation_refs, loaders.calculation]);
   return (
     <dialog
+      id={id}
       ref={dialogRef}
       className="evidence"
+      inert={!visible}
       aria-label="证据"
       data-testid="evidence-panel"
       onCancel={(event) => {
@@ -152,11 +201,24 @@ function EvidencePanel({
       onKeyDown={(event) => {
         if (event.key === 'Escape' && !event.currentTarget.matches(':modal')) onClose();
       }}
+      onClick={(event) => {
+        const dialog = event.currentTarget;
+        if (event.target !== dialog || !dialog.matches(':modal')) return;
+        const { left, right, top, bottom } = dialog.getBoundingClientRect();
+        const { clientX: x, clientY: y } = event;
+        if (x < left || x > right || y < top || y > bottom) onClose();
+      }}
     >
       <div className="dialog-head">
-        <h2>证据 {claim.ref}</h2>
-        <button className="ghost" onClick={onClose} aria-label="关闭证据">
-          ×
+        <h2>证据 {number}</h2>
+        <button
+          type="button"
+          className="ghost"
+          onClick={onClose}
+          aria-label="关闭证据"
+          title="关闭证据"
+        >
+          <X size={18} aria-hidden="true" />
         </button>
       </div>
       {showClaimText && <p className="claim-text">{claim.text}</p>}
@@ -296,15 +358,17 @@ function EvidencePanel({
 export function ReportView({
   report,
   loaders,
-  actions,
   onFeedback,
 }: {
   report: Report;
   loaders: Loaders;
-  actions?: ReactNode;
   onFeedback?: (claimRef: string) => void;
 }) {
-  const [open, setOpen] = useState<Claim | null>(null);
+  const [evidence, setEvidence] = useState<{ claim: Claim; visible: boolean } | null>(null);
+  const evidenceId = useId();
+  const dismissEvidence = useCallback((ref: string) => {
+    setEvidence((current) => (current?.claim.ref === ref && !current.visible ? null : current));
+  }, []);
   const claims = useMemo(() => Object.fromEntries(report.claims.map((c) => [c.ref, c])), [report]);
   const num = useMemo(
     () => Object.fromEntries(report.claims.map((c, i) => [c.ref, i + 1])),
@@ -317,14 +381,11 @@ export function ReportView({
       )
   );
   return (
-    <div className={'report' + (open ? ' with-panel' : '')}>
+    <div className={'report' + (evidence?.visible ? ' with-panel' : '')}>
       <ReportContents sections={report.sections} />
       <article className="report-body">
         <header className="report-head">
-          <div className="reader-title">
-            <h1>{report.title}</h1>
-            {actions && <div className="actions">{actions}</div>}
-          </div>
+          <h1>{report.title}</h1>
           <div className="meta">
             <Tag>{skillTitle[report.skill_id]}</Tag>
             <Tag tone={report.result_kind === 'full' ? 'ok' : 'warn'}>
@@ -333,12 +394,16 @@ export function ReportView({
             <Tag tone="info">AI 生成</Tag>
             {report.synthetic && <Tag tone="bad">模拟数据</Tag>}
           </div>
-          <p className="reader-dateline muted">
-            {report.snapshot_mode === 'collect_latest'
-              ? `快照截止 ${sourceTime(report.snapshot_as_of)}（北京时间）`
-              : `数据截止 ${report.data_as_of}`}{' '}
-            · 版本 {report.version} · 交付 {fmtTime(report.delivered_at)}
-          </p>
+          <ul className="reader-dateline">
+            {report.subject.symbol && <li>{report.subject.symbol}</li>}
+            <li>
+              {report.snapshot_mode === 'collect_latest'
+                ? `快照截止 ${sourceTime(report.snapshot_as_of)}（北京时间）`
+                : `数据截止 ${report.data_as_of}`}
+            </li>
+            <li>交付 {fmtTime(report.delivered_at)}</li>
+            <li>版本 {report.version}</li>
+          </ul>
           {report.snapshot_mode === 'collect_latest' && (
             <p className="muted">
               快照截止是本次研究冻结数据的时间；各来源的实际事件与披露时间见“数据与限制”。
@@ -367,24 +432,34 @@ export function ReportView({
                 <>
                   <Tag tone={c.kind === 'inference' || c.kind === 'scenario' ? 'info' : undefined}>
                     {kindLabel[c.kind]}
-                  </Tag>{' '}
-                  <span>
+                  </Tag>
+                  <span className="claim-copy">
                     {c.text}{' '}
                     <span className="claim-tools">
                       <button
+                        type="button"
                         className="cite"
-                        onClick={() => setOpen(c)}
+                        onClick={() =>
+                          setEvidence((current) => ({
+                            claim: c,
+                            visible: current?.claim.ref !== r || !current.visible,
+                          }))
+                        }
                         aria-label={'查看证据 ' + num[r]}
+                        aria-expanded={evidence?.visible === true && evidence.claim.ref === r}
+                        aria-controls={evidence ? evidenceId : undefined}
                       >
                         [{num[r]}]
                       </button>
                       {onFeedback && (
                         <button
+                          type="button"
                           className="ghost small"
                           onClick={() => onFeedback(c.ref)}
                           aria-label={'反馈结论 ' + c.ref}
+                          title="反馈结论"
                         >
-                          反馈
+                          <MessageSquare size={14} aria-hidden="true" />
                         </button>
                       )}
                     </span>
@@ -409,39 +484,8 @@ export function ReportView({
                 </p>
               );
             })}
-            {s.tables.map((t, i) => (
-              <div key={i} className="table-wrap">
-                <table
-                  className="report-table"
-                  data-choice-daily={t.title === 'Choice 日成交观察（非实时）' || undefined}
-                >
-                  <caption>{t.title}</caption>
-                  <thead>
-                    <tr>
-                      {t.columns.map((c) => (
-                        <th key={c} scope="col">
-                          {c}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {t.rows.map((row, j) => (
-                      <tr key={j}>
-                        {row.map((v, k) =>
-                          k === 0 ? (
-                            <th key={k} scope="row">
-                              {v ?? '—'}
-                            </th>
-                          ) : (
-                            <td key={k}>{v ?? '—'}</td>
-                          )
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            {s.tables.map((table, i) => (
+              <ReportTable key={i} table={table} />
             ))}
             {s.charts.map((c) => (
               <Chart
@@ -509,17 +553,72 @@ export function ReportView({
           <p className="disclaimer">{report.disclaimer}</p>
         </section>
       </article>
-      {open && (
-        <EvidencePanel
-          key={open.ref}
-          claim={open}
-          showClaimText={
-            report.skill_version !== '1.1.0-demo.2' || report.skill_id !== 'stock_analysis'
-          }
-          loaders={loaders}
-          onClose={() => setOpen(null)}
-        />
+      {evidence && (
+        <div className="evidence-slot">
+          <EvidencePanel
+            key={evidence.claim.ref}
+            id={evidenceId}
+            claim={evidence.claim}
+            number={num[evidence.claim.ref]}
+            visible={evidence.visible}
+            showClaimText={
+              report.skill_version !== '1.1.0-demo.2' || report.skill_id !== 'stock_analysis'
+            }
+            loaders={loaders}
+            onClose={() => setEvidence((current) => current && { ...current, visible: false })}
+            onDismissed={dismissEvidence}
+          />
+        </div>
       )}
+    </div>
+  );
+}
+
+function ReportTable({ table }: { table: Report['sections'][number]['tables'][number] }) {
+  const choiceDaily = table.title === 'Choice 日成交观察（非实时）';
+  const numeric = table.columns.map((_, index) => {
+    if (index === 0) return false;
+    if (choiceDaily) return true;
+    const values = table.rows
+      .map((row) => row[index]?.trim())
+      .filter((value) => value && value !== '—');
+    return values.length > 0 && values.every((value) => numericCell.test(value ?? ''));
+  });
+  return (
+    <div className="table-wrap">
+      <table className="report-table">
+        <caption>{table.title}</caption>
+        <thead>
+          <tr>
+            {table.columns.map((label, index) => (
+              <th key={label} scope="col" data-numeric={numeric[index] || undefined}>
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, index) => (
+            <tr key={index}>
+              {row.map((value, column) =>
+                column === 0 ? (
+                  <th key={column} scope="row" data-date={dateCell.test(value ?? '') || undefined}>
+                    {value ?? '—'}
+                  </th>
+                ) : (
+                  <td
+                    key={column}
+                    data-numeric={numeric[column] || undefined}
+                    data-date={dateCell.test(value ?? '') || undefined}
+                  >
+                    {value ?? '—'}
+                  </td>
+                )
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

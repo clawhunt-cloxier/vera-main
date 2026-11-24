@@ -420,7 +420,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
           /证据位置|SHA-256|\$\.data|Codes\/Indicators\/Dates|厂商百分数|内部比例|亿元/
         );
         await page.getByRole('button', { name: '关闭证据' }).click();
-        await page.getByRole('link', { name: '← 返回报告列表' }).click();
+        await page.getByRole('link', { name: '返回报告列表' }).click();
         await page.locator('a[href="/app/reports/mock-fixed-report"]').click();
         await page.getByRole('heading', { name: fixedReport.title, exact: true }).waitFor();
         assert.match(await page.locator('.report-head').innerText(), /数据截止 模拟历史截止/);
@@ -675,7 +675,7 @@ test('0.4 latest-available confirmation, frozen report and evidence render on de
         for (const entry of closing) {
           expected = entry;
           await page.goto(origin + '/app');
-          await page.getByRole('heading', { name: '发起研究', exact: true }).waitFor();
+          await page.getByRole('region', { name: '发起研究', exact: true }).waitFor();
           for (const skill of closing)
             await page.getByRole('link', { name: skill.title, exact: true }).waitFor();
           await assertNeutralAndFits();

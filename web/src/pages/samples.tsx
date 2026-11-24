@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import { get, type Report, type ChartSeries, type Evidence, type Calculation } from '../api/client';
 import { ReportView } from '../components/ReportView';
-import { ErrorBox, Loading } from '../components/ui';
+import { ErrorBox, Loading, VeraBrand } from '../components/ui';
 
 export function Sample({ skill }: { skill: string }) {
   const report = useQuery({
@@ -28,7 +28,7 @@ export function Sample({ skill }: { skill: string }) {
       <header className="site-header">
         <div className="site-header__inner">
           <Link to="/" className="site-header__brand">
-            VERA
+            <VeraBrand size={28} />
           </Link>
           <nav className="hdr-actions">
             <Link to="/" className="hdr-btn hdr-btn--secondary">
@@ -52,7 +52,7 @@ export function Privacy() {
       <header className="site-header">
         <div className="site-header__inner">
           <Link to="/" className="site-header__brand">
-            VERA
+            <VeraBrand size={28} />
           </Link>
         </div>
       </header>

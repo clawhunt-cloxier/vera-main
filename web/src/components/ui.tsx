@@ -7,6 +7,19 @@ import {
 } from 'react';
 import { ApiError } from '../api/client';
 
+export function VeraAvatar({ size = 32 }: { size?: number }) {
+  return <img className="vera-avatar" src="/vera-avatar.svg" width={size} height={size} alt="" />;
+}
+
+export function VeraBrand({ size }: { size?: number }) {
+  return (
+    <>
+      <VeraAvatar size={size} />
+      <span className="vera-wordmark">Vera</span>
+    </>
+  );
+}
+
 export function ErrorBox({ error }: { error: unknown }) {
   if (!error) return null;
   const e = error instanceof ApiError ? error : null;

@@ -34,6 +34,7 @@ export function EntitySearch({
   const [failed, setFailed] = useState(false);
   const [active, setActive] = useState(0);
   const id = useId();
+  const expanded = open && items.length > 0;
   const kindFilter = kinds?.join(',');
   useEffect(() => {
     const query = q.trim();
@@ -89,8 +90,9 @@ export function EntitySearch({
     <div className="combo">
       <input
         role="combobox"
-        aria-expanded={open}
+        aria-expanded={expanded}
         aria-controls={id}
+        aria-activedescendant={expanded && items[active] ? id + '-' + active : undefined}
         aria-autocomplete="list"
         aria-label="搜索研究对象"
         placeholder={placeholder ?? '输入公司名称、代码或行业'}
@@ -101,23 +103,33 @@ export function EntitySearch({
           setQ(e.target.value);
           setOpen(false);
           setFailed(false);
-          setItems([]);
+        }}
+        onBlur={() => {
+          setOpen(false);
+          setEditing(false);
         }}
         onKeyDown={(e) => {
-          if (e.key === 'ArrowDown') setActive((a) => Math.min(a + 1, items.length - 1));
-          if (e.key === 'ArrowUp') setActive((a) => Math.max(a - 1, 0));
-          if (open && e.key === 'Enter' && items[active]) {
+          if (expanded && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            e.preventDefault();
+            const step = e.key === 'ArrowDown' ? 1 : -1;
+            setActive((a) => Math.min(Math.max(0, a + step), items.length - 1));
+          }
+          if (expanded && e.key === 'Enter' && items[active]) {
             e.preventDefault();
             pick(items[active]);
           }
-          if (e.key === 'Escape') setOpen(false);
+          if (e.key === 'Escape') {
+            setOpen(false);
+            setEditing(false);
+          }
         }}
       />
-      {open && items.length > 0 && (
-        <ul id={id} role="listbox" className="options">
+      {items.length > 0 && (
+        <ul id={id} role="listbox" className="options" inert={!expanded}>
           {items.map((match, i) => (
             <li
               key={match.entity.id}
+              id={id + '-' + i}
               role="option"
               aria-selected={i === active}
               className={i === active ? 'active' : ''}

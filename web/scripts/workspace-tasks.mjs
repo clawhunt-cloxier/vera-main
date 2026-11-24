@@ -164,9 +164,18 @@ export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, st
         await page.goto(origin + '/app');
         await main.getByText('模拟证券甲', { exact: true }).waitFor();
         await checkVisible();
-        const summary = main.getByRole('complementary', { name: '自选股' });
+        const assistant = main.getByRole('complementary', { name: '工作助手' });
+        const summary = assistant.getByRole('region', { name: '自选股' });
         await summary.getByText(watchName).waitFor();
         await summary.getByText('有提醒').waitFor();
+        const brand = page.getByRole('link', { name: 'Vera 工作台' });
+        assert.equal(await brand.innerText(), 'Vera');
+        const avatar = brand.locator('img');
+        await avatar.evaluate((image) => image.decode());
+        assert.equal(
+          await page.locator('link[rel="icon"]').getAttribute('href'),
+          '/vera-avatar.svg'
+        );
         const nav = page.getByRole('navigation', { name: '工作区导航' });
         await nav.getByRole('link', { name: '自选股' }).click();
         await main.getByRole('heading', { name: '自选股', exact: true }).waitFor();
@@ -243,8 +252,19 @@ export async function testWorkspaceTasks(t, { browser, origin, appHTML, task, st
         await page.getByRole('button', { name: '重新加载' }).click();
         await viewReport.waitFor();
         await page.goto(origin + '/app');
-        await page.getByLabel('账户菜单').click();
-        await page.getByRole('button', { name: '退出登录' }).click();
+        const account = page.getByRole('button', { name: '账户菜单' });
+        const logout = page.getByRole('button', { name: '退出登录' });
+        await account.focus();
+        await account.press('Enter');
+        assert.equal(await account.getAttribute('aria-expanded'), 'true');
+        await account.press('Tab');
+        assert.ok(await logout.evaluate((el) => el === el.ownerDocument.activeElement));
+        await logout.press('Escape');
+        assert.equal(await account.getAttribute('aria-expanded'), 'false');
+        assert.ok(await account.evaluate((el) => el === el.ownerDocument.activeElement));
+        assert.equal(await page.locator('.desk-account-options').evaluate((el) => el.inert), true);
+        await account.click();
+        await logout.click();
         await page.waitForURL(origin + '/');
         assert.equal(logoutPosts, 1);
         assert.deepEqual(errors, []);

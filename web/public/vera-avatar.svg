@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" viewBox="0 0 1254 1254" fill="none" role="img" aria-labelledby="vera-title vera-desc">
+  <title id="vera-title">Vera · 投研助手</title>
+  <desc id="vera-desc">深棕色长发、透明科技眼镜、两只黑色胶囊眼睛的极简 Q 版头像，深炭色方形背景。</desc>
+  <defs>
+    <linearGradient id="hair-base" x1="170" y1="130" x2="1000" y2="1150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#433438"/>
+      <stop offset=".50" stop-color="#372a2d"/>
+      <stop offset="1" stop-color="#2a2226"/>
+    </linearGradient>
+    <linearGradient id="hair-fringe" x1="120" y1="90" x2="694" y2="675" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4a383c"/>
+      <stop offset=".55" stop-color="#3b2d31"/>
+      <stop offset="1" stop-color="#34282d"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="315" y1="488" x2="600" y2="1145" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffe9df"/>
+      <stop offset=".65" stop-color="#ffe4da"/>
+      <stop offset="1" stop-color="#f8d8cd"/>
+    </linearGradient>
+    <linearGradient id="face-side" x1="690" y1="490" x2="835" y2="1000" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f9d9cc"/>
+      <stop offset="1" stop-color="#ebc4b9"/>
+    </linearGradient>
+    <clipPath id="skin-clip">
+      <path d="M714 444C760 501 805 624 818 748c16 149-9 243-73 316-48 55-126 65-210 70-135 8-277-44-391-138-62-51-83-111-80-167 5-85 82-198 176-250 125-69 343-132 474-135Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Flat charcoal canvas -->
+  <path fill="#151417" d="M0 0h1254v1254H0z"/>
+
+  <!-- Back hair: overall identity silhouette -->
+  <path fill="url(#hair-base)" d="M-80 387C-34 244 94 103 252 42 374-6 515-13 647 33c84 29 142 72 165 132 99 1 181 74 232 184 49 107 57 234 45 362-9 101-38 191-29 278 4 81-18 157-63 221-55 79-158 117-257 138-168 34-296-17-452-16-114 1-238-32-296-124-75-117-66-304-53-475C-37 610-108 506-80 387Z"/>
+  <!-- Upper hair contour -->
+  <path stroke="#5b474c" stroke-width="18" stroke-linecap="round" d="M-22 303C117 129 282 26 455 16c147-8 318 49 355 155"/>
+  <!-- Right rear locks -->
+  <path fill="#241c20" d="M812 180c104 63 171 220 174 354 2 78-12 163-20 235-11-154-31-307-84-416-16-35-40-69-70-95V180Z" opacity=".77"/>
+  <path fill="#2a2024" d="M907 546c71 143 126 273 123 430-2 122-59 225-166 278 67-87 67-185 42-277-23-82-21-144 1-431Z" opacity=".8"/>
+  <path fill="#5c474b" d="M957 372c35 39 68 99 86 159 17 55 21 88 11 61-20-36-45-75-67-117-23-42-41-73-30-103Z"/>
+  <path fill="#2c2125" d="M808 1106c-67 86-123 118-206 148h266c99-87 142-183 115-325-38 83-94 136-175 177Z"/>
+  <!-- Left rear locks -->
+  <path fill="#2b2125" d="M-30 548c93 68 141 180 109 292-23 81-4 167 36 228 54 82 8 139-85 186H-30V548Z"/>
+  <path fill="#47353a" d="M33 762c-41 99-45 176-17 263 19 57 67 96 55 144-9 36-43 62-83 85h124c49-68 15-139-23-210-44-81-29-176-56-282Z"/>
+
+  <!-- Shoulder and outfit, mostly cropped below -->
+  <path fill="#343036" d="M-21 1254v-89c69-35 159-68 269-84l119 18c126 23 192 86 234 155H-21Z"/>
+  <path fill="#2a272e" d="M-14 1254c58-52 130-113 223-165l-56 104 36 42-32 19H-14Z"/>
+  <path fill="#453e45" d="M363 1100c95 42 171 88 232 154H343l18-154Z"/>
+  <!-- Neck -->
+  <path fill="#e9bfb5" d="M272 1044c39 24 84 37 139 46l-45 164H251l-22-121 43-89Z"/>
+  <path fill="#f3cfc5" d="m268 1057 143 34-40 128-103-82v-80Z"/>
+  <!-- White shirt and collar -->
+  <path fill="#f5f0f4" d="M246 1087c-17 20-20 84-13 167h125l-13-95-99-72Z"/>
+  <path fill="#e9e3ec" d="m245 1091 84 106-9 57h-73c-8-49-13-120-2-163Z"/>
+  <path fill="#f5eff3" d="m413 1107 13 24-4 123h-83l74-147Z"/>
+  <path fill="#d2c9d4" d="m326 1200 40-30 32 84h-86l14-54Z"/>
+  <path fill="#352f36" d="M218 1094c-38 50-76 98-106 160h119c-5-73-2-133 11-169l-24 9Z"/>
+
+  <!-- Ear beneath cheek -->
+  <path fill="#f1cbc0" d="M747 928c52-34 98-2 107 39 10 49-39 103-88 109-37 5-59-17-60-51 0-37 15-78 41-97Z"/>
+
+  <!-- Rounded oversized face -->
+  <path fill="url(#skin)" d="M714 444C760 501 805 624 818 748c16 149-9 243-73 316-48 55-126 65-210 70-135 8-277-44-391-138-62-51-83-111-80-167 5-85 82-198 176-250 125-69 343-132 474-135Z"/>
+  <g clip-path="url(#skin-clip)">
+    <path fill="url(#face-side)" opacity=".55" d="M702 462c89 110 133 321 114 465-8 70-32 110-83 148 32-115 12-238-10-353-21-113-40-176-21-260Z"/>
+    <path fill="#f1ccc0" opacity=".37" d="M-2 953c105 107 244 155 406 181 180 29 307-10 408-129l8 201H-7L-2 953Z"/>
+  </g>
+
+  <!-- Rounded soft cheeks; no mouth, no nose -->
+  <ellipse cx="166" cy="854" rx="69" ry="41" fill="#f8bfb0" opacity=".73" transform="rotate(11 166 854)"/>
+  <ellipse cx="681" cy="992" rx="66" ry="41" fill="#f7bdae" opacity=".73" transform="rotate(12 681 992)"/>
+
+  <!-- Hairline and bangs (several broad smooth locks) -->
+  <path fill="url(#hair-fringe)" d="M-51 320C64 155 249 34 450 24 579 16 718 59 775 144c20 30 39 86 11 137-38-62-112-80-195-83-109-4-160 40-238 85 76-65 144-113 218-124-160-14-277 79-394 170C64 413 2 441-50 460V320Z"/>
+  <!-- Top mass sweeps left over forehead -->
+  <path fill="#3d2e32" d="M-67 435c139-48 227-150 377-198 94-31 200-50 302-35 90 13 137 46 146 102 13 80-31 174-86 232-51 56-100 86-144 108 52-68 84-102 101-136-99 113-197 168-304 133 69-34 125-83 163-125-117 83-273 144-439 127C-19 633-68 603-67 542V435Z"/>
+  <!-- Bang arcs and tips -->
+  <path fill="#34272b" d="M0 495c98-31 188-99 296-186-84 123-181 191-296 185Z"/>
+  <path fill="#36282c" d="M326 641c98-50 168-123 231-183-44 88-85 152-153 185-27 14-52 13-78-2Z"/>
+  <path fill="#3c2d31" d="M437 694c81-54 146-110 202-176-41 88-105 164-202 176Z"/>
+  <!-- Fringe large right lock: stops before eye area -->
+  <path fill="#3c2d31" d="M704 323c76 67 132 177 171 279 43 116 67 243 74 360-51-80-96-153-143-219-17-132-47-238-92-297-56 124-144 211-274 248 99-80 162-178 196-274 18-51 34-77 68-97Z"/>
+  <path fill="#312429" d="M744 309c65 63 118 172 158 293 20 63 39 137 43 211-31-122-66-236-112-339-23-52-55-109-89-165Z" opacity=".6"/>
+  <!-- Right frame of hair, ending at jaw -->
+  <path fill="#382a2f" d="M885 561c71 101 106 240 120 367 18 142-9 236-100 326H790c80-96 115-195 112-286-5-115-45-251-17-407Z"/>
+  <path fill="#2b2025" d="M923 706c64 142 70 281 41 390-17 68-52 120-95 158h-78c67-74 106-161 113-259 8-96-1-196 19-289Z"/>
+  <path fill="#45343a" d="M-15 785c-11 105 22 178 71 242 56 72 68 146 25 227H0v-94c42-49 24-92 2-147-37-89-41-157-17-228Z"/>
+
+  <!-- Glass lenses: understated transparent futuristic eyewear -->
+  <path fill="#6e738a" fill-opacity=".14" d="M116 580c71-12 184 32 294 63 167 48 263 81 413 136 31 12 51 28 50 56-3 56-66 149-125 151-72 2-180-52-225-61-42-8-19-115-79-127-50-9-63 65-103 82-46 18-162-27-235-66-37-20-50-55-45-99l20-104c5-20 15-27 35-31Z"/>
+  <!-- Pale translucent arms -->
+  <path fill="#e5e0eb" fill-opacity=".82" d="M54 590c-10 18-18 48-14 65 3 14 37 22 66 27l39-95-69-1c-10 0-17 1-22 4Z"/>
+  <path fill="#e5e0eb" fill-opacity=".85" d="m839 802 62 30c12 6 15 13 10 26l-21 42c-6 12-16 13-32 7l-35-17 16-88Z"/>
+  <!-- Outer glasses upper arch -->
+  <path stroke="#f2eef7" stroke-opacity=".89" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" d="M71 706c-4-46 22-125 67-130 53-7 153 29 259 62 162 50 270 75 420 136 33 13 57 22 55 57"/>
+  <!-- Lower glasses edge and wavy nose bridge; eyes unobstructed -->
+  <path stroke="#f5eff7" stroke-opacity=".78" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" d="M68 709c-13 63 8 94 67 128 66 38 158 64 211 36 34-19 62-79 99-78 59 1 44 105 89 130 55 29 130 65 196 59 65-6 143-108 142-156"/>
+  <path stroke="#ffffff" stroke-opacity=".5" stroke-width="5" stroke-linecap="round" d="M89 608c23-24 55-29 96-19"/>
+
+  <!-- Exactly two solid vertical capsule eyes. No pupils, whites, eyebrows or mouth. -->
+  <rect x="264" y="659" width="76" height="190" rx="38" fill="#1b171a" transform="rotate(18 302 754)"/>
+  <rect x="582" y="754" width="76" height="190" rx="38" fill="#1b171a" transform="rotate(18 620 849)"/>
+</svg>
