@@ -45,6 +45,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T038 | 优化工作台与研究等待体验 | T036、T037（已部署） | REVIEW | Codex / agent/codex/T038-workspace | 2026-11-21T12:09Z 接续开发。工作台、研究计划与任务页已接通，新增桌面与手机浏览器验收。[交接](docs/handoffs/2026-11-21-T038-codex.md) |
 
 | T039 | 优化研报阅读布局 | T038（已部署） | REVIEW | Codex / agent/codex/T039-report-layout | 2026-11-21T13:04Z 领取。窄目录、正文层级、证据抽屉与图表重排已接通，并在真实报告上对照桌面与手机布局。[交接](docs/handoffs/2026-11-21-T039-codex.md) |
+| T040 | 产品化工作台与网页研报视觉 | T038、T039（已合入） | IN_PROGRESS | Codex / agent/codex/T040-product-ui | 2026-11-24T20:07Z 领取。参考 finance-suite 改造工作台，优化网页研报字体和排版，验证桌面和手机端以及介绍首页构建产物一致性。范围为 Web 组件、样式、浏览器用例和交接。[交接](docs/handoffs/2026-11-24-T040-codex.md) |
 
 ## 里程碑
 
