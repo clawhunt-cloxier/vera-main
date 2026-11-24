@@ -50,7 +50,7 @@ func (s *Store) ObservationBar(ctx context.Context, tx pgx.Tx, subject uuid.UUID
 		WHERE e.id=$1 AND e.code=$3 AND e.kind='stock' AND NOT e.synthetic AND `+visibleAtCutoff+`
 		AND r.dataset_id='mkt.daily_bar' AND r.provider_id='tushare' AND r.quality_state IN ('PASS','WARN')
 		AND r.period IS NOT NULL AND r.period <= ($2 AT TIME ZONE 'Asia/Shanghai')::date
-		AND ($4::uuid IS NULL OR r.id=$4)
+		AND ($4::uuid IS NULL OR r.id=$4) AND ($4::uuid IS NOT NULL OR `+latestRevisionAt("$2")+`)
 		ORDER BY r.period DESC,r.record_version DESC,r.record_key,r.id LIMIT 1 FOR SHARE OF r,e`, subject, cutoff, code, id)
 	if err != nil {
 		return StoredRecord{}, err

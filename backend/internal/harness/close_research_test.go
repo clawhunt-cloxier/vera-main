@@ -105,6 +105,42 @@ func TestCloseMarketDoesNotInventFactorsOrCrossDates(t *testing.T) {
 	}
 }
 
+func TestMarketCalculationInputsKeepStockAndIndexUnits(t *testing.T) {
+	b := closeTestBuilder()
+	b.B.Days = []string{"2026-10-27", "2026-10-28"}
+	units := map[uuid.UUID]string{}
+	for i, day := range b.B.Days {
+		stock := addCloseRecord(b, "mkt.daily_bar", map[string]any{"trade_date": day, "close": []string{"10", "8"}[i], "adj_factor": "2"})
+		units[stock.ID] = "CNY/share"
+		idx := dataservice.StoredRecord{ID: uuid.New(), DatasetID: "mkt.index_bar", ProviderID: "unit_test",
+			Payload: map[string]any{"trade_date": day, "index_code": "000300.SH", "close": []string{"2000", "2200"}[i]}}
+		b.B.global[idx.DatasetID] = append(b.B.global[idx.DatasetID], idx)
+		units[idx.ID] = "index_point"
+	}
+	b.market(b.B.Subject.ID, 2, "mkt", "S1")
+	var checked int
+	for _, c := range b.S.Calcs {
+		switch c.FormulaID {
+		case "F12.period_return", "F13.excess_return", "F14.max_drawdown":
+			if !c.OK() {
+				t.Fatalf("%s unexpectedly inapplicable", c.FormulaID)
+			}
+			for _, in := range c.Inputs {
+				if expected := units[in.EvidenceID]; expected == "" || in.Unit != expected {
+					t.Fatalf("%s input %s: got %s, want %s", c.FormulaID, in.EvidenceID, in.Unit, expected)
+				}
+				checked++
+			}
+			if c.FormulaID == "F13.excess_return" && c.Result.String() != "-0.3" {
+				t.Fatalf("unexpected excess return %s", c.Result)
+			}
+		}
+	}
+	if checked != 10 {
+		t.Fatalf("checked %d endpoint inputs, want 10", checked)
+	}
+}
+
 func TestCloseSegmentsOnlyCompareWithinDimension(t *testing.T) {
 	b := closeTestBuilder()
 	addSegmentFiling(b, "2025-12-31", "filing-A", b.B.AsOf)

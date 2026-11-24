@@ -18,7 +18,7 @@ const (
 )
 
 // FormulaVersion is bumped whenever any formula's semantics change; it is frozen into reports.
-const FormulaVersion = "1.1.0"
+const FormulaVersion = "1.1.1"
 
 // Input is one evidence-bound operand.
 type Input struct {
@@ -140,14 +140,14 @@ func edges(ps []Point, unit string) []Input {
 	return []Input{{ps[0].EvidenceID, ps[0].Value, unit}, {ps[len(ps)-1].EvidenceID, ps[len(ps)-1].Value, unit}}
 }
 
-// F12 period_return over adjusted closes; needs ≥80% coverage of the expected trading days.
-func PeriodReturn(ps []Point, expected int) Calc {
+// F12 period_return over adjusted stock prices or index levels; needs ≥80% coverage.
+func PeriodReturn(ps []Point, expected int, inputUnit string) Calc {
 	valid, ok := coverage(ps, expected)
 	c := newCalc("F12.period_return", "ratio", nil)
 	if !ok {
 		return c.na(fmt.Sprintf("区间内有效交易日 %d/%d，不足 80%%", len(valid), expected))
 	}
-	c.Inputs = edges(valid, "CNY")
+	c.Inputs = edges(valid, inputUnit)
 	if !valid[0].Value.IsPositive() {
 		return c.na("期初价格不为正")
 	}
@@ -185,10 +185,10 @@ func MaxDrawdown(ps []Point, expected int) (Calc, string, string) {
 		}
 	}
 	if worst.IsZero() {
-		c.Inputs = edges(valid, "CNY")
+		c.Inputs = edges(valid, "CNY/share")
 		return c.ok(worst), "", ""
 	}
-	c.Inputs = []Input{{wp.EvidenceID, wp.Value, "CNY"}, {wt.EvidenceID, wt.Value, "CNY"}}
+	c.Inputs = []Input{{wp.EvidenceID, wp.Value, "CNY/share"}, {wt.EvidenceID, wt.Value, "CNY/share"}}
 	return c.ok(worst), wp.Date, wt.Date
 }
 

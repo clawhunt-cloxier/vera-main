@@ -66,11 +66,13 @@ func marketCurrent(all []Row, day string) (map[string]Row, error) {
 }
 
 func (c *marketCollector) directory() error {
+	// Capital and eligibility belong to a common session, even when daily_basic lags the calendar.
+	day := cmp.Or(c.latestVal.Values["trade_date"], c.day)
 	subjectHistory, err := c.members("ts_code", c.code)
 	if err != nil {
 		return err
 	}
-	current, err := marketCurrent(subjectHistory, c.day)
+	current, err := marketCurrent(subjectHistory, day)
 	if err != nil {
 		return err
 	}
@@ -83,7 +85,7 @@ func (c *marketCollector) directory() error {
 	if err != nil {
 		return err
 	}
-	current, err = marketCurrent(industryMembers, c.day)
+	current, err = marketCurrent(industryMembers, day)
 	if err != nil {
 		return err
 	}
@@ -91,7 +93,7 @@ func (c *marketCollector) directory() error {
 		return marketBad("index_member_all", "inconsistent member lists")
 	}
 	vals := map[string]Row{}
-	if day := c.latestVal.Values["trade_date"]; day != "" {
+	if c.latestVal.Values["trade_date"] != "" {
 		// Doc 32 permits up to 6000 stocks per request. Rows follows the
 		// next page when the server returns a full page or has_more.
 		raw, err := c.rows("daily_basic", map[string]string{"trade_date": day}, marketValFields, 6000, false)
@@ -124,7 +126,7 @@ func (c *marketCollector) directory() error {
 		}
 		// Doc 326 accepts a single exchange and session. An otherwise valid
 		// roster from Shanghai is not evidence of Shenzhen eligibility.
-		rows, err := c.rows("margin_secs", map[string]string{"trade_date": c.day, "exchange": exchange}, "trade_date ts_code exchange", 6000, true)
+		rows, err := c.rows("margin_secs", map[string]string{"trade_date": day, "exchange": exchange}, "trade_date ts_code exchange", 6000, true)
 		if err != nil {
 			return err
 		}
@@ -247,8 +249,9 @@ func (c *marketCollector) security(code string, member, value, eligible Row, pag
 	if ex == "" || !strings.HasSuffix(code, "."+ex) || board == "" || v["name"] == "" {
 		return dataservice.Entity{}, nil, marketBad("stock_basic", "A-share identity")
 	}
+	day := cmp.Or(value.Values["trade_date"], c.day)
 	listDate, e := marketDate(v["list_date"])
-	if e != nil || v["list_date"] > c.day {
+	if e != nil || v["list_date"] > day {
 		return dataservice.Entity{}, nil, marketBad("stock_basic", "list_date")
 	}
 	ind := member.Values["l2_code"]
@@ -288,7 +291,8 @@ func (c *marketCollector) security(code string, member, value, eligible Row, pag
 			joins.add(code, "margin_secs:"+k, pages[k])
 		}
 	}
-	d, _ := marketDate(c.day)
-	rec := marketRecord(r, "ref.security", code, code, "exchange", "L2", "TuShare 证券主数据、股本及两融标的名单", &d, p)
+	d, _ := marketDate(day)
+	rec := marketRecord(r, "ref.security", code, code, "exchange", "L2", "TuShare 本次证券名录及同一交易日的股本、行业归属和两融标的名单", &d, p)
+	rec.MappingVersion = 2
 	return entity, &rec, nil
 }

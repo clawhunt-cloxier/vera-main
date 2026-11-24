@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	sharesToLotsShift = -2
-	yuanToWanShift    = -4
+	sharesToLotsShift int32 = -2
+	yuanToWanShift    int32 = -4
 )
 
 func dailyTradeDisplayValue(raw string, shift int32, historical bool) (string, error) {

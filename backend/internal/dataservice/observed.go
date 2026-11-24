@@ -96,7 +96,7 @@ type observedIdentity struct{ dataset, logical string }
 type observedVersion struct {
 	key, hash, basis, origin, tier, quality string
 	mapping, version                        int
-	published                               *time.Time
+	published, period                       *time.Time
 }
 
 func sameInstant(a, b *time.Time) bool {
@@ -113,6 +113,11 @@ func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Re
 		if r.LogicalKey == "" {
 			r.LogicalKey = r.RecordKey
 		}
+		if r.Period != nil {
+			year, month, day := r.Period.Date()
+			date := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+			r.Period = &date
+		}
 		if r.PublishedAt != nil {
 			// Conservative rounding to the next representable database instant.
 			at := r.PublishedAt.UTC().Add(time.Microsecond - time.Nanosecond).Truncate(time.Microsecond)
@@ -126,7 +131,7 @@ func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Re
 		}
 		keys = append(keys, r.LogicalKey)
 	}
-	rows, err := tx.Query(ctx, `SELECT dataset_id,logical_key,record_key,content_hash,coalesce(basis,''),origin,source_tier,quality_state,coalesce(mapping_version,0),record_version,published_at FROM records WHERE provider_id=$1 AND logical_key=ANY($2) ORDER BY record_version`, provider, keys)
+	rows, err := tx.Query(ctx, `SELECT dataset_id,logical_key,record_key,content_hash,coalesce(basis,''),origin,source_tier,quality_state,coalesce(mapping_version,0),record_version,published_at,period FROM records WHERE provider_id=$1 AND logical_key=ANY($2) ORDER BY record_version`, provider, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +140,7 @@ func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Re
 	for rows.Next() {
 		var k observedIdentity
 		var v observedVersion
-		if err := rows.Scan(&k.dataset, &k.logical, &v.key, &v.hash, &v.basis, &v.origin, &v.tier, &v.quality, &v.mapping, &v.version, &v.published); err != nil {
+		if err := rows.Scan(&k.dataset, &k.logical, &v.key, &v.hash, &v.basis, &v.origin, &v.tier, &v.quality, &v.mapping, &v.version, &v.published, &v.period); err != nil {
 			return nil, err
 		}
 		history[k] = append(history[k], v)
@@ -174,7 +179,7 @@ func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Re
 		if r.QualityState == "" {
 			r.QualityState = "PASS"
 		}
-		v := observedVersion{key: r.RecordKey, hash: r.Hash(), basis: r.Basis, origin: r.Origin, tier: r.SourceTier, quality: r.QualityState, mapping: r.MappingVersion, published: r.PublishedAt}
+		v := observedVersion{key: r.RecordKey, hash: r.Hash(), basis: r.Basis, origin: r.Origin, tier: r.SourceTier, quality: r.QualityState, mapping: r.MappingVersion, published: r.PublishedAt, period: r.Period}
 		unique := observedIdentity{r.DatasetID, r.RecordKey}
 		if previous, exists := seen[unique]; exists && previous != v.hash {
 			return nil, fmt.Errorf("%s/%s: conflicting vendor rows in one observation", r.DatasetID, r.RecordKey)
@@ -183,11 +188,17 @@ func prepareObserved(ctx context.Context, tx pgx.Tx, provider string, input []Re
 		prior := history[k]
 		if len(prior) > 0 {
 			latest := prior[len(prior)-1]
+			// A peer collection may have an older stock-capital session than the
+			// subject's own batch. The v2 join first corrects any v1 period.
+			if provider == "tushare" && r.DatasetID == "ref.security" && latest.mapping >= 2 &&
+				(v.mapping < latest.mapping || (v.period != nil && latest.period != nil && v.period.Before(*latest.period))) {
+				continue
+			}
 			if r.PublishedAt != nil && latest.published != nil && r.PublishedAt.Before(*latest.published) {
 				// Do not let an earlier re-fetched filing replace a known later revision.
 				continue
 			}
-			if v.key == latest.key && v.hash == latest.hash && v.mapping == latest.mapping && v.quality == latest.quality && v.origin == latest.origin && v.tier == latest.tier && v.basis == latest.basis && sameInstant(v.published, latest.published) {
+			if v.key == latest.key && v.hash == latest.hash && v.mapping == latest.mapping && v.quality == latest.quality && v.origin == latest.origin && v.tier == latest.tier && v.basis == latest.basis && sameInstant(v.published, latest.published) && sameInstant(v.period, latest.period) {
 				continue
 			}
 			if r.DatasetID == "fin.statement" && v.key == latest.key && v.mapping == latest.mapping {

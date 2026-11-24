@@ -99,11 +99,13 @@ type Mapper interface {
 | 时间 | `period_start`、`period_end` 或 `trade_date`；`published_at`（原始发布时间）、`available_at`（本系统可用时间）、`ingested_at` |
 | 来源 | `provider_id`、`provider_dataset`、`origin`（`exchange`、`company_filing`、`regulator`、`vendor_derived`、`media`、`broker`）、`origin_ref`（公告编号、原始 URL 或厂商记录 ID）|
 | 口径 | `basis`（合并/母公司、复权方式、分类体系版本、厂商口径说明）、`unit`、`currency` |
-| 修订 | `revision_of`（被更正的记录）、`is_latest` |
+| 修订 | 实现用同厂商的 `dataset_id`、`logical_key`、`record_version` 关联修订，按截止时点选版。物理表的遗留 `is_latest` 列不参与判断；`revision_of` 为逻辑关联。 |
 | 血缘 | `raw_ref`、`raw_sha256`、`raw_locator`（JSON 路径或页码）、`mapping_version` |
 | 治理 | `source_tier`（L1–L5）、`quality_state`（PASS/WARN/QUARANTINED/REJECTED）、`license_ref`、`allowed_uses` |
 
 数值统一用十进制字符串存储，金额单位为元，比例为小数（展示时转为 %），股数为股。未知值存 NULL 并附原因，不写 0。
+
+目录验证按实际公历日期解析日期字段。十进制映射接受十进制数及其科学计数法。非有限值与其他进制的文本触发致命映射问题。
 
 ## 5. 字段映射
 
@@ -178,6 +180,7 @@ T030 支持 Choice 与 TuShare 独立或同时装配。收盘三技能从已发�
 
 - COLLECTING 阶段按技能的数据需求组装查询，先查统一层；统一层缺失或不新鲜时调用厂商，写原始层和统一层后再查。
 - 快照清单列出每条记录的 `record_id@record_version` 和选取理由，清单哈希写入任务；报告版本绑定快照哈希。
+- 新研究先按厂商、数据集、逻辑记录及截止时点确定可见的最近一次修订，再判断质量。隔离或拒绝该版后，同一条记录的旧值也不能计入新研究、计划覆盖、按需准备或双来源收盘简报。历史快照按原清单回放，并复查原记录的质量和当前来源用途。
 - 公共数据（行情、财务、资金统计）在统一层跨用户共享，按数据集和交易日缓存；用户私有内容（自选股、研究问题）不进入统一层。
 
 ## 10. 实体目录

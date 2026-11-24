@@ -46,15 +46,14 @@ func (s *Store) researchSubjectPrepared(ctx context.Context, q subjectQuery, cod
 	// can carry the configured stock's identity before its own batch has committed.
 	var ok bool
 	err := q.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM tushare_requested_subjects WHERE $2 AND code=$1
-			AND published_at > statement_timestamp() - interval '24 hours'
-	) OR EXISTS (
 		SELECT 1 FROM entities e JOIN capabilities c ON c.entity_id=e.id
 		JOIN records r ON r.entity_id=c.entity_id AND r.dataset_id=c.dataset_id AND r.provider_id=c.provider_id
-		WHERE $3 AND e.code=$1 AND e.kind='stock' AND NOT e.synthetic AND e.attrs->>'tushare_research_subject'='true'
+		WHERE e.code=$1 AND e.kind='stock' AND NOT e.synthetic AND e.attrs->>'tushare_research_subject'='true'
+			AND ($3 OR EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE $2 AND code=e.code
+				AND published_at > statement_timestamp() - interval '24 hours'))
 			AND c.provider_id='tushare' AND c.dataset_id='mkt.daily_bar'
-			AND r.quality_state IN ('PASS','WARN') AND r.available_at <= statement_timestamp()
-			AND (r.published_at IS NULL OR r.published_at <= statement_timestamp())
+			AND r.quality_state IN ('PASS','WARN') AND `+visibleAt("r", "statement_timestamp()")+`
+			AND `+latestRevisionAt("statement_timestamp()")+`
 			AND r.period <= (statement_timestamp() AT TIME ZONE 'Asia/Shanghai')::date
 			AND r.raw_ref IS NOT NULL AND r.raw_sha256 IS NOT NULL AND r.raw_locator IS NOT NULL AND r.mapping_version > 0
 	)`, code, s.onDemandSubjects, configured).Scan(&ok)

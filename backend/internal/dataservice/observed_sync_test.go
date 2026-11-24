@@ -125,6 +125,40 @@ func TestObservedSyncSerializesCollectionAndPublication(t *testing.T) {
 	}
 }
 
+func TestSecuritySnapshotSessionAndReplay(t *testing.T) {
+	ctx := t.Context()
+	api, worker, _ := requestedStores(t)
+	batch := syntheticRequestedBatch()
+	security := batch.records[0]
+	security.DatasetID, security.RecordKey = "ref.security", "mock-security"
+	security.Payload = map[string]any{"security_code": coldTarget, "short_name": "模拟", "exchange": "SH", "board": "main", "list_date": "2000-01-01",
+		"status": "listed", "is_financial": false, "margin_eligible": true, "total_shares": "1000", "float_shares": "900"}
+	batch.records = []dataservice.Record{security}
+	day := func(v string) *time.Time {
+		d, err := time.Parse(time.DateOnly, v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &d
+	}
+	for _, tc := range []struct {
+		date           string
+		mapping, added int
+	}{
+		{"2026-01-06", 1, 1}, {"2026-01-05", 2, 1}, {"2026-01-06", 2, 1}, {"2026-01-06", 2, 0}, {"2026-01-05", 2, 0},
+	} {
+		batch.records[0].MappingVersion, batch.records[0].Period = tc.mapping, day(tc.date)
+		n, err := worker.SyncObserved(ctx, "tushare", func(context.Context) (dataservice.Provider, error) { return batch, nil })
+		if n != tc.added || err != nil {
+			t.Fatalf("sync %+v: %d, %v", tc, n, err)
+		}
+	}
+	rows, err := api.Query(ctx, dataservice.Query{DatasetIDs: []string{"ref.security"}, AsOf: time.Now()})
+	if err != nil || len(rows) != 1 || rows[0].Period == nil || rows[0].Period.Format(time.DateOnly) != "2026-01-06" || rows[0].Version != 3 {
+		t.Fatalf("wrong session after replay: %+v, %v", rows, err)
+	}
+}
+
 func TestObservedSyncLostLockSessionCannotPublish(t *testing.T) {
 	store, pool := observedStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)

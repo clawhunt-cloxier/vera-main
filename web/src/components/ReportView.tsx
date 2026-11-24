@@ -51,6 +51,15 @@ const publishedSources = new Set([
 ]);
 
 const evidencePageSize = 12;
+const calculationUnits: Record<string, string> = {
+  CNY: '元',
+  'CNY/share': '元/股',
+  index_point: '点',
+  shares: '股',
+  times: '倍',
+  ratio: '（小数比例）',
+  pp: '（比例差，小数）',
+};
 const numericCell = /^[+\-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?[%％]?$/;
 const dateCell = /^\d{4}-\d{2}-\d{2}$/;
 const compactContents = '(max-width: 759px)';
@@ -243,7 +252,7 @@ function EvidencePanel({
               <strong>{c.formula_id}</strong> <span className="muted">v{c.formula_version}</span>
             </div>
             <div>
-              结果：{c.result ?? '—'} {c.unit} ·{' '}
+              结果：{c.result ?? '—'} {calculationUnits[c.unit] ?? c.unit} ·{' '}
               {c.applicability === 'APPLICABLE' ? '适用' : '不适用'}
               {c.reason ? '（' + c.reason + '）' : ''}
             </div>
@@ -251,7 +260,7 @@ function EvidencePanel({
               输入 {c.inputs.length} 项：
               {c.inputs
                 .slice(0, 6)
-                .map((i) => i.value + (i.unit ? ' ' + i.unit : ''))
+                .map((i) => i.value + (i.unit ? ' ' + (calculationUnits[i.unit] ?? i.unit) : ''))
                 .join('，')}
               {c.inputs.length > 6 ? '…' : ''}
             </div>

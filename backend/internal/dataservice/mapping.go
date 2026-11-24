@@ -87,22 +87,7 @@ func jsonPath(obj map[string]any, expr string) (any, bool) {
 func applyTransform(transform, unit string, val any) (any, error) {
 	str := fmt.Sprintf("%v", val)
 	switch transform {
-	case "decimal", "":
-		d, err := decimal.NewFromString(str)
-		if err != nil {
-			// try via float
-			if f, err2 := strconv.ParseFloat(str, 64); err2 == nil {
-				d = decimal.NewFromFloat(f)
-			} else {
-				return nil, err
-			}
-		}
-		// scale CNY_10K → CNY (multiply by 10000)
-		if unit == "CNY_10K" {
-			d = d.Mul(decimal.NewFromInt(10000))
-		}
-		return d.String(), nil
-	case "scale_to_base":
+	case "decimal", "", "scale_to_base":
 		d, err := decimal.NewFromString(str)
 		if err != nil {
 			return nil, err

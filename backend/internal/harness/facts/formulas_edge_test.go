@@ -47,16 +47,16 @@ func TestFormulaApplicability(t *testing.T) {
 	want(t, "F10 loss", NonrecurringShare(n("-1"), n("-2")), "NA")
 	want(t, "F10", NonrecurringShare(n("10"), n("12")), "-0.2")
 	// F12 / F14 coverage ≥ 80% (suspension = missing points); F12 needs a positive start.
-	want(t, "F12 suspended 1/5", PeriodReturn(pts("10", "", "11", "12", "12.5"), 5), "0.25")
-	want(t, "F12 suspended 2/5", PeriodReturn(pts("10", "", "", "12", "12.5"), 5), "NA")
-	want(t, "F12 zero start", PeriodReturn(pts("0", "1", "2", "3"), 4), "NA")
-	want(t, "F12 one point", PeriodReturn(pts("10"), 1), "NA")
-	want(t, "F12 no expected days", PeriodReturn(pts("10", "11"), 0), "NA")
+	want(t, "F12 suspended 1/5", PeriodReturn(pts("10", "", "11", "12", "12.5"), 5, "CNY/share"), "0.25")
+	want(t, "F12 suspended 2/5", PeriodReturn(pts("10", "", "", "12", "12.5"), 5, "CNY/share"), "NA")
+	want(t, "F12 zero start", PeriodReturn(pts("0", "1", "2", "3"), 4, "CNY/share"), "NA")
+	want(t, "F12 one point", PeriodReturn(pts("10"), 1, "CNY/share"), "NA")
+	want(t, "F12 no expected days", PeriodReturn(pts("10", "11"), 0, "CNY/share"), "NA")
 	dd, _, _ := MaxDrawdown(pts("10", "11", "12"), 3)
 	want(t, "F14 monotonic", dd, "0")
 	// F13 needs both returns.
-	want(t, "F13", Excess(PeriodReturn(pts("10", "12"), 2), PeriodReturn(pts("10", "11"), 2)), "0.1")
-	want(t, "F13 bench NA", Excess(PeriodReturn(pts("10", "12"), 2), PeriodReturn(pts("10", ""), 2)), "NA")
+	want(t, "F13", Excess(PeriodReturn(pts("10", "12"), 2, "CNY/share"), PeriodReturn(pts("10", "11"), 2, "index_point")), "0.1")
+	want(t, "F13 bench NA", Excess(PeriodReturn(pts("10", "12"), 2, "CNY/share"), PeriodReturn(pts("10", ""), 2, "index_point")), "NA")
 	// F15 excludes non-positive history; window ≥ 60%.
 	want(t, "F15 zero current", Percentile(Point{Value: decimal.Zero}, pts("1", "2"), 2), "NA")
 	want(t, "F15 sparse", Percentile(Point{Value: decimal.RequireFromString("5")}, pts("1", "", "", "-3", "6"), 5), "NA")

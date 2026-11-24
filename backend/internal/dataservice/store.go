@@ -282,9 +282,22 @@ const recordCols = `r.id, r.dataset_id, r.entity_id, r.record_key, r.record_vers
 
 // Financial facts require a known disclosure time. Other sources may not have
 // one, but when supplied it must never be later than the snapshot cutoff.
-const visibleAtCutoff = `r.available_at <= $2
-		AND (r.published_at IS NULL OR r.published_at <= $2)
-		AND (r.dataset_id NOT IN ('fin.statement','fin.segment') OR r.published_at IS NOT NULL)`
+func visibleAt(alias, cutoff string) string {
+	return fmt.Sprintf(`%[1]s.available_at <= %[2]s
+		AND (%[1]s.published_at IS NULL OR %[1]s.published_at <= %[2]s)
+		AND (%[1]s.dataset_id NOT IN ('fin.statement','fin.segment') OR %[1]s.published_at IS NOT NULL)`, alias, cutoff)
+}
+
+var visibleAtCutoff = visibleAt("r", "$2")
+
+// A visible correction supersedes its predecessor even when the correction is
+// quarantined. A later disclosure or publication cannot affect an earlier cutoff.
+func latestRevisionAt(cutoff string) string {
+	return `NOT EXISTS (SELECT 1 FROM records newer
+		WHERE newer.dataset_id=r.dataset_id AND newer.logical_key=r.logical_key
+		AND newer.provider_id=r.provider_id AND newer.record_version>r.record_version
+		AND ` + visibleAt("newer", cutoff) + `)`
+}
 
 // A real-data store must exclude a vendor record attached to a synthetic
 // entity. Intraday records are also withheld from this legacy query path until
@@ -302,13 +315,12 @@ func scanRecord(row pgx.CollectableRow) (StoredRecord, error) {
 }
 
 func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
-	sql := `SELECT DISTINCT ON (r.dataset_id, r.logical_key) ` + recordCols + `
+	sql := `SELECT ` + recordCols + `
 		FROM records r JOIN providers p ON p.id = r.provider_id AND p.enabled
 		WHERE r.dataset_id = ANY($1) AND ` + visibleAtCutoff + `
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
 		AND (NOT $6::bool OR p.allow_model_processing) AND ($8='' OR p.id=$8)` + fmt.Sprintf(realSourceFilter, "$7") + `
-		AND r.quality_state IN ('PASS','WARN')
-		ORDER BY r.dataset_id, r.logical_key, r.record_version DESC`
+		AND r.quality_state IN ('PASS','WARN') AND ` + latestRevisionAt("$2")
 	var ents []uuid.UUID
 	if len(q.EntityIDs) > 0 {
 		ents = q.EntityIDs
@@ -342,7 +354,7 @@ func sortRecords(out []StoredRecord) {
 func (s *Store) Coverage(ctx context.Context, entities []uuid.UUID, asOf time.Time) (map[uuid.UUID]map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT r.entity_id, r.dataset_id FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
 		WHERE r.entity_id = ANY($1) AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
-		AND ($4='' OR p.id=$4) AND r.quality_state IN ('PASS','WARN')`, entities, asOf, s.excludeSynthetic, s.providerID)
+		AND ($4='' OR p.id=$4) AND r.quality_state IN ('PASS','WARN') AND `+latestRevisionAt("$2"), entities, asOf, s.excludeSynthetic, s.providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +380,7 @@ func (s *Store) HasGlobal(ctx context.Context, dataset string, asOf time.Time) (
 	var ok bool
 	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM records r JOIN providers p ON p.id=r.provider_id AND p.enabled
 		WHERE r.dataset_id=$1 AND r.entity_id IS NULL AND `+visibleAtCutoff+` AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
-		AND ($4='' OR p.id=$4) AND r.quality_state IN ('PASS','WARN'))`, dataset, asOf, s.excludeSynthetic, s.providerID).Scan(&ok)
+		AND ($4='' OR p.id=$4) AND r.quality_state IN ('PASS','WARN') AND `+latestRevisionAt("$2")+`)`, dataset, asOf, s.excludeSynthetic, s.providerID).Scan(&ok)
 	return ok, err
 }
 
@@ -427,7 +439,10 @@ func (s *Store) Freeze(ctx context.Context, asOf time.Time, ids []uuid.UUID) (st
 		// blocks quality_state updates until the transaction commits.
 		rows, err := tx.Query(ctx, `SELECT r.id FROM records r JOIN providers p ON p.id=r.provider_id
 			WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
-			AND ($4='' OR p.id=$4) AND r.quality_state IN ('PASS','WARN') FOR SHARE OF r,p`, sorted, asOf, s.excludeSynthetic, s.providerID)
+			AND ($4='' OR p.id=$4) AND r.quality_state IN ('PASS','WARN')
+			AND (`+latestRevisionAt("$2")+` OR EXISTS (
+				SELECT 1 FROM snapshots WHERE hash IN ($5,$6) AND as_of=$2 AND record_ids=$1
+			)) FOR SHARE OF r,p`, sorted, asOf, s.excludeSynthetic, s.providerID, hash, legacyHash)
 		if err != nil {
 			return err
 		}

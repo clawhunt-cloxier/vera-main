@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"slices"
 	"time"
 
@@ -81,8 +80,6 @@ func (d *Dataset) Field(name string) (*Field, bool) {
 	return nil, false
 }
 
-var datePat = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-
 // Validate checks a payload against the dictionary: no unknown fields, required present, types parse.
 // Decimal fields must be strings so that no float rounding enters the evidence chain.
 func (c *Catalog) Validate(r Record) error {
@@ -134,7 +131,7 @@ func (c *Catalog) checkType(f Field, v any) error {
 			return fmt.Errorf("want boolean, got %T", v)
 		}
 	case "date":
-		if !isStr || !datePat.MatchString(s) {
+		if _, err := time.Parse(time.DateOnly, s); !isStr || err != nil {
 			return fmt.Errorf("want YYYY-MM-DD, got %v", v)
 		}
 	case "datetime":
