@@ -39,7 +39,7 @@
 | GET | /api/v1/evidence/{id} | 证据版本：来源、口径、时点、原文片段或数值；不返回可公开访问的永久 URL |
 | GET | /api/v1/calculations/{id} | 公式、版本、输入引用、结果 |
 | POST | /api/v1/reports/{id}/versions/{version}/feedback | 反馈：useful/confusing/incorrect/other，可关联 claim；备注 ≤ 2000 字；幂等，201 |
-| GET / POST | /api/v1/conversations | 历史列表 / 首条消息。列表沿用 `limit`、`cursor`。接受消息返回 202、`Location` 和 `Retry-After`。 |
+| GET / POST | /api/v1/conversations | 历史列表 / 首条消息。列表沿用 `page_size`、`cursor`。接受消息返回 202、`Location` 和 `Retry-After`。 |
 | GET / DELETE | /api/v1/conversations/{conversation} | 读取最近轮次或用 `before` 加载早期轮次 / 删除对话。 |
 | POST | /api/v1/conversations/{conversation}/turns | 发送消息或引用同一会话中的轮次。 |
 | GET | /api/v1/conversations/{conversation}/turns/{turn} | 单轮详情，按状态返回候选或待确认计划。 |

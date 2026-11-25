@@ -68,9 +68,6 @@ func (s *Server) mountConversations(m *http.ServeMux) {
 
 func (s *Server) sendConversation(w http.ResponseWriter, r *http.Request) error {
 	var in conversation.Message
-	if err := httpx.Decode(r, &in); err != nil {
-		return err
-	}
 	var conv *uuid.UUID
 	if r.PathValue("conversation") != "" {
 		id, err := pathID(r, "conversation")
@@ -78,6 +75,18 @@ func (s *Server) sendConversation(w http.ResponseWriter, r *http.Request) error 
 			return err
 		}
 		conv = &id
+		if err := httpx.Decode(r, &in); err != nil {
+			return err
+		}
+	} else {
+		var first struct {
+			ClientMessageID uuid.UUID `json:"client_message_id"`
+			Text            string    `json:"text"`
+		}
+		if err := httpx.Decode(r, &first); err != nil {
+			return err
+		}
+		in.ClientMessageID, in.Text = first.ClientMessageID, first.Text
 	}
 	_, ws := principal(r)
 	out, err := s.conversations().Send(r.Context(), conversation.Sender{Workspace: ws, Channel: "web"}, conv, in)
@@ -251,12 +260,12 @@ func (s *Server) conversationAction(w http.ResponseWriter, r *http.Request) erro
 		}
 		err = service.Choose(r.Context(), ws, conv, t.ID, *in.SubjectID, in.ExpectedRevision)
 	case "confirm":
-		if in.PlanID == nil || len(in.PlanHash) != 64 || in.SubjectID != nil || in.TaskRevision != nil {
+		if in.PlanID == nil || !validPlanHash(in.PlanHash) || in.SubjectID != nil || in.TaskRevision != nil {
 			return errs.BadRequest("INVALID_ACTION", "需要计划编号和校验值")
 		}
 		err = service.Confirm(r.Context(), ws, conv, t.ID, *in.PlanID, in.PlanHash, in.ExpectedRevision)
 	case "cancel":
-		if in.SubjectID != nil || in.PlanID != nil || in.PlanHash != "" {
+		if in.SubjectID != nil || in.PlanID != nil || in.PlanHash != "" || in.TaskRevision != nil && *in.TaskRevision < 1 {
 			return errs.BadRequest("INVALID_ACTION", "取消只需要当前版本")
 		}
 		err = service.Cancel(r.Context(), ws, conv, t.ID, in.ExpectedRevision, in.TaskRevision)
@@ -268,6 +277,18 @@ func (s *Server) conversationAction(w http.ResponseWriter, r *http.Request) erro
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+func validPlanHash(hash string) bool {
+	if len(hash) != 64 {
+		return false
+	}
+	for _, c := range hash {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) error {
@@ -341,9 +362,12 @@ func (s *Server) conversationResult(w http.ResponseWriter, r *http.Request) erro
 		if series == nil {
 			series = []facts.Series{}
 		}
-		if doc.SkillVersion == emquant.ObservationBriefVersion && len(series) == 0 && len(tables) != 0 {
-			if chart, ok := choiceConversationSeries(tables[0]); ok {
-				series = append(series, chart)
+		if doc.SkillVersion == emquant.ConversationObservationVersion && len(series) == 0 {
+			for _, table := range tables {
+				if chart, ok := choiceConversationSeries(table); ok {
+					series = append(series, chart)
+					break
+				}
 			}
 		}
 	}
@@ -363,7 +387,7 @@ func (s *Server) conversationResult(w http.ResponseWriter, r *http.Request) erro
 }
 
 func choiceConversationSeries(table facts.Table) (facts.Series, bool) {
-	if len(table.Columns) < 3 || table.Columns[0] != "厂商返回日期" || table.Columns[2] != "成交额（元）" {
+	if table.Title != "Choice 日成交观察（非实时）" || len(table.Columns) < 3 || table.Columns[0] != "厂商返回日期" || table.Columns[2] != "成交额（万元）" {
 		return facts.Series{}, false
 	}
 	if len(table.Rows) == 0 || len(table.Evidence) == 0 {
@@ -378,7 +402,7 @@ func choiceConversationSeries(table facts.Table) (facts.Series, bool) {
 	}
 	note := "日期为 Choice 返回的观察日期，未补齐缺失日期。"
 	return facts.Series{
-		ID: harness.DailyTradingTopic, Title: "成交额", Kind: "bar", X: "trade_date", Unit: "元",
+		ID: harness.DailyTradingTopic, Title: "成交额", Kind: "bar", X: "trade_date", Unit: "万元",
 		Lines: []facts.SeriesLine{values}, Evidence: table.Evidence, Note: &note,
 	}, true
 }

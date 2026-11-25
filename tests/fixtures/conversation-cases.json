@@ -63,6 +63,17 @@
         "skill_id": "stock_analysis",
         "brief": false
       }
+    },
+    {
+      "input": "600000.SH 的日成交",
+      "context": "synthetic Choice native ABI",
+      "expect": {
+        "state": "confirm",
+        "skill_version": "1.2.0-chat-choice.1",
+        "amount_display": "180.00",
+        "amount_unit": "万元",
+        "same_chart_and_table_evidence": true
+      }
     }
   ]
 }

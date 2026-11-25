@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/riverqueue/river"
 	"github.com/shopspring/decimal"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation"
@@ -81,6 +83,11 @@ func TestConversationAPIWithRiver(t *testing.T) {
 	}
 	threadPath := chatPath + "/" + accepted.ConversationID.String()
 	turnPath := threadPath + "/turns/" + accepted.TurnID.String()
+	if status, _, headers := a.do("POST", chatPath, first, nil); status != 202 || headers.Get("Location") != turnPath {
+		t.Fatalf("first message accepted without a matching Location: %d, %s", status, headers.Get("Location"))
+	}
+	a.json("POST", chatPath, map[string]any{"client_message_id": uuid.New(), "text": first.Text, "expected_revision": 1}, 400, nil)
+	a.json("POST", threadPath+"/turns", map[string]any{"client_message_id": uuid.New(), "text": "这个数怎么算的"}, 400, nil)
 	conflicting := first
 	conflicting.Text = "换成另一个请求"
 	a.json("POST", chatPath, conflicting, 409, nil)
@@ -101,6 +108,8 @@ func TestConversationAPIWithRiver(t *testing.T) {
 	contract.check(t, schema("ConversationTurn"), body)
 	a.json("GET", "/api/v1/research-plans/"+planTurn.Plan.ID.String(), nil, 404, nil)
 	confirm := conversationAction{Action: "confirm", PlanID: &planTurn.Plan.ID, PlanHash: planTurn.Plan.PlanHash, ExpectedRevision: planTurn.Revision}
+	a.json("POST", turnPath+"/actions", conversationAction{Action: "confirm", ExpectedRevision: planTurn.Revision}, 400, nil)
+	a.json("POST", turnPath+"/actions", conversationAction{Action: "choose", ExpectedRevision: planTurn.Revision}, 400, nil)
 	b.json("POST", turnPath+"/actions", confirm, 404, nil)
 	codesCh := make(chan int, 2)
 	for range 2 {
@@ -279,6 +288,10 @@ func TestConversationAPIWithRiver(t *testing.T) {
 		t.Fatal("purging chat restored spent research quota")
 	}
 	a.json("GET", fullReportPath, nil, 200, nil)
+	code, pdf, headers = a.do("GET", fullReportPath+"/pdf", nil, nil)
+	if code != 200 || headers.Get("Content-Type") != "application/pdf" || !strings.HasPrefix(string(pdf), "%PDF-") {
+		t.Fatalf("retained formal PDF: %d %v", code, headers)
+	}
 
 	var expiring conversation.Accepted
 	a.json("POST", chatPath, conversation.Message{ClientMessageID: uuid.New(), Text: "演示制造的日成交"}, 202, &expiring)
@@ -289,6 +302,98 @@ func TestConversationAPIWithRiver(t *testing.T) {
 	}
 	a.json("GET", otherPath, nil, 404, nil)
 	awaitConversationPurge(t, e, expiring.ConversationID)
+}
+
+func TestConversationFormalDeliveryAfterDeletionOrExpiry(t *testing.T) {
+	ctx := context.Background()
+	e := setup(t)
+	// Omit the periodic job and research dispatch so we can interleave user
+	// commands with a specific execution attempt and assert before cleanup.
+	register := conversation.Register(e.engine)
+	worker, err := e.engine.NewRiver(e.pool, true, 1, func(workers *river.Workers, cfg *river.Config) {
+		register(workers, cfg)
+		cfg.PeriodicJobs = nil
+		delete(cfg.Queues, "research")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		stop, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := worker.Stop(stop); err != nil {
+			t.Error(err)
+		}
+	})
+	user := e.login(t, "chat-formal-cancel")
+	codes, err := identity.CreateInvites(ctx, e.pool, 1, 1, time.Hour, "conversation test", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.json("POST", "/api/v1/onboarding", map[string]string{"invite_code": codes[0], "persona": "analyst"}, 200, nil)
+	for _, scenario := range []string{"queued_delete", "expired_before_delivery"} {
+		t.Run(scenario, func(t *testing.T) {
+			a := &client{t: t, e: e, http: user.http, csrf: user.csrf}
+			first := conversation.Message{ClientMessageID: uuid.New(), Text: "为演示制造生成完整个股研报"}
+			var accepted conversation.Accepted
+			a.json("POST", chatPath, first, 202, &accepted)
+			path := chatPath + "/" + accepted.ConversationID.String()
+			turnPath := path + "/turns/" + accepted.TurnID.String()
+			v := chatAwait(t, a, accepted.ConversationID, accepted.TurnID, func(v chatReadTurn) bool { return v.State != "pending" })
+			if v.Plan == nil || !v.Plan.Executable {
+				t.Fatalf("formal plan: %+v", v)
+			}
+			a.json("POST", turnPath+"/actions", conversationAction{Action: "confirm", PlanID: &v.Plan.ID, PlanHash: v.Plan.PlanHash, ExpectedRevision: v.Revision}, 204, nil)
+			var ws, task uuid.UUID
+			if err := e.pool.QueryRow(ctx, "SELECT workspace_id,task_id FROM conversation_turns WHERE id=$1", accepted.TurnID).Scan(&ws, &task); err != nil {
+				t.Fatal(err)
+			}
+			state := func(want string, wantEpoch int64) {
+				t.Helper()
+				var status string
+				var epoch int64
+				var report *uuid.UUID
+				err := e.pool.QueryRow(ctx, "SELECT status,epoch,report_id FROM research_tasks WHERE id=$1", task).Scan(&status, &epoch, &report)
+				if err != nil || status != want || epoch != wantEpoch || report != nil {
+					t.Fatalf("state=%s epoch=%d report=%v: %v", status, epoch, report, err)
+				}
+			}
+			state("QUEUED", 1)
+			if scenario == "expired_before_delivery" {
+				if _, err := e.pool.Exec(ctx, "UPDATE conversations SET expires_at=now()-interval '1 second' WHERE id=$1", accepted.ConversationID); err != nil {
+					t.Fatal(err)
+				}
+				a.json("GET", path, nil, 404, nil)
+				if err := e.engine.Run(ctx, ws, task, 1); err != nil {
+					t.Fatal(err)
+				}
+				state("ASSEMBLING", 1)
+			}
+			a.json("DELETE", path, nil, 204, nil)
+			if scenario == "queued_delete" {
+				state("CANCELLED", 2)
+				a.json("POST", chatPath, first, 404, nil)
+			} else {
+				var status string
+				var epoch int64
+				var report *uuid.UUID
+				if err := e.pool.QueryRow(ctx, "SELECT status,epoch,report_id FROM research_tasks WHERE id=$1", task).Scan(&status, &epoch, &report); err != nil ||
+					(status != "CANCEL_REQUESTED" && status != "CANCELLED") || epoch != 2 || report != nil {
+					t.Fatalf("expired task after deletion: %s, epoch %d, report %v: %v", status, epoch, report, err)
+				}
+			}
+			if err := e.engine.Run(ctx, ws, task, 1); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := e.pool.QueryRow(ctx, "SELECT count(*) FROM report_versions WHERE task_id=$1", task).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("hidden conversation delivered a report: %d %v", count, err)
+			}
+		})
+	}
 }
 
 func TestCloseConversationSourceWithRiver(t *testing.T) {
@@ -378,12 +483,56 @@ func TestCloseConversationSourceWithRiver(t *testing.T) {
 		a.json("GET", path, nil, 503, nil)
 	}
 	changeGrant(true)
-	if _, err := e.pool.Exec(ctx, "UPDATE records SET quality_state='QUARANTINED' WHERE id=$1", evidence); err != nil {
+	// A second, narrower snapshot cites some of the same days. Quarantining
+	// an older day hides the first result without masking the usable citation.
+	var narrow conversation.Accepted
+	a.json("POST", chatPath, conversation.Message{ClientMessageID: uuid.New(), Text: "演示制造近 5 个交易日融资余额"}, 202, &narrow)
+	narrowThread := chatPath + "/" + narrow.ConversationID.String()
+	narrowTurn := narrowThread + "/turns/" + narrow.TurnID.String()
+	v := chatAwait(t, a, narrow.ConversationID, narrow.TurnID, func(v chatReadTurn) bool { return v.State != "pending" })
+	if v.Plan == nil || !v.Plan.Executable {
+		t.Fatalf("narrow plan: %+v", v)
+	}
+	a.json("POST", narrowTurn+"/actions", conversationAction{Action: "confirm", PlanID: &v.Plan.ID, PlanHash: v.Plan.PlanHash, ExpectedRevision: v.Revision}, 204, nil)
+	if v := chatAwait(t, a, narrow.ConversationID, narrow.TurnID, func(v chatReadTurn) bool { return harness.IsTerminal(v.TaskStatus) }); !v.Result {
+		t.Fatalf("narrow result: %+v", v)
+	}
+	var narrowResult struct{ Series []facts.Series }
+	a.json("GET", narrowTurn+"/result", nil, 200, &narrowResult)
+	if len(narrowResult.Series) != 1 || len(narrowResult.Series[0].Evidence) == 0 {
+		t.Fatalf("narrow evidence: %+v", narrowResult)
+	}
+	shared := narrowResult.Series[0].Evidence[0]
+	if !slices.Contains(result.Series[0].Evidence, shared) {
+		t.Fatal("expected shared evidence across snapshots")
+	}
+	sibling := slices.IndexFunc(result.Series[0].Evidence, func(id uuid.UUID) bool {
+		return !slices.Contains(narrowResult.Series[0].Evidence, id)
+	})
+	if sibling < 0 {
+		t.Fatal("expected an earlier day exclusive to the original snapshot")
+	}
+	if _, err := e.pool.Exec(ctx, "UPDATE records SET quality_state='QUARANTINED' WHERE id=$1", result.Series[0].Evidence[sibling]); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range paths {
+	for _, path := range slices.Delete(slices.Clone(paths), 4, 5) {
 		a.json("GET", path, nil, 503, nil)
 	}
+	sharedPath := "/api/v1/evidence/" + shared.String()
+	a.json("GET", sharedPath, nil, 200, nil)
+	if _, err := e.pool.Exec(ctx, "UPDATE records SET quality_state='QUARANTINED' WHERE id=$1", shared); err != nil {
+		t.Fatal(err)
+	}
+	a.json("GET", sharedPath, nil, 503, nil)
+	if _, err := e.pool.Exec(ctx, "UPDATE conversations SET expires_at=now()-interval '1 second' WHERE id=$1", accepted.ConversationID); err != nil {
+		t.Fatal(err)
+	}
+	changeGrant(false)
+	for _, path := range slices.Delete(slices.Clone(paths), 4, 5) {
+		a.json("GET", path, nil, 404, nil)
+	}
+	a.json("DELETE", narrowThread, nil, 204, nil)
+	a.json("GET", sharedPath, nil, 404, nil)
 }
 
 func startConversationWorker(t *testing.T, e *env) {

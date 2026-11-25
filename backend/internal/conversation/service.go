@@ -109,10 +109,14 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 			return err
 		}
 		var previousHash string
-		err := tx.QueryRow(ctx, `SELECT t.conversation_id,t.id,t.request_hash FROM conversation_turns t
-			JOIN conversations c ON c.id=t.conversation_id AND c.workspace_id=t.workspace_id WHERE t.client_message_id=$1 AND `+visible,
-			message.ClientMessageID).Scan(&out.ConversationID, &out.TurnID, &previousHash)
+		var stillVisible bool
+		err := tx.QueryRow(ctx, `SELECT t.conversation_id,t.id,t.request_hash,(`+visible+`) FROM conversation_turns t
+			JOIN conversations c ON c.id=t.conversation_id AND c.workspace_id=t.workspace_id WHERE t.client_message_id=$1`,
+			message.ClientMessageID).Scan(&out.ConversationID, &out.TurnID, &previousHash, &stillVisible)
 		if err == nil {
+			if !stillVisible {
+				return errs.NotFound()
+			}
 			if previousHash != hash {
 				return errs.Conflict("MESSAGE_ID_REUSED", "该消息编号已用于不同请求")
 			}

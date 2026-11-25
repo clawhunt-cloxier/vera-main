@@ -3,6 +3,7 @@ import { api, get, post, type S } from './client';
 export type ConversationAccepted = S<'ConversationAccepted'>;
 export type ConversationAction = S<'ConversationAction'>;
 export type ConversationMessage = S<'ConversationMessage'>;
+export type ConversationFollowUp = S<'ConversationFollowUp'>;
 export type ConversationHistory = S<'ConversationHistory'>;
 export type ConversationThread = S<'ConversationThread'>;
 export type ConversationTurn = S<'ConversationTurn'>;
@@ -51,8 +52,11 @@ export const conversationTurn = (id: string, turn: string, signal: AbortSignal) 
 export const conversationResult = (id: string, turn: string, signal: AbortSignal) =>
   get<ConversationResult>(turnPath(id, turn) + '/result', { ...json, signal });
 
-export const sendMessage = (body: ConversationMessage, id?: string) =>
-  post<ConversationAccepted>(id ? threadPath(id) + '/turns' : base, body, json);
+export const startConversation = (body: ConversationMessage) =>
+  post<ConversationAccepted>(base, body, json);
+
+export const sendFollowUp = (id: string, body: ConversationFollowUp) =>
+  post<ConversationAccepted>(threadPath(id) + '/turns', body, json);
 
 export const actOnTurn = (id: string, turn: string, action: ConversationAction) =>
   post<void>(turnPath(id, turn) + '/actions', action, json);

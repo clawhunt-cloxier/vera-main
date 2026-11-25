@@ -329,7 +329,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 			doc.DataAsOf = "数据冻结截止时点：" + cutoff.In(cst).Format("2006-01-02 15:04:05") + "（北京时间）"
 		}
 	}
-	if t.Version == emquant.ObservationBriefVersion || t.Version == MixedObservationVersion {
+	if emquant.IsDailyBriefVersion(t.Version) || t.Version == MixedObservationVersion {
 		doc.ResultKind = "limited"
 		doc.DataAsOf = "数据采集后的冻结时点：" + t.AsOf.In(cst).Format("2006-01-02 15:04:05") + "（北京时间；非实时）"
 	}
@@ -363,7 +363,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 		return doc, nil
 	}
 	provs, err := e.providerNames(ctx)
-	if t.Version == emquant.ObservationBriefVersion && e.Brief != nil {
+	if emquant.IsDailyBriefVersion(t.Version) && e.Brief != nil {
 		err = e.Pool.QueryRow(ctx, `SELECT name FROM providers WHERE id=$1 AND enabled AND NOT synthetic`, e.Brief.ProviderID).Scan(&provs)
 	}
 	if t.Version == RealtimeBriefVersion && len(doc.SourceFreshness) > 0 {
@@ -389,7 +389,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 // realtimeFreshness reads and reauthorizes the immutable quote bound to the
 // task. It never chooses a newer record from a progress revision or wall clock.
 func (e *Engine) realtimeFreshness(ctx context.Context, t *taskRow) (*time.Time, []SourceFreshness, error) {
-	if t.Version == emquant.ObservationBriefVersion || t.Version == MixedObservationVersion {
+	if emquant.IsDailyBriefVersion(t.Version) || t.Version == MixedObservationVersion {
 		if e.Brief == nil {
 			return nil, nil, errors.New("harness: observation source unavailable")
 		}
@@ -471,6 +471,9 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 	versions, _ := json.Marshal(map[string]string{"skill": doc.SkillVersion, "rules": check.RulesVersion, "formulas": facts.FormulaVersion,
 		"prompts": PromptVersion, "policy": e.Policy.Version, "prices": e.priceVersion()})
 	return e.deliverTransaction(ctx, t, func(tx pgx.Tx) error {
+		if err := lockDeliveryConversation(ctx, tx, t); err != nil {
+			return err
+		}
 		var epoch, revision int64
 		var status, planHash string
 		var snapshot *string

@@ -26,8 +26,8 @@ type responseGrant func(func() error) error
 func noop() error                        { return nil }
 func unrestricted(fn func() error) error { return fn() }
 
-// Keep handler errors intact. A failed source check before the callback runs
-// means the report cannot currently be displayed.
+// Keep handler errors and visibility failures intact. Treat other failures
+// before the callback as source unavailability.
 func checkSource(check responseGrant, message string) responseGrant {
 	return func(fn func() error) error {
 		called := false
@@ -35,7 +35,7 @@ func checkSource(check responseGrant, message string) responseGrant {
 			called = true
 			return fn()
 		})
-		if err != nil && !called {
+		if err != nil && !called && errs.As(err).Status != http.StatusNotFound {
 			return errs.Unavailable("SOURCE_UNAVAILABLE", message).Wrap(err)
 		}
 		return err
@@ -73,7 +73,7 @@ func (s *Server) versionGrant(r *http.Request, version string) (responseGrant, e
 	switch {
 	case version == harness.MixedObservationVersion:
 		return s.mixedGrant(r), nil
-	case version == emquant.ObservationBriefVersion || version == harness.RealtimeBriefVersion:
+	case emquant.IsDailyBriefVersion(version) || version == harness.RealtimeBriefVersion:
 		return s.choiceGrant(r), nil
 	case harness.IsCloseResearchVersion(version):
 		return s.closeGrant(r), nil
@@ -99,7 +99,7 @@ func (s *Server) resourceVersion(r *http.Request) (task uuid.UUID, version strin
 		if json.Unmarshal(data, &input) != nil {
 			return task, "", errs.BadRequest("INVALID_BODY", "请求内容无效")
 		}
-		query = "SELECT id,skill_version FROM research_plans WHERE id=$1"
+		query = "SELECT p.id,p.skill_version FROM research_plans p WHERE p.id=$1 AND NOT p.conversation_plan"
 		args = append(args, input.PlanID)
 	} else {
 		id, err := pathID(r, "id")
@@ -109,17 +109,20 @@ func (s *Server) resourceVersion(r *http.Request) (task uuid.UUID, version strin
 		args = append(args, id)
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/api/v1/research-plans/"):
-			query = "SELECT id,skill_version FROM research_plans WHERE id=$1"
+			query = "SELECT p.id,p.skill_version FROM research_plans p WHERE p.id=$1 AND NOT p.conversation_plan"
 		case strings.HasPrefix(r.URL.Path, "/api/v1/research-tasks/"):
-			query = "SELECT id,skill_version FROM research_tasks WHERE id=$1"
+			query = `SELECT t.id,t.skill_version FROM research_tasks t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
+				WHERE t.id=$1 AND ` + visibleShortResearch
 		case strings.HasPrefix(r.URL.Path, "/api/v1/calculations/"):
-			query = "SELECT t.id,t.skill_version FROM calculations c JOIN research_tasks t ON t.id=c.task_id AND t.workspace_id=c.workspace_id WHERE c.id=$1"
+			query = `SELECT t.id,t.skill_version FROM calculations c JOIN research_tasks t ON t.id=c.task_id AND t.workspace_id=c.workspace_id
+				JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE c.id=$1 AND ` + visibleShortResearch
 		case strings.HasPrefix(r.URL.Path, "/api/v1/reports/"):
 			number, err := strconv.Atoi(r.PathValue("version"))
 			if err != nil || number < 1 {
 				return task, "", errs.NotFound()
 			}
-			query = "SELECT t.id,t.skill_version FROM report_versions v JOIN research_tasks t ON t.id=v.task_id AND t.workspace_id=v.workspace_id WHERE v.report_id=$1 AND v.version=$2"
+			query = `SELECT t.id,t.skill_version FROM report_versions v JOIN research_tasks t ON t.id=v.task_id AND t.workspace_id=v.workspace_id
+				JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE v.report_id=$1 AND v.version=$2 AND ` + visibleShortResearch
 			args = append(args, number)
 		default:
 			return task, "", errs.NotFound()
@@ -192,11 +195,10 @@ func (s *Server) snapshotGrant(r *http.Request, task uuid.UUID, version string, 
 			return checkSource(func(use func() error) error {
 				return s.Engine.WithMixedDisplay(ctx, ws, task, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return use() })
 			}, "双来源研报的冻结数据当前不可读取")(fn)
-		case emquant.ObservationBriefVersion, harness.RealtimeBriefVersion:
-			if version == harness.RealtimeBriefVersion {
-				return s.withQuote(r, ws, task, func(emquant.QuoteView) error { return fn() })
-			}
-			return s.withDaily(r, ws, task, func(emquant.BriefObservation) error { return fn() })
+		case emquant.ObservationBriefVersion, emquant.ConversationObservationVersion:
+			return s.withDaily(r, ws, task, version, func(emquant.BriefObservation) error { return fn() })
+		case harness.RealtimeBriefVersion:
+			return s.withQuote(r, ws, task, func(emquant.QuoteView) error { return fn() })
 		default:
 			return meta(fn)
 		}
@@ -206,26 +208,41 @@ func (s *Server) snapshotGrant(r *http.Request, task uuid.UUID, version string, 
 // The provider switch and the bound snapshot are checked in one transaction.
 // In particular a full pool of concurrent readers never waits for a second
 // connection while already holding its first grant lock.
-func (s *Server) withDaily(r *http.Request, ws, task uuid.UUID, use func(emquant.BriefObservation) error) error {
+func (s *Server) withDaily(r *http.Request, ws, task uuid.UUID, version string, use func(emquant.BriefObservation) error) error {
 	brief := s.Engine.Brief
 	if brief == nil || brief.Runtime == nil {
 		return errs.Unavailable("SOURCE_UNAVAILABLE", "Choice 研究来源当前不可用")
 	}
-	if !s.combined() {
+	if !s.combined() && version != emquant.ConversationObservationVersion {
 		return brief.WithSnapshot(r.Context(), ws, task, dataservice.SourceDisplay, use)
 	}
-	return pgx.BeginFunc(r.Context(), s.Pool, func(tx pgx.Tx) error {
-		if err := brief.MixedProviderUse(r.Context(), tx, dataservice.SourceModel); err != nil {
-			return errs.Unavailable("SOURCE_UNAVAILABLE", "Choice 研究来源当前不可用").Wrap(err)
-		}
-		o, err := brief.Read(r.Context(), tx, ws, task, dataservice.SourceDisplay)
-		if err != nil {
-			return err
-		}
-		if o.Manifest.Security.Product != brief.Product || o.Manifest.Liquidity.Product != brief.Product {
-			return errs.Unavailable("SOURCE_UNAVAILABLE", "成交快照不属于当前 Choice 产品")
-		}
-		return use(o)
+	var observation emquant.BriefObservation
+	grant := checkSource(func(display func() error) error {
+		return pgx.BeginFunc(r.Context(), s.Pool, func(tx pgx.Tx) error {
+			// Confirm also acquires the provider permission before the conversation.
+			if s.combined() {
+				if err := brief.MixedProviderUse(r.Context(), tx, dataservice.SourceModel); err != nil {
+					return err
+				}
+			}
+			if version == emquant.ConversationObservationVersion {
+				if err := harness.LockShortConversation(r.Context(), tx, ws, task); err != nil {
+					return err
+				}
+			}
+			o, err := brief.Read(r.Context(), tx, ws, task, dataservice.SourceDisplay)
+			if err != nil {
+				return err
+			}
+			if o.Manifest.Security.Product != brief.Product || o.Manifest.Liquidity.Product != brief.Product {
+				return errs.Unavailable("SOURCE_UNAVAILABLE", "成交快照不属于当前 Choice 产品")
+			}
+			observation = o
+			return display()
+		})
+	}, "Choice 研究来源当前不可用")
+	return grant(func() error {
+		return use(observation)
 	})
 }
 

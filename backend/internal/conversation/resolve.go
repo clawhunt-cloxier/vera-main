@@ -212,6 +212,9 @@ func (s Service) plan(ctx context.Context, args resolveArgs, scope Scope, starte
 				return s.fail(ctx, args, prep.Message)
 			case prep.Status != "ready":
 				if err := s.setPreparing(ctx, args, scope); err != nil {
+					if errors.Is(err, errTurnMoved) {
+						return nil
+					}
 					return err
 				}
 				return errPreparing
@@ -235,13 +238,25 @@ func (s Service) plan(ctx context.Context, args resolveArgs, scope Scope, starte
 
 func (s Service) setPreparing(ctx context.Context, args resolveArgs, scope Scope) error {
 	return db.InWorkspace(ctx, s.Engine.Pool, args.Workspace, func(tx pgx.Tx) error {
+		if err := lockConversation(ctx, tx, args.Conversation); err != nil {
+			if errs.As(err).Status == 404 {
+				return errTurnMoved
+			}
+			return err
+		}
 		data, err := json.Marshal(intent{Scope: scope, Preparing: true})
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE conversation_turns t SET intent=$3, message='正在准备研究数据…'
-			WHERE t.id=$1 AND t.revision=$2 AND t.state='pending'`, args.Turn, args.Revision, data)
-		return err
+		result, err := tx.Exec(ctx, `UPDATE conversation_turns SET intent=$3, message='正在准备研究数据…'
+			WHERE id=$1 AND revision=$2 AND state='pending' AND conversation_id=$4`, args.Turn, args.Revision, data, args.Conversation)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return errTurnMoved
+		}
+		return nil
 	})
 }
 

@@ -194,7 +194,7 @@ func (e *Engine) buildSkillPlanForTurn(ctx context.Context, ws uuid.UUID, sk *Sk
 		requirement := string(emquant.QuoteLatestAvailable)
 		plan.QuoteRequirement = &requirement
 	}
-	if sk.Version == emquant.ObservationBriefVersion || sk.Version == MixedObservationVersion {
+	if emquant.IsDailyBriefVersion(sk.Version) || sk.Version == MixedObservationVersion {
 		plan.SnapshotMode = "collect_latest"
 	}
 	params, _ := json.Marshal(p)
@@ -745,7 +745,7 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	switch t.Version {
 	case RealtimeBriefVersion:
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
-	case emquant.ObservationBriefVersion, MixedObservationVersion:
+	case emquant.ObservationBriefVersion, emquant.ConversationObservationVersion, MixedObservationVersion:
 		err = e.observationPipeline(runCtx, ctx, t, sk)
 	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion, CloseUnifiedVersion, ConversationCloseVersion:
 		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {

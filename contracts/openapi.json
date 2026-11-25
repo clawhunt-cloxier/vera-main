@@ -1595,6 +1595,13 @@
                   "type": "integer",
                   "minimum": 1
                 }
+              },
+              "Location": {
+                "description": "Relative URL of the accepted turn, including for a replayed message",
+                "schema": {
+                  "type": "string",
+                  "format": "uri-reference"
+                }
               }
             }
           },
@@ -1758,6 +1765,13 @@
                   "type": "integer",
                   "minimum": 1
                 }
+              },
+              "Location": {
+                "description": "Relative URL of the accepted turn, including for a replayed message",
+                "schema": {
+                  "type": "string",
+                  "format": "uri-reference"
+                }
               }
             }
           },
@@ -1796,7 +1810,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConversationMessage"
+                "$ref": "#/components/schemas/ConversationFollowUp"
               }
             }
           }
@@ -2504,6 +2518,25 @@
             "type": "string",
             "minLength": 2,
             "maxLength": 500
+          }
+        },
+        "required": [
+          "client_message_id",
+          "text"
+        ]
+      },
+      "ConversationFollowUp": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "client_message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 500
           },
           "reply_to_turn_id": {
             "type": "string",
@@ -2516,20 +2549,30 @@
         },
         "required": [
           "client_message_id",
-          "text"
+          "text",
+          "expected_revision"
         ]
       },
       "ConversationAction": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ConversationChoose"
+          },
+          {
+            "$ref": "#/components/schemas/ConversationConfirm"
+          },
+          {
+            "$ref": "#/components/schemas/ConversationCancel"
+          }
+        ]
+      },
+      "ConversationChoose": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "action": {
             "type": "string",
-            "enum": [
-              "choose",
-              "confirm",
-              "cancel"
-            ]
+            "const": "choose"
           },
           "expected_revision": {
             "type": "integer",
@@ -2538,6 +2581,25 @@
           "subject_id": {
             "type": "string",
             "format": "uuid"
+          }
+        },
+        "required": [
+          "action",
+          "expected_revision",
+          "subject_id"
+        ]
+      },
+      "ConversationConfirm": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "confirm"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
           },
           "plan_id": {
             "type": "string",
@@ -2546,6 +2608,26 @@
           "plan_hash": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "action",
+          "expected_revision",
+          "plan_id",
+          "plan_hash"
+        ]
+      },
+      "ConversationCancel": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "cancel"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
           },
           "task_revision": {
             "type": "integer",

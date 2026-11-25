@@ -10,7 +10,8 @@ import {
   conversationTurn,
   deleteConversation,
   historyKey,
-  sendMessage,
+  sendFollowUp,
+  startConversation,
   threadKey,
   type ConversationAction,
   type ConversationThread,
@@ -61,15 +62,16 @@ export function ConversationComposer({
   const nav = useNavigate();
   const cache = useQueryClient();
   const mutation = useMutation({
-    mutationFn: (value: string) =>
-      sendMessage(
-        {
-          client_message_id: key,
-          text: value,
-          ...(thread ? { expected_revision: thread.revision, reply_to_turn_id: reply?.id } : {}),
-        },
-        thread?.id
-      ),
+    mutationFn: (value: string) => {
+      const body = { client_message_id: key, text: value };
+      return thread
+        ? sendFollowUp(thread.id, {
+            ...body,
+            expected_revision: thread.revision,
+            reply_to_turn_id: reply?.id,
+          })
+        : startConversation(body);
+    },
     onSuccess: async (data) => {
       setText('');
       setKey(newKey());
@@ -462,8 +464,7 @@ function TurnBody({
       void cache.invalidateQueries({ queryKey: ['tasks'] });
     },
   });
-  const run = (payload: Omit<ConversationAction, 'expected_revision'>) =>
-    action.mutate({ ...payload, expected_revision: turn.revision });
+  const expected_revision = turn.revision;
   const status = turn.task_status;
   const working = status != null && !terminal.includes(status);
   const plan = turn.plan;
@@ -481,7 +482,9 @@ function TurnBody({
             <SubjectPicker
               candidates={turn.candidates}
               choosing={action.isPending}
-              onChoose={(subject) => run({ action: 'choose', subject_id: subject })}
+              onChoose={(subject) =>
+                action.mutate({ action: 'choose', subject_id: subject, expected_revision })
+              }
             />
           )}
         </>
@@ -533,7 +536,12 @@ function TurnBody({
               className="primary"
               disabled={action.isPending}
               onClick={() =>
-                run({ action: 'confirm', plan_id: plan.id, plan_hash: plan.plan_hash })
+                action.mutate({
+                  action: 'confirm',
+                  plan_id: plan.id,
+                  plan_hash: plan.plan_hash,
+                  expected_revision,
+                })
               }
             >
               确认研究
@@ -553,7 +561,13 @@ function TurnBody({
             type="button"
             className="chat-action"
             disabled={action.isPending}
-            onClick={() => run({ action: 'cancel', task_revision: turn.task_revision })}
+            onClick={() =>
+              action.mutate({
+                action: 'cancel',
+                task_revision: turn.task_revision,
+                expected_revision,
+              })
+            }
           >
             取消本轮
           </button>

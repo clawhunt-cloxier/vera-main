@@ -950,51 +950,92 @@ func (s *Server) getEvidence(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	_, ws := principal(r)
-	// A published TuShare record may also be present in a standalone close
-	// task. That task grants its own path, independently of Choice.
-	var version string
-	var task uuid.UUID
-	err = db.InWorkspace(r.Context(), s.Pool, ws, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT t.id,t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
+	handled, err := s.recordEvidence(w, r, ws, id)
+	if handled {
+		return err
+	}
+	if err != nil && errs.As(err).Status != http.StatusServiceUnavailable {
+		return err
+	}
+	if handled, supplementErr := s.supplementEvidence(w, r, ws, id); handled || supplementErr != nil {
+		return supplementErr
+	}
+	if s.Engine.Brief != nil {
+		if handled, briefErr := s.briefEvidence(w, r); handled || briefErr != nil {
+			return briefErr
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return errs.NotFound()
+}
+
+func (s *Server) recordEvidence(w http.ResponseWriter, r *http.Request, ws, id uuid.UUID) (bool, error) {
+	ctx := r.Context()
+	type citation struct {
+		Task    uuid.UUID
+		Version string
+	}
+	var citations []citation
+	err := db.InWorkspace(ctx, s.Pool, ws, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT t.id,t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
 			JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
 			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]) AND t.skill_version=ANY($3::text[])
 			AND (t.skill_version<>ALL($4::text[]) OR t.status='COMPLETED') AND `+visibleShortResearch+`
-			ORDER BY (t.skill_version=ANY($4::text[])),t.id LIMIT 1`, id, s.historyVersions(),
+			ORDER BY (t.skill_version=ANY($4::text[])),t.id`, id, s.historyVersions(),
 			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion, harness.CloseUnifiedVersion, harness.ConversationCloseVersion, harness.ConversationFixtureVersion},
-			[]string{harness.CloseUnifiedVersion, harness.ConversationCloseVersion, harness.ConversationFixtureVersion}).Scan(&task, &version)
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		if handled, err := s.supplementEvidence(w, r, ws, id); handled || err != nil {
+			[]string{harness.CloseUnifiedVersion, harness.ConversationCloseVersion, harness.ConversationFixtureVersion})
+		if err != nil {
 			return err
 		}
-		if s.Engine.Brief != nil {
-			if handled, err := s.briefEvidence(w, r); handled || err != nil {
-				return err
-			}
-		}
-		return errs.NotFound()
-	}
-	if err != nil {
+		citations, err = pgx.CollectRows(rows, pgx.RowToStructByPos[citation])
 		return err
+	})
+	if err != nil || len(citations) == 0 {
+		return false, err
 	}
-	grant, err := s.versionGrant(r, version)
+	// Prepare the response outside the grant transaction to avoid acquiring
+	// another pooled connection while holding source and snapshot locks.
+	recs, err := s.Store.Get(ctx, []uuid.UUID{id})
 	if err != nil {
-		return err
-	}
-	if version == harness.CloseUnifiedVersion || version == harness.ConversationCloseVersion {
-		grant = s.snapshotGrant(r, task, version, grant)
-	}
-	// Query before taking the write-time grant to keep the transaction short.
-	recs, err := s.Store.Get(r.Context(), []uuid.UUID{id})
-	if err != nil {
-		return err
+		return false, err
 	}
 	rec, found := recs[id]
-	if !found || rec.ProviderID != s.historyRecordProvider() {
-		return errs.NotFound()
+	found = found && rec.ProviderID == s.historyRecordProvider()
+	var ev Evidence
+	if found {
+		ev = s.evidence(r, rec)
 	}
-	ev := s.evidence(r, rec)
-	return grant(func() error { httpx.JSON(w, r, 200, ev); return nil })
+	// A bad sibling record may make one citation unreadable. Each citing
+	// snapshot has its own authorization and can independently prove access.
+	var unavailable error
+	for _, cite := range citations {
+		grant, err := s.versionGrant(r, cite.Version)
+		if err != nil {
+			return false, err
+		}
+		written := false
+		err = s.snapshotGrant(r, cite.Task, cite.Version, grant)(func() error {
+			if !found {
+				return errs.NotFound()
+			}
+			httpx.JSON(w, r, 200, ev)
+			written = true
+			return nil
+		})
+		if written {
+			return true, err
+		}
+		switch errs.As(err).Status {
+		case http.StatusNotFound:
+		case http.StatusServiceUnavailable:
+			unavailable = err
+		default:
+			return false, err
+		}
+	}
+	return false, unavailable
 }
 
 func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidence {

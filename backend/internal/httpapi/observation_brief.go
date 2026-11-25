@@ -41,7 +41,7 @@ func dailyTradeDisplayValue(raw string, shift int32, historical bool) (string, e
 // Scale the known A-share daily observation columns for both report formats.
 // Historical briefs keep their existing two-decimal presentation.
 func formatDailyTradeTables(d *harness.Document) error {
-	historical := d.SkillVersion == emquant.ObservationBriefVersion || d.SkillVersion == harness.MixedObservationVersion
+	historical := emquant.IsDailyBriefVersion(d.SkillVersion) || d.SkillVersion == harness.MixedObservationVersion
 	if !historical && d.SkillVersion != harness.CloseUnifiedVersion {
 		return nil
 	}
@@ -169,7 +169,7 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 			return true, errs.Unavailable("SOURCE_UNAVAILABLE", "双来源证据当前不可读取").Wrap(err)
 		}
 	} else {
-		err = s.withDaily(r, ws, task, display)
+		err = s.withDaily(r, ws, task, version, display)
 	}
 	return true, err
 }

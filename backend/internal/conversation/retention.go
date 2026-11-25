@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
-	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
 
 type retentionArgs struct{}
@@ -48,51 +48,20 @@ func (w *retentionWorker) Work(ctx context.Context, _ *river.Job[retentionArgs])
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, item := range items {
 		if err := s.expire(ctx, item.workspace, item.conversation); err != nil {
-			return err
+			failures = append(failures, err)
+			continue
 		}
 		if err := s.clean(ctx, item); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (s Service) clean(ctx context.Context, item expired) error {
-	type task struct {
-		id       uuid.UUID
-		status   string
-		revision int64
-	}
-	rows, err := s.Engine.Pool.Query(ctx, `SELECT r.id,r.status,r.revision FROM research_tasks r
-		JOIN conversation_turns t ON t.task_id=r.id AND t.workspace_id=r.workspace_id
-		JOIN conversations c ON c.id=t.conversation_id AND c.workspace_id=t.workspace_id
-		WHERE c.id=$1 AND c.workspace_id=$2 AND c.deleted_at IS NOT NULL`, item.conversation, item.workspace)
-	if err != nil {
-		return err
-	}
-	tasks, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (task, error) {
-		var value task
-		err := r.Scan(&value.id, &value.status, &value.revision)
-		return value, err
-	})
-	if err != nil {
-		return err
-	}
-	waiting := false
-	for _, t := range tasks {
-		if harness.IsTerminal(t.status) {
-			continue
-		}
-		waiting = true
-		if _, _, err := s.Engine.CancelTask(ctx, item.workspace, t.id, t.revision); err != nil && errs.As(err).Status != 409 {
-			return err
-		}
-	}
-	if waiting {
-		return nil
-	}
 	return db.InSystem(ctx, s.Engine.Pool, func(tx pgx.Tx) error {
 		var id uuid.UUID
 		err := tx.QueryRow(ctx, `SELECT id FROM conversations WHERE id=$1 AND workspace_id=$2 AND deleted_at IS NOT NULL FOR UPDATE`,
@@ -102,6 +71,15 @@ func (s Service) clean(ctx context.Context, item expired) error {
 		}
 		if err != nil {
 			return err
+		}
+		var active bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM conversation_turns t
+			JOIN research_tasks r ON r.id=t.task_id AND r.workspace_id=t.workspace_id
+			WHERE t.conversation_id=$1 AND t.workspace_id=$2 AND r.status<>ALL($3::text[]))`, id, item.workspace, terminalStatuses).Scan(&active); err != nil {
+			return err
+		}
+		if active {
+			return nil
 		}
 		rows, err := tx.Query(ctx, `SELECT t.task_id FROM conversation_turns t JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
 			WHERE t.conversation_id=$1 AND t.workspace_id=$2 AND p.conversation_brief AND t.task_id IS NOT NULL`, id, item.workspace)

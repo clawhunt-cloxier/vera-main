@@ -1,6 +1,6 @@
 # Vera MVP 体验与运行说明
 
-更新：2026-11-07。分支 agent/claude/mvp，未 push。本文只写实际跑过的内容；没跑过的单列在第 6 节。
+本文记录本地演示的启动和体验流程。对话研究的验收命令和数据模式见 [TESTING](TESTING.md#conversation-acceptance)。
 
 ## 1. 重要前提
 
@@ -70,7 +70,6 @@ MODEL_ROUTER_ADAPTER=openai MODEL_ROUTER_BASE_URL=https://api.deepseek.com MODEL
 
 - 需要选择对象的 `choose` 分支：目前只做了与契约的类型对齐，没有在浏览器里走过。
 - 深度研究的耗时与费用没有统计。
-- 没有仓库内的 Playwright 用例，浏览器检查脚本只在临时目录里。
 - 完整三技能尚未在真实厂商数据上完成验收；东方财富 300059.SZ 的真实成交简报已通过网站生成、证据与 PDF 验收，明确非实时，不包含未验明的行情或财报字段。
 
 ## 7. 已知限制

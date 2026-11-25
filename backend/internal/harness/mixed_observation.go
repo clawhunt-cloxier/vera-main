@@ -155,7 +155,7 @@ func (e *Engine) withObservation(ctx context.Context, ws, task uuid.UUID, versio
 	if e.Brief == nil {
 		return errors.New("choice 数据源不可用")
 	}
-	if version == emquant.ObservationBriefVersion {
+	if emquant.IsDailyBriefVersion(version) {
 		return e.Brief.WithSnapshot(ctx, ws, task, use, func(o emquant.BriefObservation) error { return fn(o, nil) })
 	}
 	if version != MixedObservationVersion || !e.RealResearch {

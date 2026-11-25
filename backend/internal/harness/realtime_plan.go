@@ -30,6 +30,9 @@ func (e *Engine) SkillVersion(id, version string) *Skill {
 	if version == ConversationCloseVersion && e.hasCloseSkills() || version == ConversationFixtureVersion && e.Synthetic && e.Brief == nil && !e.hasCloseSkills() {
 		return conversationSkill(id, version)
 	}
+	if id == "stock_analysis" && version == emquant.ConversationObservationVersion && e.Brief != nil {
+		return conversationObservationSkill()
+	}
 	if id == "stock_analysis" && version == MixedObservationVersion && e.Brief != nil && e.hasCloseSkills() {
 		return MixedObservationSkill()
 	}
@@ -63,9 +66,9 @@ func (e *Engine) SkillVersion(id, version string) *Skill {
 
 func (e *Engine) supportsSnapshotMode(mode, version string) bool {
 	if mode == "fixed_legacy" {
-		return version != RealtimeBriefVersion && version != emquant.ObservationBriefVersion && version != MixedObservationVersion
+		return version != RealtimeBriefVersion && !emquant.IsDailyBriefVersion(version) && version != MixedObservationVersion
 	}
-	return mode == "collect_latest" && ((version == emquant.ObservationBriefVersion && e.Brief != nil) || (version == RealtimeBriefVersion && e.RealtimeEnabled()) || (version == MixedObservationVersion && e.Brief != nil && e.hasCloseSkills()))
+	return mode == "collect_latest" && ((emquant.IsDailyBriefVersion(version) && e.Brief != nil) || (version == RealtimeBriefVersion && e.RealtimeEnabled()) || (version == MixedObservationVersion && e.Brief != nil && e.hasCloseSkills()))
 }
 
 func requireBriefSource(ctx context.Context, tx pgx.Tx, source BriefQuoteSource, code, requirement string) error {

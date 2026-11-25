@@ -137,31 +137,29 @@ func (s Service) Cancel(ctx context.Context, ws, conv, turn uuid.UUID, revision 
 }
 
 func (s Service) Delete(ctx context.Context, ws, conv uuid.UUID) error {
-	return db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
-		var id uuid.UUID
-		err := tx.QueryRow(ctx, `UPDATE conversations SET deleted_at=coalesce(deleted_at,now()),title='',scope=NULL
-			WHERE id=$1 RETURNING id`, conv).Scan(&id)
-		if err != nil {
-			return notFound(err)
-		}
-		_, err = tx.Exec(ctx, `UPDATE conversation_turns SET body='',message=NULL,intent=NULL WHERE conversation_id=$1`, conv)
-		return err
-	})
+	return notFound(s.hide(ctx, ws, conv, false))
 }
 
 func (s Service) expire(ctx context.Context, ws, conv uuid.UUID) error {
-	err := db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
+	err := s.hide(ctx, ws, conv, true)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	return err
+}
+
+func (s Service) hide(ctx context.Context, ws, conv uuid.UUID, expiredOnly bool) error {
+	return db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
 		var id uuid.UUID
 		err := tx.QueryRow(ctx, `UPDATE conversations SET deleted_at=coalesce(deleted_at,now()),title='',scope=NULL
-			WHERE id=$1 AND (deleted_at IS NOT NULL OR expires_at<=clock_timestamp()) RETURNING id`, conv).Scan(&id)
+			WHERE id=$1 AND (NOT $2 OR deleted_at IS NOT NULL OR expires_at<=clock_timestamp()) RETURNING id`, conv, expiredOnly).Scan(&id)
 		if err != nil {
+			return err
+		}
+		if err := s.Engine.CancelConversationTasks(ctx, tx, ws, id); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE conversation_turns SET body='',message=NULL,intent=NULL WHERE conversation_id=$1`, conv)
 		return err
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	return err
 }

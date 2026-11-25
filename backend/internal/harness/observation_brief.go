@@ -119,7 +119,7 @@ func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (j
 	if t.Version == RealtimeBriefVersion {
 		return e.completeRealtime(ctx, t, req)
 	}
-	if t.Version != emquant.ObservationBriefVersion && t.Version != MixedObservationVersion {
+	if !emquant.IsDailyBriefVersion(t.Version) && t.Version != MixedObservationVersion {
 		return e.Gateway.Complete(ctx, req)
 	}
 	if e.Brief == nil {
@@ -293,7 +293,7 @@ func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Pla
 			return fn(tx)
 		})
 	}
-	if plan.SkillVersion != emquant.ObservationBriefVersion && plan.SkillVersion != MixedObservationVersion {
+	if !emquant.IsDailyBriefVersion(plan.SkillVersion) && plan.SkillVersion != MixedObservationVersion {
 		return db.InWorkspace(ctx, e.Pool, ws, fn)
 	}
 	return pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
@@ -322,12 +322,16 @@ func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Pla
 
 func (e *Engine) deliverTransaction(ctx context.Context, t *taskRow, fn func(pgx.Tx) error) error {
 	if t.Version == ConversationCloseVersion {
-		return e.WithConversationSnapshot(ctx, t.Workspace, t.ID, func(tx pgx.Tx) error {
+		err := e.WithConversationSnapshot(ctx, t.Workspace, t.ID, func(tx pgx.Tx) error {
 			if err := setResearchWorkspace(ctx, tx, t.Workspace); err != nil {
 				return err
 			}
 			return fn(tx)
 		})
+		if err != nil && errs.As(err).Status == 404 {
+			return errStale
+		}
+		return err
 	}
 	if t.Version == CloseUnifiedVersion {
 		return e.WithUnifiedSources(ctx, t.Workspace, t.ID, dataservice.SourceDisplay, func(tx pgx.Tx, _ []BoundResearchSupplement) error {
@@ -351,7 +355,7 @@ func (e *Engine) deliverTransaction(ctx context.Context, t *taskRow, fn func(pgx
 			return fn(tx)
 		})
 	}
-	if t.Version != emquant.ObservationBriefVersion && t.Version != MixedObservationVersion {
+	if !emquant.IsDailyBriefVersion(t.Version) && t.Version != MixedObservationVersion {
 		return db.InWorkspace(ctx, e.Pool, t.Workspace, fn)
 	}
 	return pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/policy"
@@ -24,7 +25,19 @@ const (
 )
 
 func isConversationSkill(version string) bool {
-	return version == ConversationCloseVersion || version == ConversationFixtureVersion
+	return version == ConversationCloseVersion || version == ConversationFixtureVersion || version == emquant.ConversationObservationVersion
+}
+
+func conversationObservationSkill() *Skill {
+	sk := ObservationBriefSkill()
+	sk.Version = emquant.ConversationObservationVersion
+	sections := sk.Sections
+	sk.Sections = func(p Params) []Section {
+		result := sections(p)
+		result[0].MaxClaims = 3
+		return result
+	}
+	return sk
 }
 
 func ConversationWindows(topic string) []int {
@@ -272,7 +285,7 @@ func (e *Engine) BuildConversationPlan(ctx context.Context, ws, turn uuid.UUID, 
 		if window != 20 {
 			return nil, errs.Unprocessable("INVALID_PARAMS", "当前来源提供最近最多 20 个交易日的成交观察")
 		}
-		return e.buildSkillPlanForTurn(ctx, ws, ObservationBriefSkill(), subject, nil, &turn, true, bind)
+		return e.buildSkillPlanForTurn(ctx, ws, conversationObservationSkill(), subject, nil, &turn, true, bind)
 	}
 	sk := conversationSkill(skill, version)
 	if sk == nil {
@@ -323,6 +336,45 @@ func attachConversationTask(ctx context.Context, tx pgx.Tx, conv, turn, task uui
 	}
 	_, err := tx.Exec(ctx, `UPDATE conversations SET revision=revision+1,updated_at=now(),expires_at=now()+interval '90 days',
 		scope=(SELECT intent->'scope' FROM conversation_turns WHERE id=$2) WHERE id=$1`, conv, turn)
+	return err
+}
+
+func lockDeliveryConversation(ctx context.Context, tx pgx.Tx, t *taskRow) error {
+	err := lockTaskConversation(ctx, tx, t.Workspace, t.ID, false)
+	if err != nil && errs.As(err).Status == 404 {
+		return errStale
+	}
+	return err
+}
+
+// LockShortConversation protects a short result while it is being displayed.
+func LockShortConversation(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID) error {
+	return lockTaskConversation(ctx, tx, ws, task, true)
+}
+
+func lockTaskConversation(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID, briefOnly bool) error {
+	var turn *uuid.UUID
+	var chat bool
+	err := tx.QueryRow(ctx, `SELECT p.conversation_turn_id,p.conversation_plan FROM research_tasks r
+		JOIN research_plans p ON p.workspace_id=r.workspace_id AND p.id=r.plan_id
+		WHERE r.workspace_id=$1 AND r.id=$2 AND (NOT $3 OR p.conversation_brief)`, ws, task, briefOnly).Scan(&turn, &chat)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errs.NotFound()
+	}
+	if err != nil {
+		return err
+	}
+	if !chat && !briefOnly {
+		return nil
+	}
+	var id uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT c.id FROM conversation_turns t JOIN conversations c
+		ON c.workspace_id=t.workspace_id AND c.id=t.conversation_id
+		WHERE t.workspace_id=$1 AND t.id=$2 AND c.deleted_at IS NULL AND c.expires_at>clock_timestamp()
+		FOR SHARE OF c`, ws, turn).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errs.NotFound()
+	}
 	return err
 }
 

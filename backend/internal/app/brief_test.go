@@ -22,9 +22,11 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/shopspring/decimal"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/httpapi"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/config"
@@ -337,6 +339,9 @@ func TestObservationBriefDelivery(t *testing.T) {
 	if err := a.Brief.Freeze(ctx, ws, cancelID, 1, observation.Manifest); err == nil {
 		t.Fatal("cancelled task frozen")
 	}
+	t.Run("conversation_chart_and_retention", func(t *testing.T) {
+		checkChoiceConversation(t, a, id, doc.ID, reportPath, request, checkResponse)
+	})
 	// An operator cannot expose saved vendor names by switching this database
 	// back to fixture configuration during rollback.
 	fixtureCfg := *c
@@ -345,6 +350,147 @@ func TestObservationBriefDelivery(t *testing.T) {
 		t.Fatal("fixture rollback accepted real database")
 	}
 	t.Run("mixed closing snapshot", func(t *testing.T) { checkMixedObservation(t, a, ws, sub, id, token) })
+}
+
+type choiceRetentionProbe struct{}
+
+func (choiceRetentionProbe) Kind() string { return "conversation.retention" }
+
+func checkChoiceConversation(t *testing.T, a *App, formalTask, formalReport uuid.UUID, formalPath string,
+	request func(method, path, body, accept, key string) *httptest.ResponseRecorder, checkResponse func(string, []byte)) {
+	t.Helper()
+	ctx := context.Background()
+	worker, err := a.Engine.NewRiver(a.Pool, true, 1, conversation.Register(a.Engine))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = worker.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		stop, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := worker.Stop(stop); err != nil {
+			t.Error(err)
+		}
+	})
+	call := func(method, path, body string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := request(method, path, body, "application/json", "")
+		if rec.Code != want {
+			t.Fatalf("%s %s: got %d, want %d: %s", method, path, rec.Code, want, rec.Body)
+		}
+		return rec
+	}
+	accepted := call("POST", "/api/v1/conversations", fmt.Sprintf(`{"client_message_id":%q,"text":"600000.SH 的日成交"}`, uuid.NewString()), 202)
+	var ids conversation.Accepted
+	if err := json.Unmarshal(accepted.Body.Bytes(), &ids); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/conversations/" + ids.ConversationID.String()
+	turnPath := path + "/turns/" + ids.TurnID.String()
+	if accepted.Header().Get("Location") != turnPath {
+		t.Fatalf("turn location: %s", accepted.Header().Get("Location"))
+	}
+	type turn struct {
+		State       string                `json:"state"`
+		Revision    int64                 `json:"revision"`
+		Plan        *httpapi.ResearchPlan `json:"plan"`
+		TaskStatus  string                `json:"task_status"`
+		ResultReady bool                  `json:"result_ready"`
+	}
+	awaitTurn := func(ready func(turn) bool) turn {
+		t.Helper()
+		var latest turn
+		for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+			latest = turn{}
+			if err := json.Unmarshal(call("GET", turnPath, "", 200).Body.Bytes(), &latest); err != nil {
+				t.Fatal(err)
+			}
+			if ready(latest) {
+				return latest
+			}
+		}
+		t.Fatalf("last Choice turn: %+v", latest)
+		return turn{}
+	}
+	planned := awaitTurn(func(v turn) bool { return v.State != "pending" })
+	if planned.Plan == nil || !planned.Plan.Executable || planned.Plan.SkillVersion != emquant.ConversationObservationVersion {
+		t.Fatalf("Choice plan: %+v", planned)
+	}
+	call("POST", turnPath+"/actions", fmt.Sprintf(`{"action":"confirm","expected_revision":%d,"plan_id":%q,"plan_hash":%q}`,
+		planned.Revision, planned.Plan.ID, planned.Plan.PlanHash), 204)
+	completed := awaitTurn(func(v turn) bool { return harness.IsTerminal(v.TaskStatus) })
+	if !completed.ResultReady {
+		t.Fatalf("Choice result: %+v", completed)
+	}
+	content := call("GET", turnPath+"/result", "", 200).Body.Bytes()
+	checkResponse("ConversationResult", content)
+	var result struct {
+		ReportID uuid.UUID      `json:"report_id"`
+		Tables   []facts.Table  `json:"tables"`
+		Series   []facts.Series `json:"series"`
+	}
+	if err := json.Unmarshal(content, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tables) != 1 || len(result.Series) != 1 || len(result.Series[0].Evidence) != 1 || len(result.Series[0].Lines) != 1 {
+		t.Fatalf("missing table, chart or evidence: %s", content)
+	}
+	table, chart := result.Tables[0], result.Series[0]
+	points := chart.Lines[0].Points
+	if len(table.Rows) != 1 || len(table.Rows[0]) < 3 || table.Rows[0][2] == nil || *table.Rows[0][2] != "180.00" ||
+		chart.Unit != "万元" || len(points) != 1 || points[0][1] == nil || *points[0][1] != "180.00" ||
+		!slices.Equal(chart.Evidence, table.Evidence) {
+		t.Fatalf("Choice table and chart differ: %s", content)
+	}
+	evidence := call("GET", "/api/v1/evidence/"+chart.Evidence[0].String(), "", 200)
+	if !strings.Contains(evidence.Body.String(), "180.00 万元") {
+		t.Fatalf("Choice evidence differs: %s", evidence.Body.String())
+	}
+	var shortTask uuid.UUID
+	if err := a.Pool.QueryRow(ctx, "SELECT task_id FROM conversation_turns WHERE id=$1", ids.TurnID).Scan(&shortTask); err != nil {
+		t.Fatal(err)
+	}
+	const deleteSnapshot = `DELETE FROM observation_brief_snapshots WHERE task_id=$1`
+	if _, err := a.Pool.Exec(ctx, deleteSnapshot, shortTask); err == nil {
+		t.Fatal("visible Choice snapshot could be deleted")
+	}
+	if _, err := a.Pool.Exec(ctx, "UPDATE observation_brief_snapshots SET manifest=manifest WHERE task_id=$1", shortTask); err == nil {
+		t.Fatal("Choice snapshot could be modified")
+	}
+	if list := request("GET", "/api/v1/reports", "", "application/vnd.vera.observation.v1+json", ""); list.Code != 200 ||
+		!strings.Contains(list.Body.String(), formalReport.String()) || strings.Contains(list.Body.String(), result.ReportID.String()) {
+		t.Fatalf("formal history: %d %s", list.Code, list.Body)
+	}
+	call("DELETE", path, "", 204)
+	call("GET", turnPath+"/result", "", 404)
+	if _, err := worker.Insert(ctx, choiceRetentionProbe{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for end := time.Now().Add(8 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		var retained bool
+		if err := a.Pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM conversations WHERE id=$1)", ids.ConversationID).Scan(&retained); err != nil {
+			t.Fatal(err)
+		}
+		if !retained {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("Choice conversation was not purged")
+		}
+	}
+	var shortRetained, formalRetained bool
+	if err := a.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM observation_brief_snapshots WHERE task_id=$1),
+		EXISTS (SELECT 1 FROM observation_brief_snapshots WHERE task_id=$2)`, shortTask, formalTask).Scan(&shortRetained, &formalRetained); err != nil || shortRetained || !formalRetained {
+		t.Fatalf("retention short=%t formal=%t: %v", shortRetained, formalRetained, err)
+	}
+	if _, err := a.Pool.Exec(ctx, deleteSnapshot, formalTask); err == nil {
+		t.Fatal("ordinary Choice snapshot could be deleted")
+	}
+	if pdf := request("GET", formalPath+"/pdf", "", "application/pdf", ""); pdf.Code != 200 || !strings.HasPrefix(pdf.Body.String(), "%PDF") {
+		t.Fatalf("retained formal PDF: %d", pdf.Code)
+	}
 }
 
 func checkMixedObservation(t *testing.T, a *App, ws uuid.UUID, subject dataservice.EntityRow, historical uuid.UUID, token string) {

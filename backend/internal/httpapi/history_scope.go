@@ -15,7 +15,7 @@ import (
 func (s *Server) historyVersions() []string {
 	var versions []string
 	if s.Engine.Brief != nil {
-		versions = []string{emquant.ObservationBriefVersion, harness.RealtimeBriefVersion}
+		versions = []string{emquant.ObservationBriefVersion, emquant.ConversationObservationVersion, harness.RealtimeBriefVersion}
 		if !s.FullVendorResearch {
 			return versions
 		}

@@ -538,19 +538,35 @@ export interface components {
             /** Format: uuid */
             client_message_id: string;
             text: string;
+        };
+        ConversationFollowUp: {
+            /** Format: uuid */
+            client_message_id: string;
+            text: string;
             /** Format: uuid */
             reply_to_turn_id?: string;
-            expected_revision?: number;
+            expected_revision: number;
         };
-        ConversationAction: {
-            /** @enum {string} */
-            action: "choose" | "confirm" | "cancel";
+        ConversationAction: components["schemas"]["ConversationChoose"] | components["schemas"]["ConversationConfirm"] | components["schemas"]["ConversationCancel"];
+        ConversationChoose: {
+            /** @constant */
+            action: "choose";
             expected_revision: number;
             /** Format: uuid */
-            subject_id?: string;
+            subject_id: string;
+        };
+        ConversationConfirm: {
+            /** @constant */
+            action: "confirm";
+            expected_revision: number;
             /** Format: uuid */
-            plan_id?: string;
-            plan_hash?: string;
+            plan_id: string;
+            plan_hash: string;
+        };
+        ConversationCancel: {
+            /** @constant */
+            action: "cancel";
+            expected_revision: number;
             task_revision?: number;
         };
         ConversationAccepted: {
@@ -2111,6 +2127,8 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the next poll while the turn is active */
                     "Retry-After"?: number;
+                    /** @description Relative URL of the accepted turn, including for a replayed message */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2208,7 +2226,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConversationMessage"];
+                "application/json": components["schemas"]["ConversationFollowUp"];
             };
         };
         responses: {
@@ -2217,6 +2235,8 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the next poll while the turn is active */
                     "Retry-After"?: number;
+                    /** @description Relative URL of the accepted turn, including for a replayed message */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
