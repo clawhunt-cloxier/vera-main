@@ -50,7 +50,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T041 | 长研报图表与证据栏动效收尾 | T040（已合入） | DONE | Codex / agent/codex/T041-reader-motion | PR #54 已合入 `dev@d8a39c6`，Verify 与测试站部署通过。八图模拟研报按视口绘制，打印时补齐全部图表。Chromium 20 项回归通过。[交接](docs/handoffs/2026-11-24-T041-codex.md) |
 
 | T042 | 数据治理与研究证据字段审计 | T036、T037、T041（已合入） | DONE | Codex / agent/codex/T042-governance | 2026-11-24T23:01Z 领取。PR #55 修正可见修订、证券快照和实体目录、日期及小数校验、计算输入单位及财报更正序号。本地综合检查、带 PostgreSQL 的回归和 20 项 Chromium 测试通过。[审计交接](docs/handoffs/2026-11-24-T042-codex.md) |
-| T043 | 隔离异常基金持仓披露行 | T042（已合入） | IN_PROGRESS | Codex / agent/codex/T043-fund-positions | 2026-11-25T18:45Z 领取。范围限于 `fund_portfolio` 可选数据集的异常行隔离、覆盖限制说明、回归测试与 T042 关联排查；不规范化未确认的基金代码格式，不改迁移或公共数据契约。[交接](docs/handoffs/2026-11-26-T043-codex.md) |
+| T043 | 修正公募持仓基金代码格式假设 | T042（已合入） | IN_PROGRESS | Codex / agent/codex/T043-fund-positions | 2026-11-25T18:45Z 领取。按 `fund.disclosed_position` 的字符串契约保留 TuShare 基金代码原文，同时校验标的与报告期身份；新增格式回归测试并核查 T042 关联，不改迁移或公共数据契约。[交接](docs/handoffs/2026-11-26-T043-codex.md) |
 
 ## 里程碑
 
