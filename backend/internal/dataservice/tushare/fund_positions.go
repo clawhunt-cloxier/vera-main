@@ -3,7 +3,6 @@ package tushare
 import (
 	"errors"
 	"maps"
-	"regexp"
 	"slices"
 	"time"
 
@@ -11,8 +10,6 @@ import (
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 )
-
-var fundIdentifier = regexp.MustCompile(`^[0-9]{6}\.(OF|SH|SZ)$`)
 
 // fund_portfolio identifies a filing by fund code, subject, quarter and
 // announcement date. It doesn't identify a common portfolio across share classes.
@@ -59,7 +56,9 @@ func (c *marketCollector) fundQuarter(period time.Time) error {
 	for _, row := range rows {
 		v := row.Values
 		fund := v["ts_code"]
-		if v["symbol"] != c.code || v["end_date"] != params["period"] || !fundIdentifier.MatchString(fund) {
+		// The dataset contract treats the vendor's fund code as an opaque string.
+		// Preserve it verbatim instead of assuming a specific exchange-code format.
+		if v["symbol"] != c.code || v["end_date"] != params["period"] || fund == "" {
 			return marketBad(api, "fund or position identity")
 		}
 		if v["ann_date"] == "" {
