@@ -1,14 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import {
-  ArrowDownUp,
-  ArrowRight,
-  ChartNoAxesCombined,
-  Clock3,
-  Files,
-  Search,
-  Star,
-} from 'lucide-react';
+import { ArrowDownUp, ArrowRight, ChartNoAxesCombined, Files, Search, Star } from 'lucide-react';
 import { useRef, useState } from 'react';
 import {
   fmtTime,
@@ -287,12 +279,6 @@ export function App() {
           <div className="desk-primary">
             <header className="desk-title">
               <h1>今天想研究什么？</h1>
-              {typeof me.data.quota?.daily_remaining === 'number' && (
-                <p className="desk-quota">
-                  <Clock3 size={15} aria-hidden="true" />
-                  今日剩余 <strong>{me.data.quota.daily_remaining}</strong> 次研究
-                </p>
-              )}
             </header>
             {me.data.workspace_id && Boolean(me.data.conversation_topics?.length) ? (
               <>

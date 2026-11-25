@@ -10,19 +10,22 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
 
-// One in-flight collection per symbol across workspaces. The first request
-// is charged against admission limits; subsequent requests only read state.
+// One in-flight collection per symbol across workspaces. Only jobs started
+// outside a conversation count toward the standalone daily limit.
 type prepareSubjectArgs struct {
 	Code      string    `json:"code"`
 	Workspace uuid.UUID `json:"workspace"`
+	Source    string    `json:"source,omitempty"`
 }
 
 func (prepareSubjectArgs) Kind() string { return "tushare_subject_prepare" }
 
 const prepareQueue = "subject_prepare"
+const conversationPreparationSource = "conversation"
 
 type SubjectPreparation struct {
 	Status  string `json:"status"`
@@ -60,6 +63,17 @@ func (w *prepareSubjectWorker) Work(ctx context.Context, j *river.Job[prepareSub
 }
 
 func (e *Engine) RequestSubjectPreparation(ctx context.Context, ws uuid.UUID, code string) (SubjectPreparation, error) {
+	return e.requestSubjectPreparation(ctx, ws, code, nil)
+}
+
+func (e *Engine) RequestConversationSubjectPreparation(ctx context.Context, ws uuid.UUID, code string, turn uuid.UUID, revision int64) (SubjectPreparation, error) {
+	return e.requestSubjectPreparation(ctx, ws, code, func(tx pgx.Tx) error {
+		_, err := lockPendingTurn(ctx, tx, turn, revision)
+		return err
+	})
+}
+
+func (e *Engine) requestSubjectPreparation(ctx context.Context, ws uuid.UUID, code string, guard func(pgx.Tx) error) (SubjectPreparation, error) {
 	if e.PrepareTuShareSubject == nil || !e.RealResearch || e.Store == nil || e.Pool == nil || KillSwitch(ctx, e.Pool) {
 		return SubjectPreparation{}, errs.Unavailable("PREPARATION_UNAVAILABLE", "真实研究数据准备当前不可用")
 	}
@@ -73,7 +87,7 @@ func (e *Engine) RequestSubjectPreparation(ctx context.Context, ws uuid.UUID, co
 	if e.River == nil || e.Policy == nil {
 		return SubjectPreparation{}, errs.Unavailable("PREPARATION_UNAVAILABLE", "真实研究数据准备队列尚未就绪")
 	}
-	return e.enqueueSubjectPreparation(ctx, ws, code)
+	return e.enqueueSubjectPreparation(ctx, ws, code, guard)
 }
 
 func preparationFailure(code string) string {
@@ -89,10 +103,18 @@ func preparationFailure(code string) string {
 	}
 }
 
-func (e *Engine) enqueueSubjectPreparation(ctx context.Context, ws uuid.UUID, code string) (SubjectPreparation, error) {
+func (e *Engine) enqueueSubjectPreparation(ctx context.Context, ws uuid.UUID, code string, guard func(pgx.Tx) error) (SubjectPreparation, error) {
 	result := SubjectPreparation{Status: "pending"}
 	args := prepareSubjectArgs{Code: code, Workspace: ws}
-	err := pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
+	if guard != nil {
+		args.Source = conversationPreparationSource
+	}
+	enqueue := func(tx pgx.Tx) error {
+		if guard != nil {
+			if err := guard(tx); err != nil {
+				return err
+			}
+		}
 		// Serialize only the short check-and-insert, not vendor calls. This
 		// bounds outstanding work even across concurrent API replicas.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(600048715, 36)`); err != nil {
@@ -124,11 +146,12 @@ func (e *Engine) enqueueSubjectPreparation(ctx context.Context, ws uuid.UUID, co
 		}
 		var outstanding, daily int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FILTER(WHERE finalized_at IS NULL),
-			count(*) FILTER(WHERE args->>'workspace'=$2 AND created_at > now()-interval '24 hours')
-			FROM river_job WHERE kind=$1`, args.Kind(), ws.String()).Scan(&outstanding, &daily); err != nil {
+			count(*) FILTER(WHERE args->>'workspace'=$2 AND created_at > now()-interval '24 hours'
+				AND args->>'source' IS DISTINCT FROM $3)
+			FROM river_job WHERE kind=$1`, args.Kind(), ws.String(), conversationPreparationSource).Scan(&outstanding, &daily); err != nil {
 			return err
 		}
-		if daily >= e.Policy.Quota.UserDailyTasks {
+		if args.Source != conversationPreparationSource && daily >= e.Policy.Quota.UserDailyTasks {
 			return errs.New(429, "PREPARATION_DAILY_QUOTA", "过去 24 小时的数据准备配额已用完，请稍后重新发起。")
 		}
 		if outstanding >= e.Policy.Quota.PlatformInFlightTasks {
@@ -136,6 +159,12 @@ func (e *Engine) enqueueSubjectPreparation(ctx context.Context, ws uuid.UUID, co
 		}
 		_, err = e.River.InsertTx(ctx, tx, args, &river.InsertOpts{Queue: prepareQueue, MaxAttempts: 1})
 		return err
-	})
+	}
+	var err error
+	if guard != nil {
+		err = db.InWorkspace(ctx, e.Pool, ws, enqueue)
+	} else {
+		err = pgx.BeginFunc(ctx, e.Pool, enqueue)
+	}
 	return result, err
 }

@@ -32,6 +32,9 @@ function outcomeNote(task: Task): string {
     case 'REAL_RESEARCH_DISABLED':
       return '这项研究服务当前不可用，请稍后重试。';
   }
+  if (task.status === 'BUDGET_EXHAUSTED') {
+    return '本次研究未能完成。可以缩小研究范围后重试。';
+  }
   if (task.reason_message?.trim()) {
     const message = researchText(task.reason_message);
     if (task.reason_code === 'REQUIRED_SECTION_UNSUPPORTED') {
@@ -43,8 +46,6 @@ function outcomeNote(task: Task): string {
   switch (task.status) {
     case 'CANCELLED':
       return '本次研究已按你的请求停止。';
-    case 'BUDGET_EXHAUSTED':
-      return '本次研究可用的额度已用完，必需章节未能完成。';
     case 'ABSTAINED':
       return '本次未交付报告，系统没有提供进一步说明。';
     case 'BLOCKED':

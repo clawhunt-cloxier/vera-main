@@ -336,7 +336,10 @@ export interface paths {
         /** listConversations */
         get: operations["listConversations"];
         put?: never;
-        /** createConversation */
+        /**
+         * Accept a message for the conversation agent
+         * @description Accept the first message for background resolution. Executable research starts automatically when its scope is clear.
+         */
         post: operations["createConversation"];
         delete?: never;
         options?: never;
@@ -371,7 +374,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** sendConversationMessage */
+        /**
+         * Accept a message for the conversation agent
+         * @description Accept a message for background resolution. Executable research starts automatically when its scope is clear.
+         */
         post: operations["sendConversationMessage"];
         delete?: never;
         options?: never;
@@ -386,7 +392,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** getConversationTurn */
+        /**
+         * getConversationTurn
+         * @description Read the current turn, its action candidates and task progress, or a general model reply.
+         */
         get: operations["getConversationTurn"];
         put?: never;
         post?: never;
@@ -405,7 +414,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** actOnConversationTurn */
+        /**
+         * actOnConversationTurn
+         * @description Choose a research subject when needed or cancel the current turn. Resolving the subject starts the research automatically.
+         */
         post: operations["actOnConversationTurn"];
         delete?: never;
         options?: never;
@@ -538,6 +550,8 @@ export interface components {
             /** Format: uuid */
             client_message_id: string;
             text: string;
+            /** @description Automatically run executable research. Clients that omit this field keep the plan confirmation flow. */
+            automatic?: boolean;
         };
         ConversationFollowUp: {
             /** Format: uuid */
@@ -546,6 +560,8 @@ export interface components {
             /** Format: uuid */
             reply_to_turn_id?: string;
             expected_revision: number;
+            /** @description Automatically run executable research. Clients that omit this field keep the plan confirmation flow. */
+            automatic?: boolean;
         };
         ConversationAction: components["schemas"]["ConversationChoose"] | components["schemas"]["ConversationConfirm"] | components["schemas"]["ConversationCancel"];
         ConversationChoose: {
@@ -554,14 +570,6 @@ export interface components {
             expected_revision: number;
             /** Format: uuid */
             subject_id: string;
-        };
-        ConversationConfirm: {
-            /** @constant */
-            action: "confirm";
-            expected_revision: number;
-            /** Format: uuid */
-            plan_id: string;
-            plan_hash: string;
         };
         ConversationCancel: {
             /** @constant */
@@ -590,7 +598,10 @@ export interface components {
             /** @enum {string} */
             topic?: "daily_trading" | "financing_balance";
             window?: number;
+            /** @enum {string} */
+            mode?: "company_industry";
         };
+        /** @description A research request with automatic=true can start directly after validation. Clients that omit automatic receive a plan for confirmation. The answer state contains a non-research reply. */
         ConversationTurn: {
             /** Format: uuid */
             id: string;
@@ -598,13 +609,12 @@ export interface components {
             text: string;
             revision: number;
             /** @enum {string} */
-            state: "pending" | "clarify" | "confirm" | "research" | "reference" | "unavailable";
+            state: "pending" | "clarify" | "confirm" | "research" | "reference" | "answer" | "unavailable";
             /** Format: uuid */
             reply_to_turn_id?: string;
             message?: string;
             /** Format: date-time */
             created_at: string;
-            plan?: components["schemas"]["ResearchPlan"];
             candidates?: components["schemas"]["Entity"][];
             /** @enum {unknown} */
             task_status?: "QUEUED" | "COLLECTING" | "ANALYZING" | "ASSEMBLING" | "DELIVERING" | "CANCEL_REQUESTED" | "COMPLETED" | "ABSTAINED" | "BUDGET_EXHAUSTED" | "CANCELLED" | "BLOCKED" | "FAILED";
@@ -617,6 +627,11 @@ export interface components {
             reference_kind?: "result" | "evidence" | "calculation";
             result_ready: boolean;
             is_brief: boolean;
+            plan?: components["schemas"]["ResearchPlan"];
+            /** @description This clarification accepts a subject selection. */
+            needs_subject?: boolean;
+            /** @description Service generated response about a part of the request that is outside the research scope. */
+            notice?: string;
         };
         ConversationHistory: {
             items: components["schemas"]["ConversationSummary"][];
@@ -1242,6 +1257,14 @@ export interface components {
             event_at?: string | null;
             /** @enum {unknown} */
             latency_mode?: "real_time" | "delayed" | "unknown" | null;
+        };
+        ConversationConfirm: {
+            /** @constant */
+            action: "confirm";
+            expected_revision: number;
+            /** Format: uuid */
+            plan_id: string;
+            plan_hash: string;
         };
     };
     responses: never;

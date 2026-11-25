@@ -53,10 +53,10 @@ export const conversationResult = (id: string, turn: string, signal: AbortSignal
   get<ConversationResult>(turnPath(id, turn) + '/result', { ...json, signal });
 
 export const startConversation = (body: ConversationMessage) =>
-  post<ConversationAccepted>(base, body, json);
+  post<ConversationAccepted>(base, { ...body, automatic: true }, json);
 
 export const sendFollowUp = (id: string, body: ConversationFollowUp) =>
-  post<ConversationAccepted>(threadPath(id) + '/turns', body, json);
+  post<ConversationAccepted>(threadPath(id) + '/turns', { ...body, automatic: true }, json);
 
 export const actOnTurn = (id: string, turn: string, action: ConversationAction) =>
   post<void>(turnPath(id, turn) + '/actions', action, json);

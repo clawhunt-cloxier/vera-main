@@ -6,7 +6,7 @@
 
 - 默认本地 fixture 模式的数据是虚构的演示数据（fixture：12 只演示证券、2 个行业），报告不对应任何真实公司或市场，页面顶部有横幅提示。
 - 模型可以是模拟模型（无需密钥），也可以是真实模型。目前只联调过 DeepSeek 的 deepseek-flash。真实模型下，写作与核验的文字由真模型生成，本地 fixture 模式依据的仍是虚构数据。2026-11-16 测试网站已切换真实 Choice 成交简报，范围与验收见 [交接](docs/handoffs/2026-11-15-T014b-observation-brief-codex.md)。
-- 登录是开发登录：任意小写用户名，无密码校验。只能在本机使用，不要暴露到网络。
+- 对话演示使用预配账号和独立工作区，可直接用账号密码登录。
 
 ## 2. 构建
 
@@ -19,14 +19,24 @@ cd ../web && npm ci && npm run build
 
 ## 3. 启动
 
-必须在 backend/ 目录下启动，因为默认从 ../contracts 读取契约和策略。启动时终端会打印 3 个邀请码，每个只能用一次。
+在 `backend/` 目录启动，默认从 `../contracts` 读取契约和策略。
 
 ### 3.1 模拟模型（无需任何密钥）
 
 ```bash
 cd backend
-VERA_API_ADDR=127.0.0.1:18093 VERA_WEB_DIR=../web/dist VERA_DEMO_DIR=$HOME/.cache/vera-demo-sim VERA_DEMO_PG_PORT=55432 ../vera demo
+VERA_API_ADDR=127.0.0.1:18093 VERA_WEB_DIR=../web/dist VERA_DEMO_DIR=$HOME/.cache/vera-demo-sim VERA_DEMO_PG_PORT=55432 \
+VERA_DEMO_INVITES=0 VERA_REGISTRATION_ENABLED=false ../vera demo
 ```
+
+在另一终端从 `backend/` 运行以下命令，为本机模拟数据库建立两个独立账号。内嵌数据库的演示密码是 `vera-demo`。
+
+```bash
+psql -X -h 127.0.0.1 -p 55432 -U vera -d vera -v ON_ERROR_STOP=1 -f scripts/create-demo-account.sql
+psql -X -h 127.0.0.1 -p 55432 -U vera -d vera -v ON_ERROR_STOP=1 -v demo_username=vera-t044-demo -f scripts/create-demo-account.sql
+```
+
+`administrator` 和 `vera-t044-demo` 均用演示密码 `administrator` 登录。模拟模型只演示预设样例。接入支持原生 Tool Call 的 `router` 模型后，由该模型理解自然语言提问。
 
 ### 3.2 接 DeepSeek（真实模型）
 
@@ -37,6 +47,7 @@ export DEEPSEEK_API_KEY=你的密钥
 cd backend
 EB='{"thinking":{"type":"disabled"}}'
 VERA_API_ADDR=127.0.0.1:18094 VERA_WEB_DIR=../web/dist VERA_DEMO_DIR=$HOME/.cache/vera-demo-ds VERA_DEMO_PG_PORT=55433 \
+VERA_DEMO_INVITES=0 VERA_REGISTRATION_ENABLED=false \
 VERA_DAILY_MODEL_COST_LIMIT_USD=20.00 MODEL_PRICE_TABLE_VERSION=deepseek-2026-11-06 \
 MODEL_WRITER_ADAPTER=openai MODEL_WRITER_BASE_URL=https://api.deepseek.com MODEL_WRITER_ID=deepseek-flash MODEL_WRITER_API_KEY=$DEEPSEEK_API_KEY MODEL_WRITER_EXTRA_BODY=$EB \
 MODEL_VERIFIER_ADAPTER=openai MODEL_VERIFIER_BASE_URL=https://api.deepseek.com MODEL_VERIFIER_ID=deepseek-flash MODEL_VERIFIER_API_KEY=$DEEPSEEK_API_KEY MODEL_VERIFIER_EXTRA_BODY=$EB \
@@ -48,9 +59,9 @@ MODEL_ROUTER_ADAPTER=openai MODEL_ROUTER_BASE_URL=https://api.deepseek.com MODEL
 
 ## 4. 体验流程
 
-1. 打开 http://127.0.0.1:端口 ，点右上角登录，输入用户名（小写字母、数字、点、下划线、连字符）。
-2. 首次登录进入开通工作区页：输入终端打印的邀请码，身份任选。
-3. 工作台：用对话输入框发送 `演示制造近 20 个交易日的融资余额怎么变`，确认并打开图表、明细或计算。可继续追问 `这个数怎么算的` 或 `改成 60 个交易日`。在侧栏回看私人对话。
+1. 打开 http://127.0.0.1:端口/app ，输入已预配的账号和密码。
+2. 登录后直接进入工作台。使用真实模型演示时，按 §3.1 在对应的演示数据库端口预配账号。
+3. 工作台：用对话输入框发送 `演示制造近 20 个交易日的融资余额怎么变`，发送后自动研究。完成后打开图表、明细或计算。也可以先问候或询问金融概念。可继续追问 `这个数怎么算的` 或 `改成 60 个交易日`。在侧栏回看私人对话。
 4. 完整研报：打开「用一句话生成完整研报」，写 `个股分析 DM0001`、`资金动向 DM0001` 或 `深度研究 DM0001`，点开始研究。
 5. 计划页：查看章节与可用性，可取消勾选可选章节，点提交任务。
 6. 任务页：步骤状态自动刷新。真实模型下个股分析实测约 50 秒。

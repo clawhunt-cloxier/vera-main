@@ -8,7 +8,7 @@
 
 | 表 | 关键字段与唯一性 | 模块 |
 | --- | --- | --- |
-| users | issuer+subject 唯一；persona；invited_by | identity |
+| users | issuer+subject 唯一；persona；本地账号的可选密码哈希 | identity |
 | workspaces | 每用户一个；owner_user_id 唯一 | identity |
 | sessions | hash(session_id)、user、workspace、expires_at、csrf_hash、revoked_at | identity |
 | research_plans | id、skill_id/version、subject_id、params、as_of、snapshot_mode、quote_requirement、sections、plan_hash、expires_at、consumed_task_id | harness |

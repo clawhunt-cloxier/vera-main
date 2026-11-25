@@ -136,6 +136,44 @@ func TestClientErrorIsNotRetried(t *testing.T) {
 	}
 }
 
+func TestGatewayOpenAIUsageOnUnusableCompletion(t *testing.T) {
+	var hits atomic.Int32
+	x := newGW(t, func(w http.ResponseWriter, _ *http.Request) {
+		body := `{"choices":"invalid","usage":{"prompt_tokens":100,"completion_tokens":10}}`
+		if hits.Add(1) > 1 {
+			body = `{"choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}`
+		}
+		_, _ = w.Write([]byte(body))
+	}, Profile{})
+	for _, want := range []string{"FAILED", "UNKNOWN"} {
+		req := x.req()
+		if want == "UNKNOWN" {
+			req.Task = nil
+			req.StepKey = "conversation_agent"
+		}
+		if _, _, err := x.g.Complete(t.Context(), req); err == nil {
+			t.Fatal("unusable response was accepted")
+		}
+		var status string
+		var cost decimal.NullDecimal
+		if err := x.pool.QueryRow(t.Context(), `SELECT status,cost_usd FROM model_calls WHERE workspace_id=$1`, req.Workspace).
+			Scan(&status, &cost); err != nil || status != want || (want == "FAILED") != (cost.Valid && cost.Decimal.IsPositive()) {
+			t.Fatalf("want %s, got %s, cost %+v: %v", want, status, cost, err)
+		}
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("unusable responses were retried: %d calls", hits.Load())
+	}
+	// A process can exit after sending but before marking a call UNKNOWN.
+	if _, err := x.pool.Exec(t.Context(), `UPDATE model_calls SET status='SENT',finished_at=NULL,sent_at=now()-interval '25 hours'
+		WHERE step_key='conversation_agent'`); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := x.g.ReleaseUnknown(t.Context(), time.Now().Add(-UnknownReleaseAfter)); err != nil || len(released) != 1 {
+		t.Fatalf("interrupted private call was not released: %v %v", released, err)
+	}
+}
+
 func TestTimeoutIsUnknownAndHoldsReservation(t *testing.T) {
 	var n atomic.Int32
 	x := newGW(t, func(w http.ResponseWriter, r *http.Request) {

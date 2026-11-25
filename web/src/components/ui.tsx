@@ -23,10 +23,15 @@ export function VeraBrand({ size }: { size?: number }) {
 export function ErrorBox({ error }: { error: unknown }) {
   if (!error) return null;
   const e = error instanceof ApiError ? error : null;
+  let title = '出错了';
+  if (e?.status === 429) {
+    const isRateLimited =
+      e.code === 'CONVERSATION_RATE_LIMITED' || e.code === 'PLAN_PARSE_RATE_LIMITED';
+    title = isRateLimited ? '请求过于频繁' : '服务繁忙';
+  }
   return (
     <div className="error" role="alert">
-      <strong>{e?.status === 429 ? '已达到使用上限' : '出错了'}</strong>{' '}
-      {error instanceof Error ? error.message : String(error)}
+      <strong>{title}</strong> {error instanceof Error ? error.message : String(error)}
       {e?.requestId && <span className="muted"> （请求编号 {e.requestId}）</span>}
     </div>
   );

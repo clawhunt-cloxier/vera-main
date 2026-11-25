@@ -132,27 +132,40 @@ func (e *Engine) CancelTask(ctx context.Context, ws, id uuid.UUID, expected int6
 	var rev int64
 	var status string
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT status, revision FROM research_tasks WHERE id=$1 FOR UPDATE`, id).Scan(&status, &rev); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return errs.NotFound()
-			}
-			return err
-		}
-		switch {
-		case status == "COMPLETED":
-			return errs.Conflict("ALREADY_COMPLETED", "任务已完成，无法取消")
-		case status == "CANCEL_REQUESTED" || status == "CANCELLED":
-			return nil
-		case IsTerminal(status):
-			return errs.Conflict("ALREADY_TERMINAL", "任务已结束")
-		case rev != expected:
-			return errs.Conflict("REVISION_MISMATCH", "任务状态已变化，请刷新后重试").With("revision", rev)
-		}
-		nextRev, nextStatus, err := e.cancelLockedTask(ctx, tx, ws, id, status)
-		rev, status = nextRev, nextStatus
+		var err error
+		rev, status, err = e.cancelTaskTx(ctx, tx, ws, id, &expected)
 		return err
 	})
 	return rev, status, err
+}
+
+// CancelConversationTask is called with the active conversation and turn locked.
+// An absent task revision means the user pressed cancel before that turn was queued.
+func (e *Engine) CancelConversationTask(ctx context.Context, tx pgx.Tx, ws, id uuid.UUID, expected *int64) error {
+	_, _, err := e.cancelTaskTx(ctx, tx, ws, id, expected)
+	return err
+}
+
+func (e *Engine) cancelTaskTx(ctx context.Context, tx pgx.Tx, ws, id uuid.UUID, expected *int64) (int64, string, error) {
+	var rev int64
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status, revision FROM research_tasks WHERE id=$1 FOR UPDATE`, id).Scan(&status, &rev); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, "", errs.NotFound()
+		}
+		return 0, "", err
+	}
+	switch {
+	case status == "COMPLETED":
+		return rev, status, errs.Conflict("ALREADY_COMPLETED", "任务已完成，无法取消")
+	case status == "CANCEL_REQUESTED" || status == "CANCELLED":
+		return rev, status, nil
+	case IsTerminal(status):
+		return rev, status, errs.Conflict("ALREADY_TERMINAL", "任务已结束")
+	case expected != nil && rev != *expected:
+		return rev, status, errs.Conflict("REVISION_MISMATCH", "任务状态已变化，请刷新后重试").With("revision", rev)
+	}
+	return e.cancelLockedTask(ctx, tx, ws, id, status)
 }
 
 // CancelConversationTasks runs with the conversation locked by the caller.

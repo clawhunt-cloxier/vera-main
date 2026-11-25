@@ -45,13 +45,20 @@ Verify 的 `workspace-browser` 在 Chromium 中运行上述模拟浏览器套件
 
 ```bash
 cd backend
-go test -race ./internal/conversation ./internal/httpapi ./internal/harness ./internal/harness/model ./internal/app \
-  -run 'TestQuestionRouting|TestConversation|TestCloseConversationSourceWithRiver|TestGatewayOpenAIRetryRepairReuseBudget|TestObservationBriefDelivery'
+go test -race ./internal/conversation ./internal/httpapi ./internal/harness ./internal/harness/model ./internal/app ./cmd/vera \
+  -run 'TestConversation|TestCloseConversationSourceWithRiver|TestGatewayOpenAI|TestObservationBriefDelivery|TestAdminUsageReportAndReconcile'
 ```
 
-测试使用独立 PostgreSQL、实际 River 工作者和模拟模型。验证两种短研究、冻结序列、计算锚点、幂等确认、账户隔离、权限撤回后的替代引用、删除与过期时的交付边界、配额及完整研报 PDF。回归还覆盖会话清理前后的旧 epoch、新到的计费结果与未知费用核销，以及超过截止时间后拒绝交付。Linux 原生构建通过合成 Choice 动态库及本地 S3 替身，检查图表与明细的数值和证据都一致，并按用途验证快照留存。
+测试使用独立 PostgreSQL、实际 River 工作者和模拟模型。`TestConversationNativeToolCalls` 使用本地模型 HTTP 替身，检查七种已登记的工具声明、口语问法、澄清后自动执行、手选历史轮次优先、日期范围不适用、原始计算引用、直接金融回答及计费留痕。未声明工具、虚构标的和非法参数均不创建任务。验收还覆盖纯荐股请求、混合历史研究和目标价请求、伪造教育回复的自由文本，以及旧客户端确认计划。对话的数据准备保留队列容量限制，同标的复用作业，独立入口的每日次数单独计数。其余回归覆盖两类短研究、冻结序列、幂等发送、账户隔离、权限撤回、删除和过期、迟到记账、时限及完整研报 PDF。合成 Choice 动态库与本地 S3 替身检查图表、明细和证据一致性以及快照留存。
 
-按 [演示启动指南](README-MVP.md) 启动本机 Vera。在邀请码文件最后一行保存可用两次的本地测试邀请码，保持文件私有。安装 Chromium 后在 `web/` 执行 `VERA_CHAT_URL=http://127.0.0.1:18095 VERA_CHAT_INVITE_FILE=/path/to/local-invite npm run test:conversation-ui`。在 1440×960 与 390×844 检查真实 API 的登录、首页提问、证据与公式、刷新、追问、取消和历史删除。
+按 [演示启动指南](README-MVP.md) 启动模拟 Vera 并建立两个工作区。把本地演示密码保存在私有文本文件。安装 Chromium 后在 `web/` 运行：
+
+```bash
+VERA_CHAT_URL=http://127.0.0.1:18093 VERA_CHAT_USER=vera-t044-demo VERA_CHAT_MOBILE_USER=administrator \
+VERA_CHAT_PASSWORD_FILE=/path/to/private-password npm run test:conversation-ui
+```
+
+浏览器检查 1440×960 和 390×844 的密码登录、问候、金融追问、非金融问题、拒绝荐股、自动研究、证据、公式、刷新、历史删除和旧计划确认。两个视口使用不同的工作区。
 
 ## 2. 按任务补齐的测试
 

@@ -54,7 +54,6 @@
 .chat-compose-foot,
 .chat-examples,
 .chat-inline-actions,
-.chat-plan-heading,
 .chat-result-meta {
   display: flex;
   flex-wrap: wrap;
@@ -313,30 +312,14 @@
   font-size: 18px;
 }
 
-.chat-plan dl {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 12px;
-  font-size: 14px;
-}
-
-.chat-plan dt,
-.chat-plan-note {
-  color: var(--subtle);
-}
-
-.chat-plan dd {
-  margin: 0;
-}
-
-.chat-plan-note,
 .chat-source-notes p {
   overflow-wrap: anywhere;
   font-size: 13px;
 }
 
-.chat-plan + .chat-action {
-  margin-top: 8px;
+.chat-reply {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .chat-subject form,

@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "greeting",
+        "thanks",
+        "capabilities",
+        "education",
+        "decline_advice",
+        "clarify",
+        "unavailable",
+        "out_of_scope"
+      ]
+    },
+    "concepts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "type": "string",
+            "pattern": "^[a-z_]+$",
+            "description": "A concept ID from the registered catalogue in the prompt."
+          },
+          "aspect": {
+            "type": "string",
+            "enum": [
+              "definition",
+              "method",
+              "limits",
+              "overview"
+            ]
+          }
+        },
+        "required": [
+          "topic",
+          "aspect"
+        ]
+      }
+    }
+  },
+  "required": [
+    "kind",
+    "concepts"
+  ]
+}

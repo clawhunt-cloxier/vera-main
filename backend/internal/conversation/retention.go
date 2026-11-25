@@ -32,9 +32,6 @@ type expired struct{ workspace, conversation uuid.UUID }
 
 func (w *retentionWorker) Work(ctx context.Context, _ *river.Job[retentionArgs]) error {
 	s := w.service
-	if _, err := s.Engine.Pool.Exec(ctx, "DELETE FROM conversation_quota_debits WHERE created_at<date_trunc('day', now())"); err != nil {
-		return err
-	}
 	rows, err := s.Engine.Pool.Query(ctx, `SELECT workspace_id,id FROM conversations
 		WHERE deleted_at IS NOT NULL OR expires_at<=now() ORDER BY coalesce(deleted_at,expires_at),id LIMIT 100`)
 	if err != nil {
@@ -71,6 +68,16 @@ func (s Service) clean(ctx context.Context, item expired) error {
 		}
 		if err != nil {
 			return err
+		}
+		// Keep empty rows for the admission interval so deletion cannot
+		// reset the workspace's recent message count.
+		var recent bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM conversation_turns
+			WHERE conversation_id=$1 AND workspace_id=$2 AND created_at>now()-interval '1 minute')`, id, item.workspace).Scan(&recent); err != nil {
+			return err
+		}
+		if recent {
+			return nil
 		}
 		var active bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM conversation_turns t
@@ -109,8 +116,6 @@ func (s Service) clean(ctx context.Context, item expired) error {
 
 func purgeShortTask(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID) error {
 	for _, statement := range []string{
-		`INSERT INTO conversation_quota_debits(task_id,workspace_id,created_at) SELECT id,workspace_id,created_at
-			FROM research_tasks WHERE workspace_id=$1 AND id=$2 AND created_at>=date_trunc('day', now()) ON CONFLICT DO NOTHING`,
 		`DELETE FROM feedback WHERE workspace_id=$1 AND report_id IN (SELECT report_id FROM report_versions WHERE workspace_id=$1 AND task_id=$2)`,
 		`DELETE FROM publications WHERE workspace_id=$1 AND report_id IN (SELECT report_id FROM report_versions WHERE workspace_id=$1 AND task_id=$2)`,
 		`DELETE FROM observation_brief_snapshots WHERE workspace_id=$1 AND task_id=$2`,

@@ -13,6 +13,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/policy"
 )
@@ -251,22 +252,72 @@ func (e *Engine) ConversationTopics() []string {
 	}
 }
 
-func (e *Engine) BuildConversationPlan(ctx context.Context, ws, turn uuid.UUID, subject dataservice.EntityRow, skill, topic string, window int, bind func(pgx.Tx, *Plan) error) (*Plan, error) {
-	if topic == "" {
-		if e.Brief != nil && !e.hasCloseSkills() {
-			return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "当前来源仅支持日成交观察，完整研报暂不可用")
+// ConversationResearchSpec describes the scope supported by a registered skill.
+type ConversationResearchSpec struct {
+	Subjects      []string
+	Windows       []int
+	DefaultWindow int
+	Modes         []string
+}
+
+func (e *Engine) ConversationResearchSpec(skill, topic string) (ConversationResearchSpec, bool) {
+	if topic != "" {
+		if !slices.Contains(e.ConversationTopics(), topic) ||
+			(topic == DailyTradingTopic && skill != "stock_analysis") ||
+			(topic == FinancingBalanceTopic && skill != "capital_flow") {
+			return ConversationResearchSpec{}, false
 		}
+		windows := ConversationWindows(topic)
+		if e.Brief != nil && !e.hasCloseSkills() {
+			windows = []int{20}
+		}
+		return ConversationResearchSpec{Subjects: []string{"stock"}, Windows: windows, DefaultWindow: 20}, true
+	}
+	sk := e.Skills[skill]
+	if sk == nil || e.realResearchDisabled() || (e.Brief != nil && !e.hasCloseSkills()) {
+		return ConversationResearchSpec{}, false
+	}
+	props, _ := sk.Schema["properties"].(map[string]any)
+	window, _ := props["window"].(map[string]any)
+	mode, _ := props["mode"].(map[string]any)
+	windows, _ := window["enum"].([]int)
+	defaultWindow, _ := window["default"].(int)
+	modes, _ := mode["enum"].([]string)
+	return ConversationResearchSpec{Subjects: sk.Subjects, Windows: windows, DefaultWindow: defaultWindow, Modes: modes}, true
+}
+
+// ConversationLaunch binds a new plan to its pending turn. AutoRun is set by the
+// current workspace client. The older API can still prepare a plan for confirmation.
+type ConversationLaunch struct {
+	TurnID   uuid.UUID
+	Revision int64
+	AutoRun  bool
+	Bind     func(pgx.Tx, *Plan) error
+}
+
+func (e *Engine) StartConversationResearch(ctx context.Context, ws uuid.UUID, subject dataservice.EntityRow, skill, topic string, window int, mode string, launch ConversationLaunch) (*Plan, error) {
+	spec, ok := e.ConversationResearchSpec(skill, topic)
+	if !ok {
+		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "当前环境未开放该研究能力")
+	}
+	if !slices.Contains(spec.Subjects, subject.Kind) {
+		return nil, errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "该研究能力不支持此对象类型")
+	}
+	if window != 0 && !slices.Contains(spec.Windows, window) || mode != "" && !slices.Contains(spec.Modes, mode) {
+		return nil, errs.Unprocessable("INVALID_PARAMS", "该研究能力不支持所请求的范围")
+	}
+	if window == 0 {
+		window = spec.DefaultWindow
+	}
+	if topic == "" {
 		raw := map[string]any{}
 		if window != 0 {
-			if skill == "deep_research" {
-				return nil, errs.Unprocessable("INVALID_PARAMS", "深度研究使用各章节的披露范围，请去掉交易日窗口后重试")
-			}
 			raw["window"] = float64(window)
 		}
-		return e.buildPlan(ctx, ws, skill, subject, raw, &turn, bind)
-	}
-	if subject.Kind != "stock" || !slices.Contains(e.ConversationTopics(), topic) {
-		return nil, errs.Unprocessable("CAPABILITY_UNAVAILABLE", "当前数据源不支持该短研究主题")
+		if mode != "" {
+			raw["mode"] = mode
+		}
+		return e.buildPlan(ctx, ws, skill, subject, raw, &launch)
 	}
 	version := ConversationFixtureVersion
 	if e.hasCloseSkills() {
@@ -285,13 +336,13 @@ func (e *Engine) BuildConversationPlan(ctx context.Context, ws, turn uuid.UUID, 
 		if window != 20 {
 			return nil, errs.Unprocessable("INVALID_PARAMS", "当前来源提供最近最多 20 个交易日的成交观察")
 		}
-		return e.buildSkillPlanForTurn(ctx, ws, conversationObservationSkill(), subject, nil, &turn, true, bind)
+		return e.buildSkillPlanForTurn(ctx, ws, conversationObservationSkill(), subject, nil, &launch, true)
 	}
 	sk := conversationSkill(skill, version)
 	if sk == nil {
 		return nil, errs.Unprocessable("UNKNOWN_SKILL", "不支持的研究技能")
 	}
-	return e.buildSkillPlanForTurn(ctx, ws, sk, subject, map[string]any{"window": float64(window)}, &turn, true, bind)
+	return e.buildSkillPlanForTurn(ctx, ws, sk, subject, map[string]any{"window": float64(window)}, &launch, true)
 }
 
 func (e *Engine) researchBudget(skill, version string) policy.Budget {
@@ -301,6 +352,74 @@ func (e *Engine) researchBudget(skill, version string) policy.Budget {
 		b.MaxModelCalls = min(4, b.MaxModelCalls)
 	}
 	return b
+}
+
+func (e *Engine) startConversationTask(ctx context.Context, ws uuid.UUID, sk *Skill, plan *Plan, launch ConversationLaunch, persist func(pgx.Tx) error) error {
+	if !launch.AutoRun {
+		return db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
+			conv, err := lockPendingTurn(ctx, tx, launch.TurnID, launch.Revision)
+			if err != nil {
+				return err
+			}
+			if err := persist(tx); err != nil {
+				return err
+			}
+			if err := launch.Bind(tx, plan); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE conversation_turns SET plan_id=$2, state='confirm', message='研究计划已准备好。', revision=revision+1 WHERE id=$1`, launch.TurnID, plan.ID); err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `UPDATE conversations SET revision=revision+1, updated_at=now(), expires_at=now()+interval '90 days' WHERE id=$1`, conv)
+			return err
+		})
+	}
+	return e.confirmTransaction(ctx, ws, plan, func(tx pgx.Tx) error {
+		if err := lockResearchAdmission(ctx, tx, ws); err != nil {
+			return err
+		}
+		conv, err := lockPendingTurn(ctx, tx, launch.TurnID, launch.Revision)
+		if err != nil {
+			return err
+		}
+		if !time.Now().Before(plan.ExpiresAt) {
+			return errs.Conflict("PLAN_EXPIRED", "研究准备超时，请重新发送问题。")
+		}
+		if err := persist(tx); err != nil {
+			return err
+		}
+		if err := launch.Bind(tx, plan); err != nil {
+			return err
+		}
+		taskID, err := e.enqueueResearchTask(ctx, tx, ws, plan, sk, nil)
+		if err != nil {
+			return err
+		}
+		return attachConversationTask(ctx, tx, conv, launch.TurnID, plan.ID, taskID)
+	})
+}
+
+func lockPendingTurn(ctx context.Context, tx pgx.Tx, turn uuid.UUID, revision int64) (uuid.UUID, error) {
+	var conv uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT c.id FROM conversations c JOIN conversation_turns t
+		ON t.conversation_id=c.id AND t.workspace_id=c.workspace_id
+		WHERE t.id=$1 AND c.deleted_at IS NULL AND c.expires_at>clock_timestamp() FOR UPDATE OF c`, turn).Scan(&conv)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, errs.NotFound()
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var state string
+	var current int64
+	err = tx.QueryRow(ctx, `SELECT state, revision FROM conversation_turns WHERE id=$1 AND conversation_id=$2 FOR UPDATE`, turn, conv).Scan(&state, &current)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if current != revision || state != "pending" {
+		return uuid.Nil, errs.Conflict("CONVERSATION_CHANGED", "该轮研究已更新")
+	}
+	return conv, nil
 }
 
 func lockTurnConfirmation(ctx context.Context, tx pgx.Tx, turn, plan uuid.UUID, revision int64) (uuid.UUID, uuid.UUID, error) {
@@ -316,22 +435,24 @@ func lockTurnConfirmation(ctx context.Context, tx pgx.Tx, turn, plan uuid.UUID, 
 	}
 	var state string
 	var current int64
+	var automatic, newest bool
 	var boundPlan, task *uuid.UUID
-	err = tx.QueryRow(ctx, `SELECT state, revision, plan_id, task_id FROM conversation_turns WHERE id=$1 FOR UPDATE`, turn).Scan(&state, &current, &boundPlan, &task)
+	err = tx.QueryRow(ctx, `SELECT state, revision, plan_id, task_id, automatic, ordinal=(SELECT max(ordinal) FROM conversation_turns WHERE conversation_id=$2)
+		FROM conversation_turns WHERE id=$1 AND conversation_id=$2 FOR UPDATE`, turn, conv).Scan(&state, &current, &boundPlan, &task, &automatic, &newest)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}
-	if boundPlan != nil && *boundPlan == plan && task != nil {
+	if !automatic && boundPlan != nil && *boundPlan == plan && task != nil {
 		return conv, *task, nil
 	}
-	if current != revision || state != "confirm" || boundPlan == nil || *boundPlan != plan {
+	if automatic || !newest || current != revision || state != "confirm" || boundPlan == nil || *boundPlan != plan {
 		return uuid.Nil, uuid.Nil, errs.Conflict("CONVERSATION_CHANGED", "该轮研究已更新，请刷新后确认")
 	}
 	return conv, uuid.Nil, nil
 }
 
-func attachConversationTask(ctx context.Context, tx pgx.Tx, conv, turn, task uuid.UUID) error {
-	if _, err := tx.Exec(ctx, `UPDATE conversation_turns SET task_id=$2,state='research',revision=revision+1 WHERE id=$1`, turn, task); err != nil {
+func attachConversationTask(ctx context.Context, tx pgx.Tx, conv, turn, plan, task uuid.UUID) error {
+	if _, err := tx.Exec(ctx, `UPDATE conversation_turns SET plan_id=$2,task_id=$3,state='research',message=NULL,revision=revision+1 WHERE id=$1`, turn, plan, task); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE conversations SET revision=revision+1,updated_at=now(),expires_at=now()+interval '90 days',

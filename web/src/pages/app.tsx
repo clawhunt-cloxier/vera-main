@@ -441,10 +441,7 @@ export function PlanReview({ id }: { id: string }) {
             )}
             <div className="research-plan-footer">
               {p.data.estimate && (
-                <p>
-                  参考用时约 {Math.max(1, Math.ceil(p.data.estimate.p95_seconds / 60))} 分钟 · 配额{' '}
-                  {p.data.estimate.quota_cost} 次
-                </p>
+                <p>参考用时约 {Math.max(1, Math.ceil(p.data.estimate.p95_seconds / 60))} 分钟</p>
               )}
               <button
                 type="submit"

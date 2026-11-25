@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
@@ -17,7 +16,11 @@ import (
 func (t Turn) Scope() Scope            { return t.Intent.Scope }
 func (t Turn) Candidates() []uuid.UUID { return slices.Clone(t.Intent.Candidates) }
 func (t Turn) Reference() *uuid.UUID   { return t.Intent.Reference }
-func (t Turn) ReferenceKind() string   { return t.Intent.ReferenceKind }
+func (t Turn) NeedsSubject() bool {
+	return t.Intent.NeedsSubject || !t.Automatic && t.State == "clarify" && t.Intent.Scope.Skill != ""
+}
+func (t Turn) AdviceDeclined() bool  { return t.Intent.AdviceDeclined }
+func (t Turn) ReferenceKind() string { return t.Intent.ReferenceKind }
 
 func lockConversation(ctx context.Context, tx pgx.Tx, conv uuid.UUID) error {
 	var id uuid.UUID
@@ -40,15 +43,16 @@ func (s Service) Choose(ctx context.Context, ws, conv, turn, subject uuid.UUID, 
 		var status string
 		var actual, ordinal int64
 		var in intent
-		err := tx.QueryRow(ctx, `SELECT state,revision,ordinal,coalesce(intent,'{}'::jsonb) FROM conversation_turns WHERE id=$1 AND conversation_id=$2`, turn, conv).
-			Scan(&status, &actual, &ordinal, &in)
+		var automatic bool
+		err := tx.QueryRow(ctx, `SELECT state,revision,ordinal,coalesce(intent,'{}'::jsonb),automatic FROM conversation_turns WHERE id=$1 AND conversation_id=$2`, turn, conv).
+			Scan(&status, &actual, &ordinal, &in, &automatic)
 		if err != nil {
 			return notFound(err)
 		}
-		if actual > revision && in.Scope.SubjectID == subject && (status == "pending" || status == "confirm" || status == "research") {
+		if actual > revision && in.Scope.SubjectID == subject && (status == "pending" || status == "research" || status == "confirm") {
 			return nil
 		}
-		if status != "clarify" || actual != revision || in.Scope.Skill == "" {
+		if status != "clarify" || actual != revision || in.Scope.Skill == "" || automatic && !in.NeedsSubject {
 			return errs.Conflict("CONVERSATION_CHANGED", "该轮消息已更新，请刷新后重试")
 		}
 		var newest int64
@@ -58,14 +62,17 @@ func (s Service) Choose(ctx context.Context, ws, conv, turn, subject uuid.UUID, 
 		if newest != ordinal {
 			return errs.Conflict("CONVERSATION_CHANGED", "请从最近一轮继续研究")
 		}
-		if len(in.Candidates) > 0 && !slices.Contains(in.Candidates, subject) || in.Scope.Topic != "" && entity.Kind != "stock" {
-			return errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "请选择该研究范围内的标的")
+		spec, ok := s.Engine.ConversationResearchSpec(in.Scope.Skill, in.Scope.Topic)
+		if !ok || !slices.Contains(spec.Subjects, entity.Kind) || in.Scope.Mode == "company_industry" && entity.Kind != "stock" ||
+			len(in.Candidates) > 0 && !slices.Contains(in.Candidates, subject) {
+			return errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "请选择该研究范围内的对象")
 		}
-		if in.Scope.Topic != "" && !slices.Contains(harness.ConversationWindows(in.Scope.Topic), in.Scope.Window) {
+		if in.Scope.Window != 0 && !slices.Contains(spec.Windows, in.Scope.Window) {
 			return errs.Unprocessable("INVALID_PARAMS", "请先明确交易日窗口")
 		}
 		in.Scope.SubjectID = subject
-		data, err := json.Marshal(intent{Scope: in.Scope})
+		in.Candidates, in.NeedsSubject = nil, false
+		data, err := json.Marshal(in)
 		if err != nil {
 			return err
 		}
@@ -84,7 +91,7 @@ func (s Service) Confirm(ctx context.Context, ws, conv, turn, plan uuid.UUID, ha
 	if err != nil {
 		return err
 	}
-	if t.PlanID == nil || *t.PlanID != plan {
+	if t.Automatic || t.PlanID == nil || *t.PlanID != plan {
 		return errs.NotFound()
 	}
 	if t.TaskID != nil {
@@ -102,31 +109,27 @@ func (s Service) Confirm(ctx context.Context, ws, conv, turn, plan uuid.UUID, ha
 }
 
 func (s Service) Cancel(ctx context.Context, ws, conv, turn uuid.UUID, revision int64, taskRevision *int64) error {
-	t, err := s.Turn(ctx, ws, conv, turn)
-	if err != nil {
-		return err
-	}
-	if t.TaskID != nil {
-		if taskRevision == nil || revision != t.Revision {
-			return errs.Conflict("CONVERSATION_CHANGED", "请刷新后取消当前研究")
-		}
-		_, _, err = s.Engine.CancelTask(ctx, ws, *t.TaskID, *taskRevision)
-		return err
-	}
 	return db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
 		if err := lockConversation(ctx, tx, conv); err != nil {
 			return err
 		}
 		var state string
 		var current int64
-		err := tx.QueryRow(ctx, `SELECT state,revision FROM conversation_turns WHERE id=$1 AND conversation_id=$2`, turn, conv).Scan(&state, &current)
+		var task *uuid.UUID
+		err := tx.QueryRow(ctx, `SELECT state,revision,task_id FROM conversation_turns WHERE id=$1 AND conversation_id=$2`, turn, conv).Scan(&state, &current, &task)
 		if err != nil {
 			return notFound(err)
+		}
+		if state == "research" && task != nil {
+			if taskRevision != nil && current == revision || taskRevision == nil && current-1 == revision {
+				return s.Engine.CancelConversationTask(ctx, tx, ws, *task, taskRevision)
+			}
+			return errs.Conflict("CONVERSATION_CHANGED", "请刷新后取消当前研究")
 		}
 		if state == "unavailable" && current == revision+1 {
 			return nil
 		}
-		if current != revision || !slices.Contains([]string{"pending", "confirm", "clarify"}, state) {
+		if taskRevision != nil || current != revision || !slices.Contains([]string{"pending", "clarify", "confirm"}, state) {
 			return errs.Conflict("CONVERSATION_CHANGED", "该轮消息已更新，请刷新后重试")
 		}
 		if _, err := tx.Exec(ctx, `UPDATE conversation_turns SET state='unavailable',message='已取消本轮研究。',revision=revision+1 WHERE id=$1`, turn); err != nil {

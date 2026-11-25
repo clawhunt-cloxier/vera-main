@@ -30,7 +30,7 @@ import {
 } from '../api/client';
 import { useMe } from '../api/hooks';
 import { ConversationResult } from '../components/ConversationResult';
-import { Empty, ErrorBox, Loading, Tag, VeraAvatar } from '../components/ui';
+import { Empty, ErrorBox, Loading, VeraAvatar } from '../components/ui';
 import { WorkspaceFrame } from '../components/WorkspaceFrame';
 import './conversations.css';
 
@@ -90,7 +90,7 @@ export function ConversationComposer({
     if (mutation.isError) mutation.reset();
   };
   const message = text.trim();
-  const canSend = !disabled && !mutation.isPending && Array.from(message).length >= 2;
+  const canSend = !disabled && !mutation.isPending && message.length > 0;
 
   return (
     <section className="chat-compose-section" aria-label={thread ? '继续对话研究' : '发起对话研究'}>
@@ -125,7 +125,7 @@ export function ConversationComposer({
           rows={2}
           maxLength={500}
           disabled={mutation.isPending}
-          placeholder={thread ? '继续提问' : '输入股票简称、代码或研究问题'}
+          placeholder={thread ? '继续提问' : '聊聊金融概念，或提一个研究问题'}
           onChange={(event) => update(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -154,8 +154,8 @@ export function ConversationComposer({
             type="submit"
             className="chat-send"
             disabled={!canSend}
-            aria-label="发送研究问题"
-            title="发送研究问题"
+            aria-label="发送消息"
+            title="发送消息"
           >
             <ArrowUp size={18} aria-hidden="true" />
           </button>
@@ -298,17 +298,13 @@ function ConversationThreadView({ id, workspace }: { id: string; workspace: stri
   const detail = useQuery({
     queryKey: [...key, 'detail', newest?.id, newest?.revision],
     queryFn: ({ signal }) => conversationTurn(id, newest!.id, signal),
-    enabled: newest?.state === 'confirm' || newest?.state === 'clarify',
+    enabled: newest?.state === 'clarify' || newest?.state === 'confirm',
     retry: false,
   });
   const activeTurn = detail.data ?? newest;
   const taskStatus = activeTurn?.task_status;
   const busy =
-    activeTurn?.state === 'pending' ||
-    Boolean(
-      activeTurn?.state === 'confirm' && (activeTurn.plan?.executable || detail.isFetching)
-    ) ||
-    Boolean(taskStatus && !terminal.includes(taskStatus));
+    activeTurn?.state === 'pending' || Boolean(taskStatus && !terminal.includes(taskStatus));
   const input = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -424,7 +420,7 @@ const reasonText: Record<string, string> = {
   REQUIRED_DATA_MISSING: '此次研究缺少可核验的必需数据。',
   REQUIRED_SECTION_UNSUPPORTED: '现有证据不足，无法交付结论。',
   DEADLINE_EXCEEDED: '研究已超时。可以缩小范围后重试。',
-  BUDGET_EXHAUSTED: '本轮研究预算已用完。',
+  BUDGET_EXHAUSTED: '本轮研究未能完成。可以缩小范围后重试。',
   DATA_SOURCE_FORBIDDEN: '本轮未能取得所需的数据用途授权。',
   USER_CANCELLED: '已取消本轮研究。',
 };
@@ -467,66 +463,36 @@ function TurnBody({
   const expected_revision = turn.revision;
   const status = turn.task_status;
   const working = status != null && !terminal.includes(status);
-  const plan = turn.plan;
+  const plan = turn.state === 'confirm' && current ? turn.plan : undefined;
 
   return (
     <>
       {current && detailError != null && <ErrorBox error={detailError} />}
       {action.error && <ErrorBox error={action.error} />}
-      {turn.state === 'pending' && <Loading label={turn.message ?? '正在理解研究问题…'} />}
+      {turn.state === 'pending' && <Loading label={turn.message ?? '正在理解你的问题…'} />}
       {turn.state === 'unavailable' && <p role="status">{turn.message}</p>}
-      {turn.state === 'clarify' && (
-        <>
-          <p>{turn.message}</p>
-          {current && turn.scope && (
-            <SubjectPicker
-              candidates={turn.candidates}
-              choosing={action.isPending}
-              onChoose={(subject) =>
-                action.mutate({ action: 'choose', subject_id: subject, expected_revision })
-              }
-            />
-          )}
-        </>
-      )}
-      {turn.state === 'confirm' &&
-        !plan &&
-        (current ? <p>{turn.message}</p> : <p>该轮计划未执行。</p>)}
-      {turn.state === 'confirm' && plan && (
+      {turn.notice && <p className="chat-reply">{turn.notice}</p>}
+      {turn.state === 'confirm' && !plan && <p>{turn.message ?? '该轮计划未执行。'}</p>}
+      {plan && (
         <section className="chat-plan" aria-label="待确认的研究计划">
-          <div className="chat-plan-heading">
-            <h3>{plan.subject.name}</h3>
-            {plan.subject.symbol && <small>{plan.subject.symbol}</small>}
-            <Tag>
-              {turn.scope?.topic === 'daily_trading'
-                ? '日成交'
-                : turn.scope?.topic === 'financing_balance'
-                  ? '融资余额'
-                  : skillTitle[plan.skill_id]}
-            </Tag>
-          </div>
-          <dl>
-            {Boolean(turn.scope?.window) && (
-              <>
-                <dt>窗口</dt>
-                <dd>{turn.scope?.window} 个交易日</dd>
-              </>
-            )}
-            <dt>数据截止</dt>
-            <dd>
-              {plan.snapshot_mode === 'collect_latest'
-                ? '确认后采集并冻结'
-                : fmtDataTime(plan.as_of)}
-            </dd>
-            <dt>研究配额</dt>
-            <dd>{plan.estimate.quota_cost} 次</dd>
-            <dt>预计耗时</dt>
-            <dd>{plan.estimate.p95_seconds} 秒</dd>
-          </dl>
+          <h3>
+            {plan.subject.name} ·{' '}
+            {turn.scope?.topic === 'daily_trading'
+              ? '日成交'
+              : turn.scope?.topic === 'financing_balance'
+                ? '融资余额'
+                : skillTitle[plan.skill_id]}
+          </h3>
+          {Boolean(turn.scope?.window) && <p>窗口为 {turn.scope?.window} 个交易日</p>}
+          <p>
+            {plan.snapshot_mode === 'collect_latest'
+              ? '确认后采集并冻结数据'
+              : '数据截至 ' + fmtDataTime(plan.as_of)}
+          </p>
           {plan.sections
             .filter((section) => section.reason && section.availability !== 'available')
             .map((section) => (
-              <p key={section.id} className="chat-plan-note">
+              <p key={section.id}>
                 {section.title} · {section.reason}
               </p>
             ))}
@@ -548,6 +514,21 @@ function TurnBody({
             </button>
           )}
         </section>
+      )}
+      {turn.state === 'answer' && <p className="chat-reply">{turn.message}</p>}
+      {turn.state === 'clarify' && (
+        <>
+          <p>{turn.message}</p>
+          {current && turn.needs_subject && (
+            <SubjectPicker
+              candidates={turn.candidates}
+              choosing={action.isPending}
+              onChoose={(subject) =>
+                action.mutate({ action: 'choose', subject_id: subject, expected_revision })
+              }
+            />
+          )}
+        </>
       )}
       {working && <Loading label={taskStatusLabel(status)} />}
       {status && !working && status !== 'COMPLETED' && (

@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "result",
+        "evidence",
+        "calculation"
+      ]
+    },
+    "subject_mention": {
+      "type": "string",
+      "description": "Exact name or code from the current message, or empty if unnamed."
+    },
+    "advice": {
+      "type": "string",
+      "enum": [
+        "none",
+        "declined"
+      ],
+      "description": "Set declined if this tool fulfils just the historical part of a mixed research and investment advice request."
+    }
+  },
+  "required": [
+    "kind",
+    "subject_mention",
+    "advice"
+  ]
+}

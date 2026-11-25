@@ -28,8 +28,10 @@ type conversationAction struct {
 
 type conversationTurn struct {
 	conversation.Turn
-	Scope         *conversation.Scope `json:"scope,omitempty"`
 	Plan          *ResearchPlan       `json:"plan,omitempty"`
+	NeedsSubject  bool                `json:"needs_subject,omitempty"`
+	Notice        string              `json:"notice,omitempty"`
+	Scope         *conversation.Scope `json:"scope,omitempty"`
 	Candidates    []Entity            `json:"candidates,omitempty"`
 	ReferenceID   *uuid.UUID          `json:"reference_turn_id,omitempty"`
 	ReferenceKind string              `json:"reference_kind,omitempty"`
@@ -82,11 +84,12 @@ func (s *Server) sendConversation(w http.ResponseWriter, r *http.Request) error 
 		var first struct {
 			ClientMessageID uuid.UUID `json:"client_message_id"`
 			Text            string    `json:"text"`
+			Automatic       bool      `json:"automatic,omitempty"`
 		}
 		if err := httpx.Decode(r, &first); err != nil {
 			return err
 		}
-		in.ClientMessageID, in.Text = first.ClientMessageID, first.Text
+		in.ClientMessageID, in.Text, in.Automatic = first.ClientMessageID, first.Text, first.Automatic
 	}
 	_, ws := principal(r)
 	out, err := s.conversations().Send(r.Context(), conversation.Sender{Workspace: ws, Channel: "web"}, conv, in)
@@ -156,8 +159,6 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) error {
 	items := make([]conversationTurn, 0, len(turns))
 	for _, t := range turns {
 		out := turnView(t)
-		// Only the newest turn can accept a pending action. Fetch its plan
-		// from the turn endpoint to avoid multiple licensed reads per page.
 		items = append(items, out)
 		if turnInProgress(t) {
 			w.Header().Set("Retry-After", "2")
@@ -173,7 +174,6 @@ func (s *Server) getConversationTurn(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return err
 	}
-	_, ws := principal(r)
 	out := turnView(t)
 	if turnInProgress(t) {
 		w.Header().Set("Retry-After", "2")
@@ -191,6 +191,7 @@ func (s *Server) getConversationTurn(w http.ResponseWriter, r *http.Request) err
 		}
 	}
 	if t.State == "confirm" && t.PlanID != nil {
+		_, ws := principal(r)
 		plan, err := s.Engine.LoadPlan(r.Context(), ws, *t.PlanID)
 		if err != nil {
 			return err
@@ -215,6 +216,10 @@ func (s *Server) getConversationTurn(w http.ResponseWriter, r *http.Request) err
 
 func turnView(t conversation.Turn) conversationTurn {
 	out := conversationTurn{Turn: t, ReferenceID: t.Reference(), ReferenceKind: t.ReferenceKind(), IsBrief: t.Brief, ResultReady: t.ReportID != nil && t.ReportVersion != nil || t.Reference() != nil}
+	out.NeedsSubject = t.NeedsSubject()
+	if t.AdviceDeclined() {
+		out.Notice = conversation.AdviceBoundary
+	}
 	if scope := t.Scope(); scope.Skill != "" {
 		out.Scope = &scope
 	}

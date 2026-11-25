@@ -382,7 +382,7 @@ func checkChoiceConversation(t *testing.T, a *App, formalTask, formalReport uuid
 		}
 		return rec
 	}
-	accepted := call("POST", "/api/v1/conversations", fmt.Sprintf(`{"client_message_id":%q,"text":"600000.SH 的日成交"}`, uuid.NewString()), 202)
+	accepted := call("POST", "/api/v1/conversations", fmt.Sprintf(`{"client_message_id":%q,"text":"600000.SH 的日成交","automatic":true}`, uuid.NewString()), 202)
 	var ids conversation.Accepted
 	if err := json.Unmarshal(accepted.Body.Bytes(), &ids); err != nil {
 		t.Fatal(err)
@@ -393,11 +393,10 @@ func checkChoiceConversation(t *testing.T, a *App, formalTask, formalReport uuid
 		t.Fatalf("turn location: %s", accepted.Header().Get("Location"))
 	}
 	type turn struct {
-		State       string                `json:"state"`
-		Revision    int64                 `json:"revision"`
-		Plan        *httpapi.ResearchPlan `json:"plan"`
-		TaskStatus  string                `json:"task_status"`
-		ResultReady bool                  `json:"result_ready"`
+		State       string `json:"state"`
+		Revision    int64  `json:"revision"`
+		TaskStatus  string `json:"task_status"`
+		ResultReady bool   `json:"result_ready"`
 	}
 	awaitTurn := func(ready func(turn) bool) turn {
 		t.Helper()
@@ -414,14 +413,8 @@ func checkChoiceConversation(t *testing.T, a *App, formalTask, formalReport uuid
 		t.Fatalf("last Choice turn: %+v", latest)
 		return turn{}
 	}
-	planned := awaitTurn(func(v turn) bool { return v.State != "pending" })
-	if planned.Plan == nil || !planned.Plan.Executable || planned.Plan.SkillVersion != emquant.ConversationObservationVersion {
-		t.Fatalf("Choice plan: %+v", planned)
-	}
-	call("POST", turnPath+"/actions", fmt.Sprintf(`{"action":"confirm","expected_revision":%d,"plan_id":%q,"plan_hash":%q}`,
-		planned.Revision, planned.Plan.ID, planned.Plan.PlanHash), 204)
 	completed := awaitTurn(func(v turn) bool { return harness.IsTerminal(v.TaskStatus) })
-	if !completed.ResultReady {
+	if completed.State != "research" || !completed.ResultReady {
 		t.Fatalf("Choice result: %+v", completed)
 	}
 	content := call("GET", turnPath+"/result", "", 200).Body.Bytes()
@@ -449,8 +442,9 @@ func checkChoiceConversation(t *testing.T, a *App, formalTask, formalReport uuid
 		t.Fatalf("Choice evidence differs: %s", evidence.Body.String())
 	}
 	var shortTask uuid.UUID
-	if err := a.Pool.QueryRow(ctx, "SELECT task_id FROM conversation_turns WHERE id=$1", ids.TurnID).Scan(&shortTask); err != nil {
-		t.Fatal(err)
+	var shortVersion string
+	if err := a.Pool.QueryRow(ctx, "SELECT task_id, r.skill_version FROM conversation_turns t JOIN research_tasks r ON r.id=t.task_id WHERE t.id=$1", ids.TurnID).Scan(&shortTask, &shortVersion); err != nil || shortVersion != emquant.ConversationObservationVersion {
+		t.Fatalf("unexpected Choice version %s: %v", shortVersion, err)
 	}
 	const deleteSnapshot = `DELETE FROM observation_brief_snapshots WHERE task_id=$1`
 	if _, err := a.Pool.Exec(ctx, deleteSnapshot, shortTask); err == nil {
@@ -465,6 +459,9 @@ func checkChoiceConversation(t *testing.T, a *App, formalTask, formalReport uuid
 	}
 	call("DELETE", path, "", 204)
 	call("GET", turnPath+"/result", "", 404)
+	if _, err := a.Pool.Exec(ctx, `UPDATE conversation_turns SET created_at=now()-interval '2 minutes' WHERE conversation_id=$1`, ids.ConversationID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := worker.Insert(ctx, choiceRetentionProbe{}, nil); err != nil {
 		t.Fatal(err)
 	}
