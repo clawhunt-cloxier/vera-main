@@ -75,3 +75,21 @@ func TestConversationSubjectSpans(t *testing.T) {
 		}
 	}
 }
+
+func TestConversationTradingDayScope(t *testing.T) {
+	for _, sample := range []struct {
+		text                 string
+		requested, effective int
+		want                 bool
+	}{
+		{"看看近２０个交易日", 20, 20, true},
+		{"看看近２０个交易日", 20, 5, false},
+		{"近２０个交易日怎么算", 0, 20, true},
+		{"近２０个交易日怎么算", 0, 5, false},
+		{"看２０２５年２月的成交量", 0, 20, false},
+	} {
+		if got := matchesTradingDays(sample.text, sample.requested, sample.effective); got != sample.want {
+			t.Errorf("matchesTradingDays(%q, %d, %d) = %t, want %t", sample.text, sample.requested, sample.effective, got, sample.want)
+		}
+	}
+}
