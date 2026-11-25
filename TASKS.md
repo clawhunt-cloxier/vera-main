@@ -51,7 +51,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 
 | T042 | 数据治理与研究证据字段审计 | T036、T037、T041（已合入） | DONE | Codex / agent/codex/T042-governance | 2026-11-24T23:01Z 领取。PR #55 修正可见修订、证券快照和实体目录、日期及小数校验、计算输入单位及财报更正序号。本地综合检查、带 PostgreSQL 的回归和 20 项 Chromium 测试通过。[审计交接](docs/handoffs/2026-11-24-T042-codex.md) |
 
-| T043 | 工作台对话流研究 | T036、T037、T040、T042 | IN_PROGRESS | Codex / agent/codex/T043-chat-research | 2026-11-25T18:54Z 领取，对话 API、私有表迁移、根规范、短研究技能与工作台。交付日成交、融资余额、历史和连续追问，沿用正式研报入口。见[方案及实施计划](docs/decisions/0006-conversational-research.md)和[交接](docs/handoffs/2026-11-25-T043-codex.md)。 |
+| T044 | 工作台对话流研究 | T036、T037、T040、T042 | IN_PROGRESS | Codex / agent/codex/T044-chat-research | 2026-11-25T18:54Z 领取，对话 API、私有表迁移、根规范、短研究技能与工作台。交付日成交、融资余额、历史和连续追问，沿用正式研报入口。见[方案及实施计划](docs/decisions/0006-conversational-research.md)和[交接](docs/handoffs/2026-11-25-T044-codex.md)。 |
 
 ## 里程碑
 
