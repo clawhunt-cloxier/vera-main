@@ -146,6 +146,10 @@ func safeReturn(p string) string {
 	if p == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.Contains(p, `\`) {
 		return "/app"
 	}
+	// Browsers discard some ASCII controls when parsing navigation URLs.
+	if strings.IndexFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return "/app"
+	}
 	return p
 }
 
