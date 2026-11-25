@@ -80,7 +80,7 @@ func negotiateRepresentation(r *http.Request, realtime, observation bool) string
 }
 
 func researchVersionPath(path string) bool {
-	return strings.HasPrefix(path, "/api/") && !strings.HasSuffix(path, "/pdf")
+	return strings.HasPrefix(path, "/api/") && !strings.HasSuffix(path, "/pdf") && !strings.HasPrefix(path, "/api/v1/conversations")
 }
 
 func representation(r *http.Request) string {

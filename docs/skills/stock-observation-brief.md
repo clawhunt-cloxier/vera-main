@@ -10,6 +10,8 @@
 
 验收样例：真实成交观察生成 limited；跨 workspace 读取拒绝；许可撤销拒绝；重复确认/执行只交付一次；对象损坏、缺必需数据和无效模型输出不交付。自动化入口：`go test ./internal/app -run TestObservationBriefDelivery`；真实环境显式 `VERA_LIVE_BRIEF=1` 运行 `TestLiveObservationBrief`，需真实 SDK、持久 S3、许可与模型配置，消耗真实额度，结果不入 Git。
 
+工作台对话可以使用本版本的冻结成交明细，展示近最多 20 个观察日期及其图表。参见 [对话研究](conversation-research.md)。
+
 ## 双来源日成交简报
 
 `stock_analysis / 1.1.0-demo.4` 在双源部署下用于已登记的单只 A 股。计划使用 TuShare 发布时钟确定数据截止时间。用户确认后采集 Choice 成交数据，按同一证券身份绑定两份 Choice 原始归档和一条已发布的 TuShare 收盘记录。清单记录收盘记录 ID 与内容哈希，重试按同一清单读取。

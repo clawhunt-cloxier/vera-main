@@ -174,11 +174,14 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 	}
 	// Summary: model may fail or time out; the deterministic fallback keeps delivery possible.
 	points, err := step(parent, e, t, "summary", func() ([]summaryPoint, error) {
+		if isConversationSkill(t.Version) {
+			return fallbackSummary(final, required), nil
+		}
 		var msg string
 		for _, c := range final {
 			msg += fmt.Sprintf("%s（%s）：%s\n", c.Ref, c.Claim.Kind, c.Claim.Text)
 		}
-		raw, _, err := e.complete(ctx, t, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "summary", Profile: "writer",
+		raw, _, err := e.complete(ctx, t, model.Request{StepKey: "summary", Profile: "writer",
 			Messages: []model.Message{{Role: "system", Content: summaryRules}, {Role: "user", Content: "已核验结论：\n" + msg}}, MaxOutput: 4000,
 			Schema: "summary-output", Budget: t.Budget, Simulate: func() (any, error) { return simulateSummary(final, required), nil }})
 		var pts []summaryPoint
@@ -207,6 +210,9 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 		return err
 	}
 	points, err = step(parent, e, t, "verify:summary", func() ([]summaryPoint, error) {
+		if isConversationSkill(t.Version) {
+			return points, nil
+		}
 		return e.verifySummary(ctx, parent, t, sheet, points, by, final, required)
 	})
 	if err != nil {
@@ -323,7 +329,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 			doc.DataAsOf = "数据冻结截止时点：" + cutoff.In(cst).Format("2006-01-02 15:04:05") + "（北京时间）"
 		}
 	}
-	if t.Version == emquant.ObservationBriefVersion || t.Version == MixedObservationVersion {
+	if emquant.IsDailyBriefVersion(t.Version) || t.Version == MixedObservationVersion {
 		doc.ResultKind = "limited"
 		doc.DataAsOf = "数据采集后的冻结时点：" + t.AsOf.In(cst).Format("2006-01-02 15:04:05") + "（北京时间；非实时）"
 	}
@@ -357,7 +363,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 		return doc, nil
 	}
 	provs, err := e.providerNames(ctx)
-	if t.Version == emquant.ObservationBriefVersion && e.Brief != nil {
+	if emquant.IsDailyBriefVersion(t.Version) && e.Brief != nil {
 		err = e.Pool.QueryRow(ctx, `SELECT name FROM providers WHERE id=$1 AND enabled AND NOT synthetic`, e.Brief.ProviderID).Scan(&provs)
 	}
 	if t.Version == RealtimeBriefVersion && len(doc.SourceFreshness) > 0 {
@@ -383,7 +389,7 @@ func (e *Engine) render(ctx context.Context, t *taskRow, sk *Skill, subject data
 // realtimeFreshness reads and reauthorizes the immutable quote bound to the
 // task. It never chooses a newer record from a progress revision or wall clock.
 func (e *Engine) realtimeFreshness(ctx context.Context, t *taskRow) (*time.Time, []SourceFreshness, error) {
-	if t.Version == emquant.ObservationBriefVersion || t.Version == MixedObservationVersion {
+	if emquant.IsDailyBriefVersion(t.Version) || t.Version == MixedObservationVersion {
 		if e.Brief == nil {
 			return nil, nil, errors.New("harness: observation source unavailable")
 		}
@@ -465,6 +471,9 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 	versions, _ := json.Marshal(map[string]string{"skill": doc.SkillVersion, "rules": check.RulesVersion, "formulas": facts.FormulaVersion,
 		"prompts": PromptVersion, "policy": e.Policy.Version, "prices": e.priceVersion()})
 	return e.deliverTransaction(ctx, t, func(tx pgx.Tx) error {
+		if err := lockDeliveryConversation(ctx, tx, t); err != nil {
+			return err
+		}
 		var epoch, revision int64
 		var status, planHash string
 		var snapshot *string
@@ -474,6 +483,9 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 		}
 		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.SnapshotMode == "collect_latest" && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
 			return errStale
+		}
+		if isConversationSkill(t.Version) && !time.Now().Before(t.Deadline) {
+			return context.DeadlineExceeded
 		}
 		if IsCloseResearchVersion(t.Version) && (t.Snapshot == nil || *t.Snapshot != *snapshot) {
 			return errStale
@@ -556,7 +568,7 @@ func (e *Engine) verifySummary(ctx, parent context.Context, t *taskRow, sheet *f
 	if len(pending) == 0 {
 		return points, nil
 	}
-	raw, _, err := e.complete(ctx, t, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "verify:summary", Profile: "verifier",
+	raw, _, err := e.complete(ctx, t, model.Request{StepKey: "verify:summary", Profile: "verifier",
 		Messages: []model.Message{{Role: "system", Content: summaryVerifyRules}, {Role: "user", Content: b.String()}}, MaxOutput: 2000,
 		Schema: "verify-output", Budget: t.Budget, Simulate: func() (any, error) {
 			vs := []map[string]string{}

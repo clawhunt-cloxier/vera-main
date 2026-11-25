@@ -408,9 +408,24 @@ func (s *Store) HasGlobal(ctx context.Context, dataset string, asOf time.Time) (
 // Snapshot loads a frozen research record set, rechecking its cutoff and the
 // provider's current permission for model processing.
 func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredRecord, error) {
+	return s.snapshot(ctx, s.pool, hash, "")
+}
+
+type snapshotReader interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+// LockSnapshot keeps the exact frozen rows eligible for the current transaction.
+func (s *Store) LockSnapshot(ctx context.Context, tx pgx.Tx, hash string) error {
+	_, _, err := s.snapshot(ctx, tx, hash, " FOR SHARE OF r,p")
+	return err
+}
+
+func (s *Store) snapshot(ctx context.Context, q snapshotReader, hash, lock string) (time.Time, []StoredRecord, error) {
 	var asOf time.Time
 	var ids []uuid.UUID
-	if err := s.pool.QueryRow(ctx, `SELECT as_of, record_ids FROM snapshots WHERE hash=$1`, hash).Scan(&asOf, &ids); err != nil {
+	if err := q.QueryRow(ctx, `SELECT as_of, record_ids FROM snapshots WHERE hash=$1`, hash).Scan(&asOf, &ids); err != nil {
 		return asOf, nil, err
 	}
 	sorted := slices.Clone(ids)
@@ -423,9 +438,9 @@ func (s *Store) Snapshot(ctx context.Context, hash string) (time.Time, []StoredR
 	if hash != newHash && hash != legacyHash {
 		return asOf, nil, fmt.Errorf("snapshot %s: manifest hash mismatch", hash)
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id
+	rows, err := q.Query(ctx, `SELECT `+recordCols+` FROM records r JOIN providers p ON p.id=r.provider_id
 		WHERE r.id = ANY($1) AND `+visibleAtCutoff+` AND p.enabled AND p.allow_model_processing`+fmt.Sprintf(realSourceFilter, "$3")+`
-		AND ($4='' OR p.id=$4) AND r.quality_state IN ('PASS','WARN')`, ids, asOf, s.excludeSynthetic, s.providerID)
+		AND ($4='' OR p.id=$4) AND r.quality_state IN ('PASS','WARN')`+lock, ids, asOf, s.excludeSynthetic, s.providerID)
 	if err != nil {
 		return asOf, nil, err
 	}
@@ -609,11 +624,24 @@ func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]Entity
 
 // Mentioned returns entities whose alias occurs verbatim in free text (rule-based plan parsing). Longest alias first.
 func (s *Store) Mentioned(ctx context.Context, text string) ([]EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e JOIN LATERAL (
-		SELECT max(length(alias)) AS l FROM entity_aliases a WHERE a.entity_id = e.id AND length(a.alias) >= 2 AND strpos(lower($1), a.alias) > 0) m ON m.l IS NOT NULL
+	return s.mentioned(ctx, text, false)
+}
+
+// MentionedInQuestion requires a whole token for ASCII aliases such as stock codes.
+func (s *Store) MentionedInQuestion(ctx context.Context, text string) ([]EntityRow, error) {
+	return s.mentioned(ctx, text, true)
+}
+
+func (s *Store) mentioned(ctx context.Context, text string, exactASCII bool) ([]EntityRow, error) {
+	rows, err := s.pool.Query(ctx, `WITH input AS (SELECT lower($1) AS text,
+		CASE WHEN $5::bool THEN regexp_split_to_array(lower($1), '[^a-z0-9.]+|[.](?![a-z0-9])') END AS tokens)
+	SELECT `+entityCols+` FROM entities e CROSS JOIN input JOIN LATERAL (
+		SELECT max(length(alias)) AS l FROM entity_aliases a WHERE a.entity_id = e.id AND length(a.alias) >= 2
+		AND CASE WHEN $5::bool AND a.alias ~ '^[a-z0-9.]+$' THEN a.alias = ANY(input.tokens)
+			ELSE strpos(input.text, a.alias) > 0 END) m ON m.l IS NOT NULL
         WHERE (NOT $2::bool OR NOT e.synthetic) AND
 		($3::text[] IS NULL OR code=ANY($3) OR ($4 AND EXISTS (SELECT 1 FROM tushare_requested_subjects t WHERE t.code=e.code)))
-		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic, s.searchableCodes(), s.onDemandSubjects)
+		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic, s.searchableCodes(), s.onDemandSubjects, exactASCII)
 	if err != nil {
 		return nil, err
 	}

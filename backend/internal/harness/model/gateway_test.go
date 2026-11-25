@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
@@ -26,6 +27,28 @@ func prices() *PriceTable {
 	}{"flash": {Peak: Price{decimal.RequireFromString("0.01"), decimal.RequireFromString("0.30"), decimal.RequireFromString("1.20")},
 		OffPeak: Price{decimal.RequireFromString("0.005"), decimal.RequireFromString("0.15"), decimal.RequireFromString("0.60")}}}
 	return p
+}
+
+func newTaskRequest(t *testing.T, pool *pgxpool.Pool, pol *policy.Policy) Request {
+	t.Helper()
+	var task, workspace uuid.UUID
+	if err := pool.QueryRow(t.Context(), `WITH u AS (
+		INSERT INTO users(issuer,subject) VALUES('test',uuidv7()::text) RETURNING id
+	), w AS (
+		INSERT INTO workspaces(owner_user_id) SELECT id FROM u RETURNING id
+	), e AS (
+		INSERT INTO entities(kind,code,name) VALUES('stock',uuidv7()::text,'Test stock') RETURNING id
+	), p AS (
+		INSERT INTO research_plans(workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,expires_at)
+		SELECT w.id,'stock_analysis','test',e.id,'{}','[]',now(),'test',true,now()+interval '1 minute' FROM w,e
+		RETURNING id,workspace_id,subject_id
+	) INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget)
+	SELECT workspace_id,id,'stock_analysis','test',subject_id,'{}','[]',now(),'ANALYZING',now()+interval '1 minute','{}' FROM p
+	RETURNING id,workspace_id`).Scan(&task, &workspace); err != nil {
+		t.Fatal(err)
+	}
+	return Request{Workspace: workspace, Task: &task, TaskEpoch: 1, StepKey: "summary", Profile: "writer",
+		Messages: []Message{{"user", "写摘要"}}, MaxOutput: 500, Schema: "summary-output", Budget: pol.Budgets["stock_analysis"]}
 }
 
 func TestGatewayOpenAIRetryRepairReuseBudget(t *testing.T) {
@@ -61,9 +84,7 @@ func TestGatewayOpenAIRetryRepairReuseBudget(t *testing.T) {
 	prof := Profile{Name: "writer", Adapter: "openai", BaseURL: srv.URL, ModelID: "flash", APIKey: "test-key"}
 	g := NewGateway(pool, map[string]Profile{"writer": prof}, map[string]Adapter{"openai": OpenAI{}}, prices(), sc, pol, decimal.RequireFromString("30"))
 	g.wait = func(context.Context, time.Duration) error { return nil }
-	task := uuid.New()
-	req := Request{Workspace: uuid.New(), Task: &task, StepKey: "summary", Profile: "writer", Messages: []Message{{"user", "写摘要"}},
-		MaxOutput: 500, Schema: "summary-output", Budget: pol.Budgets["stock_analysis"]}
+	req := newTaskRequest(t, pool, pol)
 	out, meta, err := g.Complete(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +114,11 @@ func TestGatewayOpenAIRetryRepairReuseBudget(t *testing.T) {
 	after := hits.Load()
 	if _, m, err := g.Complete(context.Background(), req2); err != nil || !m.Reused || hits.Load() != after {
 		t.Fatalf("reuse failed: %+v %v hits %d→%d", m, err, before, hits.Load())
+	}
+	stale := req2
+	stale.TaskEpoch++
+	if _, _, err := g.Complete(t.Context(), stale); !errors.Is(err, ErrStaleTask) || hits.Load() != after {
+		t.Fatalf("wrong epoch reused or reserved a model call: %v", err)
 	}
 	denied := errors.New("cached research use revoked")
 	req2.WithReuse = func(context.Context, func(pgx.Tx) error) error { return denied }

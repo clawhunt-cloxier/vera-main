@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/app"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/config"
 )
 
@@ -78,7 +79,7 @@ func withApp(ctx context.Context, fn func(*app.App) error) error {
 }
 
 func serveAPI(ctx context.Context, a *app.App) error {
-	if _, err := a.Engine.NewRiver(a.Pool, false, 0); err != nil {
+	if _, err := a.Engine.NewRiver(a.Pool, false, 0, conversation.Register(a.Engine)); err != nil {
 		return err
 	}
 	h, err := a.HTTP()
@@ -101,7 +102,7 @@ func serveAPI(ctx context.Context, a *app.App) error {
 }
 
 func runWorker(ctx context.Context, a *app.App) error {
-	c, err := a.Engine.NewRiver(a.Pool, true, a.Cfg.WorkerConcurrency, a.Watch.Register, a.Engine.Gateway.Register)
+	c, err := a.Engine.NewRiver(a.Pool, true, a.Cfg.WorkerConcurrency, a.Watch.Register, a.Engine.Gateway.Register, conversation.Register(a.Engine))
 	if err != nil {
 		return err
 	}

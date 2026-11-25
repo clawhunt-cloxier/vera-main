@@ -56,7 +56,8 @@ type Request struct {
 	// WithReuse reads the cached result in the transaction holding the current source permissions.
 	WithReuse func(context.Context, func(pgx.Tx) error) error
 	Workspace uuid.UUID
-	Task      *uuid.UUID
+	Task      *uuid.UUID // nil for planning calls that have no research task
+	TaskEpoch int64      // required for task-bound calls
 	StepKey   string
 	Profile   string
 	Messages  []Message
@@ -147,6 +148,9 @@ type FormatError struct{ Msg string }
 
 func (e *FormatError) Error() string { return "model output invalid: " + e.Msg }
 
+// ErrStaleTask means the caller's task is gone, has ended, or has advanced to a different epoch.
+var ErrStaleTask = errors.New("model call task is no longer current")
+
 // Complete runs the call with reuse, budget reservation, retries and validation. It returns the validated JSON.
 func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Meta, error) {
 	prof, ok := g.Profiles[r.Profile]
@@ -191,7 +195,7 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 		}
 		release, err := g.acquire(ctx, prof.Name)
 		if err != nil {
-			g.finish(context.WithoutCancel(ctx), callID, "FAILED", nil, Usage{}, decimal.Zero, "", "cancelled before send")
+			g.finish(ctx, callID, "FAILED", nil, Usage{}, decimal.Zero, "", "cancelled before send")
 			return nil, Meta{}, err
 		}
 
@@ -220,7 +224,7 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			if me != nil && me.Unknown {
 				status = "UNKNOWN" // keeps the reservation charged until reconciled
 			}
-			g.finish(context.WithoutCancel(ctx), callID, status, nil, Usage{}, decimal.Zero, "", err.Error())
+			g.finish(ctx, callID, status, nil, Usage{}, decimal.Zero, "", err.Error())
 			lastErr = err
 			if me != nil && me.Transient && transient > 0 && ctx.Err() == nil {
 				transient--
@@ -283,15 +287,18 @@ type cachedQuery interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+const callableTask = `t.workspace_id=$1 AND t.id=$2 AND t.epoch=$3 AND t.status IN ('ANALYZING','ASSEMBLING')`
+
 func (g *Gateway) reuse(ctx context.Context, q cachedQuery, r Request, hash string, schema *jsonschema.Schema) (json.RawMessage, Meta, bool) {
 	if r.Task == nil {
 		return nil, Meta{}, false
 	}
 	var raw Raw
 	var m Meta
-	err := q.QueryRow(ctx, `SELECT id, adapter, coalesce(observed_model,''), response FROM model_calls
-		WHERE task_id=$1 AND step_key=$2 AND request_hash=$3 AND status='SUCCEEDED' ORDER BY attempt DESC LIMIT 1`,
-		*r.Task, r.StepKey, hash).Scan(&m.CallID, &m.Adapter, &m.ObservedModel, &raw)
+	err := q.QueryRow(ctx, `SELECT m.id,m.adapter,coalesce(m.observed_model,''),m.response FROM model_calls m
+		JOIN research_tasks t ON t.workspace_id=m.workspace_id AND t.id=m.task_id
+	WHERE `+callableTask+` AND m.epoch=t.epoch AND m.step_key=$4 AND m.request_hash=$5 AND m.status='SUCCEEDED' AND m.content_erased_at IS NULL
+		ORDER BY m.attempt DESC LIMIT 1`, r.Workspace, *r.Task, r.TaskEpoch, r.StepKey, hash).Scan(&m.CallID, &m.Adapter, &m.ObservedModel, &raw)
 	if err != nil {
 		return nil, Meta{}, false
 	}
@@ -318,6 +325,18 @@ func (g *Gateway) reserve(ctx context.Context, r Request, p Profile, adapter, ha
 	err := pgx.BeginFunc(ctx, g.Pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7224001)`); err != nil {
 			return err
+		}
+		if r.Task != nil {
+			// Serialize reservation with task cancellation and deletion. The lock
+			// is released before waiting for a model slot or calling an adapter.
+			var current int
+			err := tx.QueryRow(ctx, `SELECT 1 FROM research_tasks t WHERE `+callableTask+` FOR SHARE`, r.Workspace, *r.Task, r.TaskEpoch).Scan(&current)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrStaleTask
+			}
+			if err != nil {
+				return err
+			}
 		}
 		spent := `coalesce(sum(CASE WHEN status IN ('SENT','UNKNOWN') OR cost_usd < 0 THEN reserved_usd ELSE coalesce(cost_usd,0) END),0)`
 		var day decimal.Decimal
@@ -349,8 +368,8 @@ func (g *Gateway) reserve(ctx context.Context, r Request, p Profile, adapter, ha
 			}
 		}
 		return tx.QueryRow(ctx, `INSERT INTO model_calls(workspace_id,task_id,step_key,attempt,profile,adapter,model_id,request_hash,status,
-			reserved_usd,price_table) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'SENT',$9,$10) RETURNING id`,
-			r.Workspace, r.Task, r.StepKey, attempt, p.Name, adapter, p.ModelID, hash, reserve, nullIf(g.priceVersion())).Scan(&id)
+			reserved_usd,price_table,epoch) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'SENT',$9,$10,$11) RETURNING id`,
+			r.Workspace, r.Task, r.StepKey, attempt, p.Name, adapter, p.ModelID, hash, reserve, nullIf(g.priceVersion()), max(1, r.TaskEpoch)).Scan(&id)
 	})
 	return id, err
 }
@@ -370,13 +389,18 @@ func nullIf(s string) *string {
 }
 
 func (g *Gateway) finish(ctx context.Context, id uuid.UUID, status string, raw *Raw, u Usage, cost decimal.Decimal, observed, errMsg string) {
+	// The vendor may already have billed even if the task or worker stopped.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	var c *decimal.Decimal
 	if status != "UNKNOWN" {
 		c = &cost
 	}
 	ub, _ := json.Marshal(u)
-	_, err := g.Pool.Exec(ctx, `UPDATE model_calls SET status=$2, response=$3, usage=$4, cost_usd=$5, observed_model=NULLIF($6,''),
-		error=NULLIF($7,''), finished_at=now() WHERE id=$1`, id, status, raw, ub, c, observed, truncate(errMsg, 1000))
+	_, err := g.Pool.Exec(ctx, `UPDATE model_calls SET status=$2, usage=$4, cost_usd=$5, observed_model=NULLIF($6,''), finished_at=now(),
+		response=CASE WHEN content_erased_at IS NULL THEN $3::jsonb END,
+		error=CASE WHEN content_erased_at IS NULL THEN NULLIF($7,'') END
+		WHERE id=$1 AND status='SENT'`, id, status, raw, ub, c, observed, truncate(errMsg, 1000))
 	if err != nil {
 		slog.ErrorContext(ctx, "model call ledger update failed", "call", id, "err", err)
 	}
@@ -390,7 +414,7 @@ const UnknownReleaseAfter = 24 * time.Hour
 // It runs outside workspace scope (platform job) and returns the released call IDs.
 func (g *Gateway) ReleaseUnknown(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error) {
 	rows, err := g.Pool.Query(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=0, finished_at=coalesce(finished_at, now()),
-		error=left(coalesce(error,'') || ' [auto-released: no reconciliation within 24h]', 1000)
+		error=CASE WHEN content_erased_at IS NULL THEN left(coalesce(error,'') || ' [auto-released: no reconciliation within 24h]', 1000) END
 		WHERE status='UNKNOWN' AND sent_at < $1 RETURNING id`, cutoff)
 	if err != nil {
 		return nil, err

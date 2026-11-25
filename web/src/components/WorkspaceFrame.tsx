@@ -35,6 +35,7 @@ export function WorkspaceFrame({ children }: { children: ReactNode }) {
             <Link to="/app" activeOptions={{ exact: true }}>
               工作台
             </Link>
+            {Boolean(me.data?.conversation_topics?.length) && <Link to="/app/chat">对话</Link>}
             <Link to="/app/reports">报告</Link>
             <Link to="/app/watchlist">自选股</Link>
           </nav>

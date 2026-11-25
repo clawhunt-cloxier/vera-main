@@ -37,6 +37,30 @@ func plan(t *testing.T, e *Engine, ws uuid.UUID, skill, code string) *Plan {
 	return p
 }
 
+func TestConversationShortDeliveryDeadline(t *testing.T) {
+	e, task := leaseTask(t)
+	ctx := t.Context()
+	hash, err := e.Store.Freeze(ctx, task.AsOf, []uuid.UUID{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Version = ConversationFixtureVersion
+	task.Deadline = time.Now().Add(-time.Second)
+	if _, err := e.Pool.Exec(ctx, `UPDATE research_tasks SET status='ASSEMBLING', snapshot_hash=$2, deadline=$3 WHERE id=$1`,
+		task.ID, hash, task.Deadline); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{ID: uuid.New(), TaskID: task.ID, SkillID: task.Skill, SkillVersion: task.Version, SubjectID: task.Subject}
+	// A worker can hold completed sections at this point. The final transaction
+	// must still refuse publication, even if the watchdog has not run yet.
+	if err := e.deliver(ctx, task, doc, facts.NewSheet(task.ID, task.Epoch), nil, nil, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("late delivery: %v", err)
+	}
+	if got, _ := status(t, e, task.Workspace, task.ID); got != "ASSEMBLING" {
+		t.Fatalf("late delivery changed task status to %s", got)
+	}
+}
+
 func TestLifecycle(t *testing.T) {
 	e, pool := testEngine(t)
 	ctx := context.Background()

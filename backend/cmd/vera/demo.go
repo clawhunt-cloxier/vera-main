@@ -15,6 +15,7 @@ import (
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/app"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/config"
@@ -96,7 +97,7 @@ func demo(ctx context.Context, args []string) error {
 			fmt.Println("  " + c)
 		}
 	}
-	rc, err := a.Engine.NewRiver(a.Pool, true, c.WorkerConcurrency, a.Watch.Register, a.Engine.Gateway.Register)
+	rc, err := a.Engine.NewRiver(a.Pool, true, c.WorkerConcurrency, a.Watch.Register, a.Engine.Gateway.Register, conversation.Register(a.Engine))
 	if err != nil {
 		return err
 	}

@@ -52,6 +52,8 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 | T042 | 数据治理与研究证据字段审计 | T036、T037、T041（已合入） | DONE | Codex / agent/codex/T042-governance | 2026-11-24T23:01Z 领取。PR #55 修正可见修订、证券快照和实体目录、日期及小数校验、计算输入单位及财报更正序号。本地综合检查、带 PostgreSQL 的回归和 20 项 Chromium 测试通过。[审计交接](docs/handoffs/2026-11-24-T042-codex.md) |
 | T043 | 修正公募持仓基金代码格式假设 | T042（已合入） | REVIEW | Codex / agent/codex/T043-fund-positions | PR #56 已创建。按 `fund.disclosed_position` 的字符串契约保留 TuShare 基金代码原文，同时校验标的与报告期身份；映射回归、race、vet 和文档检查通过。测试站重新部署与宁德时代网页重跑待合并后验收。[交接](docs/handoffs/2026-11-26-T043-codex.md) |
 
+| T044 | 工作台对话流研究 | T036、T037、T040、T042 | REVIEW | Codex / agent/codex/T044-chat-research | 2026-11-25T18:54Z 领取，对话 API、迁移 `00023` 至 `00025`、根规范、短研究技能与工作台。日成交、融资余额、私人历史、连续追问和留存已通过 PostgreSQL、River 与双视口 Chromium 验收。实现候选 `0ebdcc3` 已独立审查，PR #57 待集成。[方案及实施计划](docs/decisions/0006-conversational-research.md) · [交接](docs/handoffs/2026-11-25-T044-codex.md) |
+
 ## 里程碑
 
 M1 本地演示：T011–T018、T019a、T022（M1 范围）、T024。M2 测试环境：T014b、T019b、T021、T022、T023。M3 PILOT：T020。详见 ADR-0003 D12。

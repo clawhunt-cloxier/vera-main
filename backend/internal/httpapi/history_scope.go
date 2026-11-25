@@ -15,7 +15,7 @@ import (
 func (s *Server) historyVersions() []string {
 	var versions []string
 	if s.Engine.Brief != nil {
-		versions = []string{emquant.ObservationBriefVersion, harness.RealtimeBriefVersion}
+		versions = []string{emquant.ObservationBriefVersion, emquant.ConversationObservationVersion, harness.RealtimeBriefVersion}
 		if !s.FullVendorResearch {
 			return versions
 		}
@@ -23,10 +23,10 @@ func (s *Server) historyVersions() []string {
 	}
 	if sk := s.Engine.Skills["stock_analysis"]; sk != nil {
 		if harness.IsCloseResearchVersion(sk.Version) {
-			return append(versions, closeHistoryVersions()...)
+			return append(append(versions, closeHistoryVersions()...), harness.ConversationCloseVersion)
 		}
 		if s.Engine.Synthetic && sk.Version == "1.0.0" {
-			return []string{sk.Version}
+			return []string{sk.Version, harness.ConversationFixtureVersion}
 		}
 	}
 	return versions

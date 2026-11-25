@@ -81,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	m.Handle("POST /api/v1/reports/{id}/versions/{version}/feedback", auth(s.idempotent(h(s.feedback))))
 	m.Handle("GET /api/v1/evidence/{id}", auth(h(s.getEvidence)))
 	m.Handle("GET /api/v1/calculations/{id}", auth(h(s.getCalculation)))
+	s.mountConversations(m)
 	m.Handle("GET /api/v1/watchlist", auth(h(s.listWatch)))
 	m.Handle("POST /api/v1/watchlist", auth(s.idempotent(h(s.addWatch))))
 	m.Handle("PATCH /api/v1/watchlist/{item_id}", auth(h(s.patchWatch)))

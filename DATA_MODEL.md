@@ -50,6 +50,8 @@
 
 迁移 `00015` 已加入 ADR-0004 的 `snapshot_mode`、`snapshot_as_of` 与清单哈希约束，`00016` 提供任务要求和不可变快照清单，T027 的 `00019` 保存不可变 `quote_requirement`；单股 demo.3 已接通确认和冻结。`collect_latest` 的任务在冻结前截止为空；冻结事务必须同时固定截止和快照哈希，并用 epoch 与唯一约束保证并发重试只能采用同一结果。既有任务按 `fixed_legacy` 保留原时间及快照，不得重算。新增数据及血缘的 `available_at` 必须不早于其真实持久化完成；跨 S3 与 PostgreSQL 的提交顺序、崩溃恢复及可见性由实施迁移与集成测试证明，不能仅用对象接收时间代替数据库可见时间。
 
+对话涉及三张私有表。迁移 `00023` 创建 `conversations`（标题、结构化范围、revision、活动时点与保留期）、`conversation_turns`（消息 UUID、原文、解析状态和计划/任务引用）及 `conversation_quota_debits`（当日删除的短任务配额记录）。`research_plans` 区分会话计划和会话短研究。所有关联按 workspace 校验，回复外键同时约束会话。消息接收与 River 入队同时提交，确认时在同一事务锁定会话及轮次、预留配额、绑定任务。数据结果由原有快照、事实表与报告版本保存。
+
 ## 2. 隔离
 
 - 私有表都有非空 `workspace_id`，外键是包含 `workspace_id` 的复合外键。
@@ -82,5 +84,7 @@
 至少需要：私有表的 `workspace_id + created_at + id`；`research_tasks(status, deadline)`；`task_steps(task_id, epoch, status)`；`model_calls(status, sent_at)`（用于对账）；`records_*` 的 `entity_id + dataset_id + period/trade_date`；`entity_aliases` 的代码与名称三元组（trigram）索引；`watchlist_items(workspace_id)`。
 
 ## 6. 留存
+
+对话自最后一次修改起保存 90 天。删除或过期后立即从读取接口隐藏。清理任务擦除对话文本与派生范围，取消在途任务，移除短报告、专有媒体快照和计算等工作区产物。迁移 `00025` 记录模型回复及错误详情的擦除时间。晚到的调用只能结算用量和费用，新调用必须匹配仍在执行的任务 epoch。已交付的正式研报、厂商共享记录与计费审计按原有约定保留。清理产生的当日配额记录在配额周期结束后删除。
 
 私有任务、报告和自选股快照默认保留 90 天（ADR-0001 Q-11）；用户删除任务时同步删除报告和私有结论，审计事件只保留去敏元数据。共享的统一记录和原始响应按厂商许可的期限保留；许可未说明时，PILOT 前由 T014 确认。

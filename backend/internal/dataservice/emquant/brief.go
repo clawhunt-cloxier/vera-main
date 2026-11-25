@@ -16,6 +16,11 @@ import (
 
 const ObservationBriefVersion = "1.1.0-demo.2"
 const MixedObservationVersion = "1.1.0-demo.4"
+const ConversationObservationVersion = "1.2.0-chat-choice.1"
+
+func IsDailyBriefVersion(version string) bool {
+	return version == ObservationBriefVersion || version == ConversationObservationVersion
+}
 
 // RealtimeBriefVersion is the negotiated 0.4 single-stock brief. It is kept
 // separate from the historical observation brief so an old worker cannot
@@ -196,11 +201,11 @@ func (b *BriefService) freeze(ctx context.Context, ws, task uuid.UUID, epoch int
 		if err != nil {
 			return err
 		}
-		expectedVersion := ObservationBriefVersion
+		versionOK := IsDailyBriefVersion(version)
 		if store != nil {
-			expectedVersion = MixedObservationVersion
+			versionOK = version == MixedObservationVersion
 		}
-		if actual != epoch || !live || version != expectedVersion || mode != "collect_latest" || status != "COLLECTING" || code != m.Code {
+		if actual != epoch || !live || !versionOK || mode != "collect_latest" || status != "COLLECTING" || code != m.Code {
 			return errors.New("emquant: brief task changed")
 		}
 		if hash != nil {
@@ -270,20 +275,22 @@ func (b *BriefService) read(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID, 
 	var body []byte
 	var cutoff time.Time
 	var h string
-	version := ObservationBriefVersion
+	manifestVersion := ObservationBriefVersion
+	versions := []string{ObservationBriefVersion, ConversationObservationVersion}
 	if store != nil {
-		version = MixedObservationVersion
+		manifestVersion = MixedObservationVersion
+		versions = []string{MixedObservationVersion}
 	}
 	var subject uuid.UUID
 	var preview time.Time
 	err := tx.QueryRow(ctx, `SELECT s.manifest,s.cutoff,s.content_hash,s.entity_id,t.as_of FROM observation_brief_snapshots s JOIN research_tasks t
  ON t.id=s.task_id AND t.workspace_id=s.workspace_id AND t.epoch=s.epoch AND t.subject_id=s.entity_id
  AND t.snapshot_manifest_hash=s.content_hash AND t.snapshot_as_of=s.cutoff
- WHERE s.workspace_id=$1 AND s.task_id=$2 AND t.skill_version=$3 AND t.status NOT IN ('CANCEL_REQUESTED','CANCELLED','FAILED','ABSTAINED','BLOCKED')`, ws, task, version).Scan(&body, &cutoff, &h, &subject, &preview)
+ WHERE s.workspace_id=$1 AND s.task_id=$2 AND t.skill_version=ANY($3::text[]) AND t.status NOT IN ('CANCEL_REQUESTED','CANCELLED','FAILED','ABSTAINED','BLOCKED')`, ws, task, versions).Scan(&body, &cutoff, &h, &subject, &preview)
 	if err != nil {
 		return BriefObservation{}, nil, err
 	}
-	if digest(body) != h || json.Unmarshal(body, &m) != nil || m.Version != version {
+	if digest(body) != h || json.Unmarshal(body, &m) != nil || m.Version != manifestVersion {
 		return BriefObservation{}, nil, errors.New("emquant: corrupt brief manifest")
 	}
 	daily := m

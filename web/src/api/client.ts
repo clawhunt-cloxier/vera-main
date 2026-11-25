@@ -69,6 +69,7 @@ type Opts = {
   noRedirect?: boolean;
   protocol?: ResearchProtocol;
   signal?: AbortSignal;
+  responseHeaders?: (headers: Headers) => void;
 };
 
 export async function api<T>(
@@ -101,6 +102,7 @@ export async function api<T>(
     credentials: 'same-origin',
     signal: opts.signal,
   });
+  opts.responseHeaders?.(res.headers);
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
