@@ -54,7 +54,7 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 
 | T044 | 工作台对话流研究 | T036、T037、T040、T042 | REVIEW | Codex / agent/codex/T044-chat-research | 2026-11-25T18:54Z 领取，对话 API、迁移 `00023` 至 `00025`、根规范、短研究技能与工作台。日成交、融资余额、私人历史、连续追问和留存已通过 PostgreSQL、River 与双视口 Chromium 验收。实现候选 `0ebdcc3` 已独立审查，PR #57 已合入 `dev@53f7f4e`。[方案及实施计划](docs/decisions/0006-conversational-research.md) · [交接](docs/handoffs/2026-11-25-T044-codex.md) |
 
-| T045 | 对话研究工具与金融输出边界 | T044（已合入） | REVIEW | Codex / agent/codex/T045-chat-tools | 2026-11-25T22:08:38Z 领取。对话工具、自动研究、金融回复、模型与 API 契约、迁移 `00026` 至 `00028`、密码登录、工作台和验收。已部署本机。六个 Go 包的集中 race 与双视口对话浏览器回归通过，等待用户验收。[交接](docs/handoffs/2026-11-25-T045-codex.md) |
+| T045 | 对话研究工具与金融输出边界 | T044（已合入） | REVIEW | Codex / agent/codex/T045-chat-tools | 2026-11-25T22:08:38Z 领取。范围涵盖对话工具、自动研究、金融回复、模型与 API 契约、迁移 `00026` 至 `00028`、密码登录和工作台。实现候选 `3e8078a` 已通过独立审查、本地 `make verify` 及双视口浏览器回归。PR #58 等待用户浏览器验收。[交接](docs/handoffs/2026-11-25-T045-codex.md) |
 
 ## 里程碑
 
