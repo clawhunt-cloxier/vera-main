@@ -54,6 +54,8 @@ ADR-0003 起，原 T002–T009 作废（均未领取），由下表 T011–T024 
 
 | T044 | 工作台对话流研究 | T036、T037、T040、T042 | REVIEW | Codex / agent/codex/T044-chat-research | 2026-11-25T18:54Z 领取，对话 API、迁移 `00023` 至 `00025`、根规范、短研究技能与工作台。日成交、融资余额、私人历史、连续追问和留存已通过 PostgreSQL、River 与双视口 Chromium 验收。实现候选 `0ebdcc3` 已独立审查，PR #57 待集成。[方案及实施计划](docs/decisions/0006-conversational-research.md) · [交接](docs/handoffs/2026-11-25-T044-codex.md) |
 
+| T045 | 对话研究工具与金融输出边界 | T044 | IN_PROGRESS | Codex / agent/codex/T045-chat-tools | 2026-11-25T22:08:38Z 领取。接续 Agent 工具调用与自动研究，扩充工具，完善合规回答，更新根规范、模型与 API 契约、迁移 `00026`、工作台和验收。 |
+
 ## 里程碑
 
 M1 本地演示：T011–T018、T019a、T022（M1 范围）、T024。M2 测试环境：T014b、T019b、T021、T022、T023。M3 PILOT：T020。详见 ADR-0003 D12。
