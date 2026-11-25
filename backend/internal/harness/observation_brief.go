@@ -59,6 +59,7 @@ func ObservationBriefSkill() *Skill {
 // complete rechecks the frozen inputs and holds current license locks for each
 // model use, including cached step retries and summary/verifier calls.
 func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (json.RawMessage, model.Meta, error) {
+	req.Workspace, req.Task, req.TaskEpoch = t.Workspace, &t.ID, t.Epoch
 	if t.Version == ConversationCloseVersion {
 		req.WithReuse = func(callCtx context.Context, cached func(pgx.Tx) error) error {
 			return e.WithConversationSnapshot(callCtx, t.Workspace, t.ID, cached)

@@ -45,11 +45,11 @@ Verify 的 `workspace-browser` 在 Chromium 中运行上述模拟浏览器套件
 
 ```bash
 cd backend
-go test -race ./internal/conversation ./internal/httpapi ./internal/app \
-  -run 'TestQuestionRouting|TestConversationAPIWithRiver|TestConversationFormalDeliveryAfterDeletionOrExpiry|TestCloseConversationSourceWithRiver|TestObservationBriefDelivery'
+go test -race ./internal/conversation ./internal/httpapi ./internal/harness ./internal/harness/model ./internal/app \
+  -run 'TestQuestionRouting|TestConversation|TestCloseConversationSourceWithRiver|TestGatewayOpenAIRetryRepairReuseBudget|TestObservationBriefDelivery'
 ```
 
-测试使用独立 PostgreSQL、实际 River 工作者和模拟模型。验证两种短研究、冻结序列、计算锚点、幂等确认、账户隔离、权限撤回后的替代引用、删除与过期时的交付边界、配额及完整研报 PDF。Linux 原生构建通过合成 Choice 动态库及本地 S3 替身，检查图表与明细的数值和证据都一致，并检查快照在会话清理后按用途保留。
+测试使用独立 PostgreSQL、实际 River 工作者和模拟模型。验证两种短研究、冻结序列、计算锚点、幂等确认、账户隔离、权限撤回后的替代引用、删除与过期时的交付边界、配额及完整研报 PDF。回归还覆盖会话清理前后的旧 epoch、新到的计费结果与未知费用核销，以及超过截止时间后拒绝交付。Linux 原生构建通过合成 Choice 动态库及本地 S3 替身，检查图表与明细的数值和证据都一致，并按用途验证快照留存。
 
 按 [演示启动指南](README-MVP.md) 启动本机 Vera。在邀请码文件最后一行保存可用两次的本地测试邀请码，保持文件私有。安装 Chromium 后在 `web/` 执行 `VERA_CHAT_URL=http://127.0.0.1:18095 VERA_CHAT_INVITE_FILE=/path/to/local-invite npm run test:conversation-ui`。在 1440×960 与 390×844 检查真实 API 的登录、首页提问、证据与公式、刷新、追问、取消和历史删除。
 

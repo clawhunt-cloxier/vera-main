@@ -680,6 +680,9 @@ func (e *Engine) stillCurrent(ctx context.Context, t *taskRow) error {
 	err := db.InWorkspace(ctx, e.Pool, t.Workspace, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT epoch, status FROM research_tasks WHERE id=$1`, t.ID).Scan(&epoch, &status)
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errStale
+	}
 	if err != nil {
 		return err
 	}
@@ -722,6 +725,9 @@ type Removed struct {
 // Run advances a task to a terminal state. Safe to call repeatedly (ledger + epoch checks).
 func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	t, err := e.loadTask(ctx, ws, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // A short task can be removed before a queued retry reaches it.
+	}
 	if err != nil {
 		return err
 	}
@@ -738,27 +744,33 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 	if sk == nil || sk.Version != t.Version {
 		return e.finish(ctx, t, "FAILED", "SKILL_VERSION_MISSING", "技能版本不可用")
 	}
+	parent := ctx
+	if isConversationSkill(t.Version) {
+		var stop context.CancelFunc
+		parent, stop = context.WithDeadline(ctx, t.Deadline)
+		defer stop()
+	}
 	// Leave 30s before the deadline for assembly without model calls.
-	runCtx, cancel := context.WithDeadline(ctx, t.Deadline.Add(-30*time.Second))
+	runCtx, cancel := context.WithDeadline(parent, t.Deadline.Add(-30*time.Second))
 	defer cancel()
 	go e.watchCancel(runCtx, cancel, t)
 	switch t.Version {
 	case RealtimeBriefVersion:
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
 	case emquant.ObservationBriefVersion, emquant.ConversationObservationVersion, MixedObservationVersion:
-		err = e.observationPipeline(runCtx, ctx, t, sk)
+		err = e.observationPipeline(runCtx, parent, t, sk)
 	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion, CloseUnifiedVersion, ConversationCloseVersion:
 		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
-			err = e.pipeline(runCtx, ctx, t, sk)
+			err = e.pipeline(runCtx, parent, t, sk)
 		}
 	default:
-		err = e.pipeline(runCtx, ctx, t, sk)
+		err = e.pipeline(runCtx, parent, t, sk)
 	}
 	var ab *abstainError
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, errStale):
+	case errors.Is(err, errStale), errors.Is(err, model.ErrStaleTask):
 		return nil
 	case errors.As(err, &ab):
 		return e.finish(ctx, t, ab.status, ab.code, ab.msg)

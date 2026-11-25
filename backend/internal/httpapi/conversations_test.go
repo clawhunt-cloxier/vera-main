@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 )
 
@@ -393,6 +395,147 @@ func TestConversationFormalDeliveryAfterDeletionOrExpiry(t *testing.T) {
 				t.Fatalf("hidden conversation delivered a report: %d %v", count, err)
 			}
 		})
+	}
+}
+
+type delayedConversationModel struct {
+	started chan struct{}
+	resume  chan struct{}
+}
+
+func (delayedConversationModel) Name() string { return "openai" }
+
+func (d delayedConversationModel) Do(_ context.Context, call model.Call) (model.Raw, error) {
+	d.started <- struct{}{}
+	<-d.resume // The request was sent and the outcome arrives after local cancellation.
+	if call.Messages[0].Content == "unknown" {
+		return model.Raw{}, &model.Error{Unknown: true, Msg: "synthetic vendor error detail"}
+	}
+	return model.Raw{Content: `{"text":"synthetic vendor response"}`, FinishReason: "stop",
+		Usage: model.Usage{PromptTokens: 100, CompletionTokens: 20}}, nil
+}
+
+func TestConversationPurgeFencesLateModelCalls(t *testing.T) {
+	e := setup(t)
+	startConversationWorker(t, e)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := e.engine.River.QueuePause(ctx, "research", nil); err != nil {
+		t.Fatal(err)
+	}
+	a := e.login(t, "chat-late-model")
+	codes, err := identity.CreateInvites(ctx, e.pool, 1, 1, time.Hour, "conversation test", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.json("POST", "/api/v1/onboarding", map[string]string{"invite_code": codes[0], "persona": "analyst"}, 200, nil)
+	var accepted conversation.Accepted
+	a.json("POST", chatPath, conversation.Message{ClientMessageID: uuid.New(), Text: "演示制造的融资余额"}, 202, &accepted)
+	path := chatPath + "/" + accepted.ConversationID.String()
+	v := chatAwait(t, a, accepted.ConversationID, accepted.TurnID, func(v chatReadTurn) bool { return v.State != "pending" })
+	if v.Plan == nil || !v.Plan.Executable {
+		t.Fatalf("short plan: %+v", v)
+	}
+	a.json("POST", path+"/turns/"+accepted.TurnID.String()+"/actions", conversationAction{
+		Action: "confirm", PlanID: &v.Plan.ID, PlanHash: v.Plan.PlanHash, ExpectedRevision: v.Revision,
+	}, 204, nil)
+	var ws, task uuid.UUID
+	var epoch int64
+	// Keep the real execution job parked and simulate the stage with two in-flight model reservations.
+	if err := e.pool.QueryRow(ctx, `UPDATE research_tasks SET status='ANALYZING' WHERE plan_id=$1
+		RETURNING workspace_id,id,epoch`, v.Plan.ID).Scan(&ws, &task, &epoch); err != nil {
+		t.Fatal(err)
+	}
+	adapter := delayedConversationModel{started: make(chan struct{}, 2), resume: make(chan struct{})}
+	var priceTable model.PriceTable
+	if err := json.Unmarshal([]byte(`{"models":{"test":{"peak":{"cache_miss_input":"1","output":"1"},"off_peak":{"cache_miss_input":"1","output":"1"}}}}`), &priceTable); err != nil {
+		t.Fatal(err)
+	}
+	gw := model.NewGateway(e.pool, map[string]model.Profile{"writer": {Name: "writer", Adapter: "openai", ModelID: "test"}},
+		map[string]model.Adapter{"openai": adapter}, &priceTable, nil, e.engine.Policy, decimal.NewFromInt(30))
+	req := model.Request{Workspace: ws, Task: &task, TaskEpoch: epoch, Profile: "writer", StepKey: "stale", MaxOutput: 100,
+		Budget: e.engine.Policy.Budgets["capital_flow"]}
+	callCtx, stopCalls := context.WithCancel(ctx)
+	defer stopCalls()
+	finished := make(chan error, 2)
+	for _, step := range []string{"paid", "unknown"} {
+		go func() {
+			call := req
+			call.StepKey, call.Messages = step, []model.Message{{Role: "user", Content: step}}
+			_, _, err := gw.Complete(callCtx, call)
+			finished <- err
+		}()
+	}
+	var released bool
+	defer func() {
+		if !released {
+			close(adapter.resume)
+		}
+	}()
+	for range 2 {
+		select {
+		case <-adapter.started:
+		case err := <-finished:
+			t.Fatalf("model did not reach simulated vendor: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	a.json("DELETE", path, nil, 204, nil)
+	checkStale := func(stage string) {
+		t.Helper()
+		if _, _, err := gw.Complete(ctx, req); !errors.Is(err, model.ErrStaleTask) {
+			t.Fatalf("stale reservation %s: %v", stage, err)
+		}
+	}
+	checkStale("after cancellation")
+	if err := e.engine.River.QueueResume(ctx, "research", nil); err != nil {
+		t.Fatal(err)
+	}
+	for start := time.Now(); ; {
+		var status string
+		if err := e.pool.QueryRow(ctx, "SELECT status FROM research_tasks WHERE id=$1", task).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status == "CANCELLED" {
+			break
+		}
+		if time.Since(start) > 8*time.Second {
+			t.Fatalf("task cancellation did not finish: %s", status)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	awaitConversationPurge(t, e, accepted.ConversationID)
+	checkStale("after cleanup")
+	stopCalls()
+	close(adapter.resume)
+	released = true
+	for range 2 {
+		select {
+		case err := <-finished:
+			var unknown *model.Error
+			if err != nil && (!errors.As(err, &unknown) || !unknown.Unknown) {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	var paid, held, present int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='SUCCEEDED' AND cost_usd=0.000120 AND (usage->>'prompt_tokens')::int=100),
+		count(*) FILTER (WHERE status='UNKNOWN' AND cost_usd IS NULL AND reserved_usd>0), count(*)
+		FROM model_calls WHERE task_id=$1 AND content_erased_at IS NOT NULL AND response IS NULL AND error IS NULL`, task).Scan(&paid, &held, &present); err != nil ||
+		paid != 1 || held != 1 || present != 2 {
+		t.Fatalf("retained ledger: paid=%d held=%d erased=%d: %v", paid, held, present, err)
+	}
+	ids, err := gw.ReleaseUnknown(ctx, time.Now().Add(time.Minute))
+	var ledgerCount, reconciled int
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("unknown reconciliation: %v %v", ids, err)
+	}
+	if err := e.pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE status='RECONCILED' AND cost_usd=0 AND response IS NULL AND error IS NULL)
+		FROM model_calls WHERE task_id=$1`, task).Scan(&ledgerCount, &reconciled); err != nil || ledgerCount != 2 || reconciled != 1 {
+		t.Fatalf("final ledger: calls=%d reconciled=%d: %v", ledgerCount, reconciled, err)
 	}
 }
 

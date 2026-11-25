@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -58,6 +57,7 @@ func reply(w http.ResponseWriter, content, finish string) {
 }
 
 type harnessT struct {
+	t     *testing.T
 	pool  *pgxpool.Pool
 	g     *Gateway
 	slept []time.Duration
@@ -81,16 +81,15 @@ func newGW(t *testing.T, h http.HandlerFunc, prof Profile) *harnessT {
 	if prof.Adapter == "" {
 		prof.Adapter = "openai"
 	}
-	x := &harnessT{pool: pool, pol: pol}
+	x := &harnessT{t: t, pool: pool, pol: pol}
 	x.g = NewGateway(pool, map[string]Profile{"writer": prof}, map[string]Adapter{"openai": OpenAI{}}, prices(), sc, pol, decimal.RequireFromString("30"))
 	x.g.wait = func(_ context.Context, d time.Duration) error { x.slept = append(x.slept, d); return nil }
 	return x
 }
 
 func (x *harnessT) req() Request {
-	task := uuid.New()
-	return Request{Workspace: uuid.New(), Task: &task, StepKey: "summary", Profile: "writer", Messages: []Message{{"user", "写摘要"}},
-		MaxOutput: 500, Schema: "summary-output", Budget: x.pol.Budgets["stock_analysis"]}
+	x.t.Helper()
+	return newTaskRequest(x.t, x.pool, x.pol)
 }
 
 func (x *harnessT) ledger(t *testing.T) []string {
@@ -215,7 +214,8 @@ func TestRequestBodyAndProfileCaps(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		reply(w, okSummary, "stop")
 	}, Profile{Thinking: "disabled", Temperature: 0.3, MaxOutput: 200, ExtraBody: map[string]any{"top_p": 0.9, "model": "evil"}})
-	if _, _, err := x.g.Complete(context.Background(), x.req()); err != nil {
+	req := x.req()
+	if _, _, err := x.g.Complete(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
 	th, _ := got["thinking"].(map[string]any)
@@ -224,7 +224,7 @@ func TestRequestBodyAndProfileCaps(t *testing.T) {
 	}
 	var reserved decimal.Decimal
 	_ = x.pool.QueryRow(context.Background(), `SELECT reserved_usd FROM model_calls`).Scan(&reserved)
-	want, _ := prices().Reserve("flash", EstimateTokens(x.req().Messages), 200)
+	want, _ := prices().Reserve("flash", EstimateTokens(req.Messages), 200)
 	if !reserved.Equal(want.Round(6)) {
 		t.Fatalf("reservation %s, want %s (capped output)", reserved, want)
 	}

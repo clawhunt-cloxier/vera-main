@@ -53,6 +53,9 @@ type deadlineWorker struct {
 // Work is the safety net when a worker died: the run job normally finishes before the deadline itself.
 func (w *deadlineWorker) Work(ctx context.Context, j *river.Job[DeadlineArgs]) error {
 	t, err := w.e.loadTask(ctx, j.Args.Workspace, j.Args.TaskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
 	if err != nil || IsTerminal(t.Status) || t.Status == "CANCEL_REQUESTED" {
 		return err
 	}
@@ -78,6 +81,9 @@ func (w *cancelWorker) Work(ctx context.Context, j *river.Job[CancelArgs]) error
 		}
 		return tx.QueryRow(ctx, `SELECT updated_at FROM research_tasks WHERE id=$1`, j.Args.TaskID).Scan(&requested)
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

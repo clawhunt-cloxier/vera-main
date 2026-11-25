@@ -181,7 +181,7 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 		for _, c := range final {
 			msg += fmt.Sprintf("%s（%s）：%s\n", c.Ref, c.Claim.Kind, c.Claim.Text)
 		}
-		raw, _, err := e.complete(ctx, t, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "summary", Profile: "writer",
+		raw, _, err := e.complete(ctx, t, model.Request{StepKey: "summary", Profile: "writer",
 			Messages: []model.Message{{Role: "system", Content: summaryRules}, {Role: "user", Content: "已核验结论：\n" + msg}}, MaxOutput: 4000,
 			Schema: "summary-output", Budget: t.Budget, Simulate: func() (any, error) { return simulateSummary(final, required), nil }})
 		var pts []summaryPoint
@@ -484,6 +484,9 @@ func (e *Engine) deliver(ctx context.Context, t *taskRow, doc Document, sheet *f
 		if epoch != t.Epoch || status != "ASSEMBLING" || snapshot == nil || planHash != t.PlanHash || (t.SnapshotMode == "collect_latest" && (t.Snapshot == nil || *t.Snapshot != *snapshot)) {
 			return errStale
 		}
+		if isConversationSkill(t.Version) && !time.Now().Before(t.Deadline) {
+			return context.DeadlineExceeded
+		}
 		if IsCloseResearchVersion(t.Version) && (t.Snapshot == nil || *t.Snapshot != *snapshot) {
 			return errStale
 		}
@@ -565,7 +568,7 @@ func (e *Engine) verifySummary(ctx, parent context.Context, t *taskRow, sheet *f
 	if len(pending) == 0 {
 		return points, nil
 	}
-	raw, _, err := e.complete(ctx, t, model.Request{Workspace: t.Workspace, Task: &t.ID, StepKey: "verify:summary", Profile: "verifier",
+	raw, _, err := e.complete(ctx, t, model.Request{StepKey: "verify:summary", Profile: "verifier",
 		Messages: []model.Message{{Role: "system", Content: summaryVerifyRules}, {Role: "user", Content: b.String()}}, MaxOutput: 2000,
 		Schema: "verify-output", Budget: t.Budget, Simulate: func() (any, error) {
 			vs := []map[string]string{}

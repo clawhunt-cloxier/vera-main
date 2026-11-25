@@ -120,7 +120,7 @@ func purgeShortTask(ctx context.Context, tx pgx.Tx, ws, task uuid.UUID) error {
 		`DELETE FROM fact_sheets WHERE workspace_id=$1 AND task_id=$2`,
 		`DELETE FROM task_steps WHERE workspace_id=$1 AND task_id=$2`,
 		`DELETE FROM task_events WHERE workspace_id=$1 AND task_id=$2`,
-		`UPDATE model_calls SET response=NULL,error=NULL WHERE workspace_id=$1 AND task_id=$2`,
+		`UPDATE model_calls SET response=NULL,error=NULL,content_erased_at=now() WHERE workspace_id=$1 AND task_id=$2`,
 	} {
 		if _, err := tx.Exec(ctx, statement, ws, task); err != nil {
 			return err
