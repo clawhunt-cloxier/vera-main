@@ -30,6 +30,7 @@ import { useMe } from '../api/hooks';
 import { researchError, researchText } from '../api/researchPresentation';
 import { Empty, ErrorBox, Loading, Tag, VeraAvatar } from '../components/ui';
 import { WorkspaceFrame } from '../components/WorkspaceFrame';
+import { ConversationComposer, ConversationHistory, conversationExamples } from './conversations';
 
 const modes = {
   stock_analysis: {
@@ -293,11 +294,28 @@ export function App() {
                 </p>
               )}
             </header>
-            <ResearchComposer
-              skills={skills.data?.items ?? []}
-              protocol={protocol}
-              synthetic={me.data.synthetic}
-            />
+            {me.data.workspace_id && Boolean(me.data.conversation_topics?.length) ? (
+              <>
+                <ConversationComposer
+                  workspace={me.data.workspace_id}
+                  examples={conversationExamples(me.data)}
+                />
+                <details className="chat-full-entry">
+                  <summary>用一句话生成完整研报</summary>
+                  <ResearchComposer
+                    skills={skills.data?.items ?? []}
+                    protocol={protocol}
+                    synthetic={me.data.synthetic}
+                  />
+                </details>
+              </>
+            ) : (
+              <ResearchComposer
+                skills={skills.data?.items ?? []}
+                protocol={protocol}
+                synthetic={me.data.synthetic}
+              />
+            )}
             <section className="desk-skills" aria-labelledby="skills-title">
               <div className="desk-section-head">
                 <h2 id="skills-title">快速启动</h2>
@@ -332,7 +350,12 @@ export function App() {
             </section>
             <RecentTasks />
           </div>
-          <WorkAssistant />
+          <div className="desk-side-tools">
+            {me.data.workspace_id && Boolean(me.data.conversation_topics?.length) && (
+              <ConversationHistory workspace={me.data.workspace_id} preview />
+            )}
+            <WorkAssistant />
+          </div>
         </div>
       )}
     </WorkspaceFrame>

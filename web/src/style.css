@@ -1036,7 +1036,7 @@ main.reader-document {
 }
 
 .rsec h3,
-.report .evidence h3 {
+:is(.report, .chat-result) .evidence h3 {
   margin: 16px 0 8px;
   font-size: 16px;
 }
@@ -1220,7 +1220,8 @@ main.reader-document {
   font-weight: 400;
 }
 
-.report .rsec .chart-legend {
+.report .rsec .chart-legend,
+.chat-result .chart-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;

@@ -122,12 +122,13 @@ function ReportContents({ sections }: { sections: Report['sections'] }) {
   );
 }
 
-function EvidencePanel({
+export function EvidencePanel({
   id,
   claim,
   number,
   visible,
   showClaimText,
+  modal = false,
   loaders,
   onClose,
   onDismissed,
@@ -137,6 +138,7 @@ function EvidencePanel({
   number: number;
   visible: boolean;
   showClaimText: boolean;
+  modal?: boolean;
   loaders: Loaders;
   onClose: () => void;
   onDismissed: (ref: string) => void;
@@ -162,15 +164,16 @@ function EvidencePanel({
     }
     const drawer = window.matchMedia('(max-width: 1099px)');
     const show = () => {
-      if (dialog.open && dialog.matches(':modal') === drawer.matches) return;
+      const showAsModal = modal || drawer.matches;
+      if (dialog.open && dialog.matches(':modal') === showAsModal) return;
       if (dialog.open) dialog.close();
-      if (drawer.matches) dialog.showModal();
+      if (showAsModal) dialog.showModal();
       else dialog.show();
     };
     show();
     drawer.addEventListener('change', show);
     return () => drawer.removeEventListener('change', show);
-  }, [claim.ref, onDismissed, visible]);
+  }, [claim.ref, modal, onDismissed, visible]);
   const pageRefs = useMemo(
     () => claim.evidence_refs.slice(page * evidencePageSize, (page + 1) * evidencePageSize),
     [claim.evidence_refs, page]
@@ -583,7 +586,7 @@ export function ReportView({
   );
 }
 
-function ReportTable({ table }: { table: Report['sections'][number]['tables'][number] }) {
+export function ReportTable({ table }: { table: Report['sections'][number]['tables'][number] }) {
   const choiceDaily = table.title === 'Choice 日成交观察（非实时）';
   const numeric = table.columns.map((_, index) => {
     if (index === 0) return false;

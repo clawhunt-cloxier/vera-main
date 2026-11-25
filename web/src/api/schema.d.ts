@@ -326,6 +326,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** listConversations */
+        get: operations["listConversations"];
+        put?: never;
+        /** createConversation */
+        post: operations["createConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** getConversation */
+        get: operations["getConversation"];
+        put?: never;
+        post?: never;
+        /** deleteConversation */
+        delete: operations["deleteConversation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation}/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** sendConversationMessage */
+        post: operations["sendConversationMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation}/turns/{turn}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** getConversationTurn */
+        get: operations["getConversationTurn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation}/turns/{turn}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** actOnConversationTurn */
+        post: operations["actOnConversationTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation}/turns/{turn}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** getConversationResult */
+        get: operations["getConversationResult"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/watchlist": {
         parameters: {
             query?: never;
@@ -430,6 +534,115 @@ export interface components {
             plan_hash: string;
             disabled_sections: string[];
         };
+        ConversationMessage: {
+            /** Format: uuid */
+            client_message_id: string;
+            text: string;
+            /** Format: uuid */
+            reply_to_turn_id?: string;
+            expected_revision?: number;
+        };
+        ConversationAction: {
+            /** @enum {string} */
+            action: "choose" | "confirm" | "cancel";
+            expected_revision: number;
+            /** Format: uuid */
+            subject_id?: string;
+            /** Format: uuid */
+            plan_id?: string;
+            plan_hash?: string;
+            task_revision?: number;
+        };
+        ConversationAccepted: {
+            /** Format: uuid */
+            conversation_id: string;
+            /** Format: uuid */
+            turn_id: string;
+        };
+        ConversationSummary: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            revision: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ConversationScope: {
+            /** Format: uuid */
+            subject_id: string;
+            skill_id: components["schemas"]["SkillId"];
+            /** @enum {string} */
+            topic?: "daily_trading" | "financing_balance";
+            window?: number;
+        };
+        ConversationTurn: {
+            /** Format: uuid */
+            id: string;
+            ordinal: number;
+            text: string;
+            revision: number;
+            /** @enum {string} */
+            state: "pending" | "clarify" | "confirm" | "research" | "reference" | "unavailable";
+            /** Format: uuid */
+            reply_to_turn_id?: string;
+            message?: string;
+            /** Format: date-time */
+            created_at: string;
+            plan?: components["schemas"]["ResearchPlan"];
+            candidates?: components["schemas"]["Entity"][];
+            /** @enum {unknown} */
+            task_status?: "QUEUED" | "COLLECTING" | "ANALYZING" | "ASSEMBLING" | "DELIVERING" | "CANCEL_REQUESTED" | "COMPLETED" | "ABSTAINED" | "BUDGET_EXHAUSTED" | "CANCELLED" | "BLOCKED" | "FAILED";
+            task_revision?: number;
+            reason_code?: string;
+            scope?: components["schemas"]["ConversationScope"];
+            /** Format: uuid */
+            reference_turn_id?: string;
+            /** @enum {string} */
+            reference_kind?: "result" | "evidence" | "calculation";
+            result_ready: boolean;
+            is_brief: boolean;
+        };
+        ConversationHistory: {
+            items: components["schemas"]["ConversationSummary"][];
+            next_cursor: string | null;
+        };
+        ConversationThread: {
+            conversation: components["schemas"]["ConversationSummary"];
+            turns: components["schemas"]["ConversationTurn"][];
+            next_before: number | null;
+        };
+        ConversationResult: {
+            /** Format: uuid */
+            report_id: string;
+            version: number;
+            title: string;
+            subject: components["schemas"]["Entity"];
+            skill_version: string;
+            data_as_of: string;
+            /** @enum {unknown} */
+            result_kind: "full" | "limited";
+            synthetic: boolean;
+            ai_generated: boolean;
+            claims: components["schemas"]["Claim"][];
+            tables: {
+                title: string;
+                columns: string[];
+                rows: (string | null)[][];
+                evidence_refs: string[];
+            }[];
+            series: components["schemas"]["ChartSeries"][];
+            limitations: string[];
+            sources: {
+                provider: string;
+                dataset_id: string;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
+            disclaimer: string;
+            is_brief: boolean;
+            /** Format: uuid */
+            original_turn_id: string;
+        };
         Error: {
             request_id: string;
             error: {
@@ -519,6 +732,7 @@ export interface components {
              * @enum {string}
              */
             research_protocol?: "observation.v1" | "v0.4";
+            conversation_topics?: ("daily_trading" | "financing_balance")[];
             /** @description 可用 application/json 请求基于已发布收盘数据的投研计划，可与 Choice 简报协议同时使用。各标的及章节按实际数据预检。 */
             closing_research_available?: boolean;
             /** @description 旧版 v0.4 客户端可用的严格实时能力标记；实际证券的行情仍须在采集时核验。 */
@@ -1841,6 +2055,283 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                     "application/vnd.vera.observation.v1+json": components["schemas"]["Error"];
                     "application/vnd.vera.v0.4+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listConversations: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationHistory"];
+                };
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createConversation: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationMessage"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    /** @description Seconds until the next poll while the turn is active */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAccepted"];
+                };
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getConversation: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                before?: number;
+            };
+            header?: never;
+            path: {
+                conversation: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    /** @description Seconds until the next poll while the turn is active */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationThread"];
+                };
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteConversation: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": string;
+            };
+            path: {
+                conversation: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Action accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    sendConversationMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": string;
+            };
+            path: {
+                conversation: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationMessage"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    /** @description Seconds until the next poll while the turn is active */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAccepted"];
+                };
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getConversationTurn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation: string;
+                turn: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    /** @description Seconds until the next poll while the turn is active */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationTurn"];
+                };
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    actOnConversationTurn: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": string;
+            };
+            path: {
+                conversation: string;
+                turn: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationAction"];
+            };
+        };
+        responses: {
+            /** @description Action accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getConversationResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation: string;
+                turn: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationResult"];
+                };
+            };
+            /** @description Structured error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

@@ -95,9 +95,10 @@ func (s *Server) briefEvidence(w http.ResponseWriter, r *http.Request) (bool, er
 		return tx.QueryRow(r.Context(), `SELECT s.task_id,t.skill_version FROM observation_brief_snapshots s
 			JOIN report_versions v ON v.task_id=s.task_id AND v.workspace_id=s.workspace_id
 			JOIN research_tasks t ON t.id=v.task_id AND t.workspace_id=v.workspace_id
+			JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
 			CROSS JOIN LATERAL (SELECT convert_from(s.manifest,'UTF8')::jsonb AS m) manifest
 			WHERE t.skill_version=ANY($2::text[]) AND (m->'Liquidity'->>'ID'=$1 OR m->'Security'->>'ID'=$1
-			OR EXISTS(SELECT 1 FROM jsonb_array_elements(m->'Supplement') x WHERE x->>'ID'=$1))
+			OR EXISTS(SELECT 1 FROM jsonb_array_elements(m->'Supplement') x WHERE x->>'ID'=$1)) AND `+visibleShortResearch+`
 			ORDER BY (t.skill_version=$3) DESC,v.delivered_at DESC LIMIT 1`, id.String(), s.historyVersions(), emquant.ObservationBriefVersion).Scan(&task, &version)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

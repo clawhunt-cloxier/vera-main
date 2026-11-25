@@ -21,6 +21,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/shopspring/decimal"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/fixture"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
@@ -112,7 +113,7 @@ func setupEngine(t *testing.T, configure func(*harness.Engine)) *env {
 	if configure != nil {
 		configure(eng)
 	}
-	if _, err := eng.NewRiver(pool, false, 1); err != nil {
+	if _, err := eng.NewRiver(pool, false, 1, conversation.Register(eng)); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
@@ -120,7 +121,7 @@ func setupEngine(t *testing.T, configure func(*harness.Engine)) *env {
 	t.Cleanup(srv.Close)
 	idp, _ := devoidc.New(srv.URL+"/dev-oidc", "vera-web", "dev-secret", srv.URL+"/auth/callback")
 	id := identity.New(pool, identity.Options{Registration: true, Issuer: idp.Issuer, ClientID: "vera-web", ClientSecret: "dev-secret", PublicURL: srv.URL})
-	s := &Server{Pool: pool, ID: id, Store: st, Engine: eng, Watch: &watchlist.Service{Pool: pool, Store: st, Now: p.Now, ProviderID: p.ID()}, Synthetic: true,
+	s := &Server{Pool: pool, ID: id, Store: eng.Store, Engine: eng, FullVendorResearch: harness.IsCloseResearchVersion(eng.Skills["stock_analysis"].Version), Watch: &watchlist.Service{Pool: pool, Store: st, Now: p.Now, ProviderID: p.ID()}, Synthetic: true,
 		Mounts: map[string]http.Handler{"/dev-oidc/": http.StripPrefix("/dev-oidc", idp.Handler())}}
 	mux.Handle("/", s.Handler())
 	return &env{srv, pool, eng}

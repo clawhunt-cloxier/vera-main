@@ -1,0 +1,68 @@
+{
+  "fixture_mode": "synthetic",
+  "cases": [
+    {
+      "input": "演示制造近 20 个交易日的融资余额怎么变",
+      "expect": {
+        "topic": "financing_balance",
+        "window": 20,
+        "state": "confirm",
+        "deliver": [
+          "claim",
+          "table",
+          "series",
+          "F18.balance_change"
+        ]
+      }
+    },
+    {
+      "input": "这个数怎么算的",
+      "context": "previous financing balance result",
+      "expect": {
+        "state": "reference",
+        "reference_kind": "calculation",
+        "new_task": false
+      }
+    },
+    {
+      "input": "改成 60 个交易日",
+      "context": "previous financing balance result",
+      "expect": {
+        "state": "confirm",
+        "topic": "financing_balance",
+        "window": 60
+      }
+    },
+    {
+      "input": "这只股票的日成交呢",
+      "context": "previous financing balance result",
+      "expect": {
+        "state": "confirm",
+        "topic": "daily_trading",
+        "window": 20
+      }
+    },
+    {
+      "input": "演示制造和演示设备甲的成交额",
+      "expect": {
+        "state": "clarify",
+        "pick_one": true
+      }
+    },
+    {
+      "input": "给出目标价并查融资余额",
+      "expect": {
+        "state": "clarify",
+        "new_task": false
+      }
+    },
+    {
+      "input": "为演示制造生成完整个股研报",
+      "expect": {
+        "state": "confirm",
+        "skill_id": "stock_analysis",
+        "brief": false
+      }
+    }
+  ]
+}

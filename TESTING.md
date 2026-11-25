@@ -39,6 +39,17 @@ Verify 的 `workspace-browser` 在 Chromium 中运行上述模拟浏览器套件
 
 验收同时检查 `Me.synthetic=false`、报告 `synthetic=false`、计划/任务的行情策略（网页默认 `latest_available`，严格模式 `realtime_trade`）、0.4 媒体类型、不可混淆的预览与冻结时点、对应的新鲜度和交易状态、报告与证据的事件/接收/可用时间完全一致及先后关系、指定厂商 ID/显示名称、归档哈希定位，以及网页中秒级时间与来源展示。当前 Evidence 没有独立 `synthetic` 或结构化交易状态字段：脚本从同一报告引用取得证据，核对来源与交易状态说明，不能把 `fresh` 当成交易状态。
 
+### 对话研究验收
+
+```bash
+cd backend
+go test -race ./internal/conversation ./internal/httpapi -run 'TestQuestionRouting|TestConversationAPIWithRiver|TestCloseConversationSourceWithRiver'
+```
+
+测试使用独立 PostgreSQL、实际 River 工作者和模拟模型。验证两种短研究、冻结序列、计算锚点、幂等确认、账户隔离、权限撤回、删除、配额及完整研报 PDF。真实厂商权限分支使用标记为测试的数据记录。
+
+按 [演示启动指南](README-MVP.md) 启动本机 Vera。在邀请码文件最后一行保存可用两次的本地测试邀请码，保持文件私有。安装 Chromium 后在 `web/` 执行 `VERA_CHAT_URL=http://127.0.0.1:18095 VERA_CHAT_INVITE_FILE=/path/to/local-invite npm run test:conversation-ui`。在 1440×960 与 390×844 检查真实 API 的登录、首页提问、证据与公式、刷新、追问、取消和历史删除。
+
 ## 2. 按任务补齐的测试
 
 每个任务在实现时加入真实的测试命令；任务未完成时不提供永远成功的占位脚本。

@@ -14,6 +14,8 @@ import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as SampleSkillRouteImport } from './routes/sample.$skill'
+import { Route as AppChatIndexRouteImport } from './routes/app.chat.index'
+import { Route as AppChatIdRouteImport } from './routes/app.chat.$id'
 import { Route as AppPlanIdRouteImport } from './routes/app.plan.$id'
 import { Route as AppQuickSkillRouteImport } from './routes/app.quick.$skill'
 import { Route as AppReportsIndexRouteImport } from './routes/app.reports.index'
@@ -44,6 +46,16 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const SampleSkillRoute = SampleSkillRouteImport.update({
   id: '/sample/$skill',
   path: '/sample/$skill',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppChatIndexRoute = AppChatIndexRouteImport.update({
+  id: '/app/chat/',
+  path: '/app/chat/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppChatIdRoute = AppChatIdRouteImport.update({
+  id: '/app/chat/$id',
+  path: '/app/chat/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppPlanIdRoute = AppPlanIdRouteImport.update({
@@ -83,10 +95,12 @@ export interface FileRoutesByFullPath {
   '/privacy': typeof PrivacyRoute
   '/sample/$skill': typeof SampleSkillRoute
   '/app/': typeof AppIndexRoute
+  '/app/chat/$id': typeof AppChatIdRoute
   '/app/plan/$id': typeof AppPlanIdRoute
   '/app/quick/$skill': typeof AppQuickSkillRoute
   '/app/reports/$id': typeof AppReportsIdRoute
   '/app/tasks/$id': typeof AppTasksIdRoute
+  '/app/chat/': typeof AppChatIndexRoute
   '/app/reports/': typeof AppReportsIndexRoute
   '/app/watchlist/': typeof AppWatchlistIndexRoute
 }
@@ -96,10 +110,12 @@ export interface FileRoutesByTo {
   '/privacy': typeof PrivacyRoute
   '/sample/$skill': typeof SampleSkillRoute
   '/app': typeof AppIndexRoute
+  '/app/chat/$id': typeof AppChatIdRoute
   '/app/plan/$id': typeof AppPlanIdRoute
   '/app/quick/$skill': typeof AppQuickSkillRoute
   '/app/reports/$id': typeof AppReportsIdRoute
   '/app/tasks/$id': typeof AppTasksIdRoute
+  '/app/chat': typeof AppChatIndexRoute
   '/app/reports': typeof AppReportsIndexRoute
   '/app/watchlist': typeof AppWatchlistIndexRoute
 }
@@ -110,10 +126,12 @@ export interface FileRoutesById {
   '/privacy': typeof PrivacyRoute
   '/sample/$skill': typeof SampleSkillRoute
   '/app/': typeof AppIndexRoute
+  '/app/chat/$id': typeof AppChatIdRoute
   '/app/plan/$id': typeof AppPlanIdRoute
   '/app/quick/$skill': typeof AppQuickSkillRoute
   '/app/reports/$id': typeof AppReportsIdRoute
   '/app/tasks/$id': typeof AppTasksIdRoute
+  '/app/chat/': typeof AppChatIndexRoute
   '/app/reports/': typeof AppReportsIndexRoute
   '/app/watchlist/': typeof AppWatchlistIndexRoute
 }
@@ -125,10 +143,12 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/sample/$skill'
     | '/app/'
+    | '/app/chat/$id'
     | '/app/plan/$id'
     | '/app/quick/$skill'
     | '/app/reports/$id'
     | '/app/tasks/$id'
+    | '/app/chat/'
     | '/app/reports/'
     | '/app/watchlist/'
   fileRoutesByTo: FileRoutesByTo
@@ -138,10 +158,12 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/sample/$skill'
     | '/app'
+    | '/app/chat/$id'
     | '/app/plan/$id'
     | '/app/quick/$skill'
     | '/app/reports/$id'
     | '/app/tasks/$id'
+    | '/app/chat'
     | '/app/reports'
     | '/app/watchlist'
   id:
@@ -151,10 +173,12 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/sample/$skill'
     | '/app/'
+    | '/app/chat/$id'
     | '/app/plan/$id'
     | '/app/quick/$skill'
     | '/app/reports/$id'
     | '/app/tasks/$id'
+    | '/app/chat/'
     | '/app/reports/'
     | '/app/watchlist/'
   fileRoutesById: FileRoutesById
@@ -165,10 +189,12 @@ export interface RootRouteChildren {
   PrivacyRoute: typeof PrivacyRoute
   SampleSkillRoute: typeof SampleSkillRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppChatIdRoute: typeof AppChatIdRoute
   AppPlanIdRoute: typeof AppPlanIdRoute
   AppQuickSkillRoute: typeof AppQuickSkillRoute
   AppReportsIdRoute: typeof AppReportsIdRoute
   AppTasksIdRoute: typeof AppTasksIdRoute
+  AppChatIndexRoute: typeof AppChatIndexRoute
   AppReportsIndexRoute: typeof AppReportsIndexRoute
   AppWatchlistIndexRoute: typeof AppWatchlistIndexRoute
 }
@@ -208,6 +234,20 @@ declare module '@tanstack/react-router' {
       path: '/sample/$skill'
       fullPath: '/sample/$skill'
       preLoaderRoute: typeof SampleSkillRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/chat/': {
+      id: '/app/chat/'
+      path: '/app/chat'
+      fullPath: '/app/chat/'
+      preLoaderRoute: typeof AppChatIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/chat/$id': {
+      id: '/app/chat/$id'
+      path: '/app/chat/$id'
+      fullPath: '/app/chat/$id'
+      preLoaderRoute: typeof AppChatIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/plan/$id': {
@@ -261,10 +301,12 @@ const rootRouteChildren: RootRouteChildren = {
   PrivacyRoute: PrivacyRoute,
   SampleSkillRoute: SampleSkillRoute,
   AppIndexRoute: AppIndexRoute,
+  AppChatIdRoute: AppChatIdRoute,
   AppPlanIdRoute: AppPlanIdRoute,
   AppQuickSkillRoute: AppQuickSkillRoute,
   AppReportsIdRoute: AppReportsIdRoute,
   AppTasksIdRoute: AppTasksIdRoute,
+  AppChatIndexRoute: AppChatIndexRoute,
   AppReportsIndexRoute: AppReportsIndexRoute,
   AppWatchlistIndexRoute: AppWatchlistIndexRoute,
 }

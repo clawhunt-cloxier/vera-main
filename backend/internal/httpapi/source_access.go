@@ -159,7 +159,7 @@ func (s *Server) responseGrant(r *http.Request) (responseGrant, error) {
 		if err != nil {
 			return nil, err
 		}
-		if (strings.HasPrefix(path, "/api/v1/reports/") || version == harness.CloseUnifiedVersion && strings.HasPrefix(path, "/api/v1/calculations/")) &&
+		if (strings.HasPrefix(path, "/api/v1/reports/") || (version == harness.CloseUnifiedVersion || version == harness.ConversationCloseVersion) && strings.HasPrefix(path, "/api/v1/calculations/")) &&
 			(r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			return s.snapshotGrant(r, task, version, grant), nil
 		}
@@ -180,6 +180,10 @@ func (s *Server) snapshotGrant(r *http.Request, task uuid.UUID, version string, 
 	ctx := r.Context()
 	return func(fn func() error) error {
 		switch version {
+		case harness.ConversationCloseVersion:
+			return checkSource(func(use func() error) error {
+				return s.Engine.WithConversationSnapshot(ctx, ws, task, func(pgx.Tx) error { return use() })
+			}, "研究所用的冻结数据当前不可读取")(fn)
 		case harness.CloseUnifiedVersion:
 			return checkSource(func(use func() error) error {
 				return s.Engine.WithUnifiedSources(ctx, ws, task, dataservice.SourceDisplay, func(pgx.Tx, []harness.BoundResearchSupplement) error { return use() })

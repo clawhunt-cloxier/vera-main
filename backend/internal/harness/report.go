@@ -174,6 +174,9 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 	}
 	// Summary: model may fail or time out; the deterministic fallback keeps delivery possible.
 	points, err := step(parent, e, t, "summary", func() ([]summaryPoint, error) {
+		if isConversationSkill(t.Version) {
+			return fallbackSummary(final, required), nil
+		}
 		var msg string
 		for _, c := range final {
 			msg += fmt.Sprintf("%s（%s）：%s\n", c.Ref, c.Claim.Kind, c.Claim.Text)
@@ -207,6 +210,9 @@ func (e *Engine) assemble(ctx, parent context.Context, t *taskRow, sk *Skill, su
 		return err
 	}
 	points, err = step(parent, e, t, "verify:summary", func() ([]summaryPoint, error) {
+		if isConversationSkill(t.Version) {
+			return points, nil
+		}
 		return e.verifySummary(ctx, parent, t, sheet, points, by, final, required)
 	})
 	if err != nil {

@@ -39,10 +39,22 @@
 | GET | /api/v1/evidence/{id} | 证据版本：来源、口径、时点、原文片段或数值；不返回可公开访问的永久 URL |
 | GET | /api/v1/calculations/{id} | 公式、版本、输入引用、结果 |
 | POST | /api/v1/reports/{id}/versions/{version}/feedback | 反馈：useful/confusing/incorrect/other，可关联 claim；备注 ≤ 2000 字；幂等，201 |
+| GET / POST | /api/v1/conversations | 历史列表 / 首条消息。列表沿用 `limit`、`cursor`。接受消息返回 202、`Location` 和 `Retry-After`。 |
+| GET / DELETE | /api/v1/conversations/{conversation} | 读取最近轮次或用 `before` 加载早期轮次 / 删除对话。 |
+| POST | /api/v1/conversations/{conversation}/turns | 发送消息或引用同一会话中的轮次。 |
+| GET | /api/v1/conversations/{conversation}/turns/{turn} | 单轮详情，按状态返回候选或待确认计划。 |
+| POST | /api/v1/conversations/{conversation}/turns/{turn}/actions | 选择对象、确认计划或取消研究。成功返回 204。 |
+| GET | /api/v1/conversations/{conversation}/turns/{turn}/result | 只读取已交付报告的对应版本。短研究返回结论、数据与图表。 |
 | GET / POST | /api/v1/watchlist | 列表 / 添加 |
 | PATCH / DELETE | /api/v1/watchlist/{item_id} | 修改标签、备注、提醒 / 移除 |
 
 轮询：任务详情响应带 `Retry-After`，执行中建议 3 秒，可退避到 15 秒，终态后停止。首版不提供 SSE。
+
+### 对话协议
+
+对话接口使用普通 JSON，需要登录且已开通 workspace。写请求校验 Origin 和 CSRF。客户端按 `/me.conversation_topics` 展示可用的短研究主题。每次发消息提交 UUID `client_message_id`。在可见历史中重发同一请求返回同一轮次，重用编号发送不同内容返回 409。追问提交会话 `expected_revision`，可带 `reply_to_turn_id`。确认提交轮次 `expected_revision`、`plan_id` 和 `plan_hash`。已开始任务的取消另需要 `task_revision`。选择候选或确认重试均受轮次状态控制。
+
+活动中的会话详情带 `Retry-After`。轮次终态从任务读出。结果与被引用的历史轮次绑定，读取会检查当前的数据用途与快照权限。短报告使用对话历史，完整研报也出现在原报告列表中。对话删除后短结果和关联证据失去该对话的可读引用。仍被另一份可读报告引用的数据按该报告的授权规则管理。
 
 ## 3. 错误
 
