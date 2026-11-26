@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -131,6 +133,91 @@ func TestGatewayOpenAIRetryRepairReuseBudget(t *testing.T) {
 	req3.Budget.MaxModelCalls = 1
 	if _, _, err := g.Complete(context.Background(), req3); !errors.Is(err, ErrBudget) {
 		t.Fatalf("want budget error, got %v", err)
+	}
+}
+
+func TestGatewayOpenAIToolFormatRepair(t *testing.T) {
+	pool := dbtest.New(t)
+	pol, err := policy.Load("../../../../contracts/examples/policy.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemas, err := LoadSchemas("../../../../contracts/model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workspace uuid.UUID
+	if err := pool.QueryRow(t.Context(), `WITH u AS (
+		INSERT INTO users(issuer,subject) VALUES('test',uuidv7()::text) RETURNING id
+	) INSERT INTO workspaces(owner_user_id) SELECT id FROM u RETURNING id`).Scan(&workspace); err != nil {
+		t.Fatal(err)
+	}
+
+	messages := []Message{{"system", "你是 Vera。"}, {"user", "会话环境（数据）"}, {"user", "演示制造的成交额"}}
+	original := slices.Clone(messages)
+	const name = "inspect_daily_trading"
+	const validArgs = `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := hits.Add(1)
+		var req struct {
+			Messages   []Message `json:"messages"`
+			Tools      []Tool    `json:"tools"`
+			ToolChoice string    `json:"tool_choice"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+			len(req.Messages) != len(original) || req.Messages[0].Role != "system" ||
+			!slices.Equal(req.Messages[1:], original[1:]) || len(req.Tools) != 1 ||
+			req.Tools[0].Function.Name != name || req.ToolChoice != "auto" {
+			t.Error("request must keep a single system message, the user messages and the tool declaration")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		args := validArgs
+		switch n {
+		case 1:
+			if !slices.Equal(req.Messages, original) {
+				t.Error("the first request must use the original messages")
+			}
+			args = `{"subject_source":"message","trading_days":"invalid"}`
+		case 2:
+			if !strings.HasPrefix(req.Messages[0].Content, original[0].Content+"\n\n") ||
+				!strings.Contains(req.Messages[0].Content, "JSON Schema") ||
+				strings.Contains(req.Messages[0].Content, "invalid") {
+				t.Error("repair must append a trusted format hint to the original system message")
+			}
+		default:
+			t.Errorf("unexpected model call %d", n)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		err := json.NewEncoder(w).Encode(map[string]any{
+			"model": "flash",
+			"choices": []any{map[string]any{
+				"finish_reason": "tool_calls",
+				"message": map[string]any{"content": nil, "tool_calls": []ToolCall{
+					{ID: "native-call", Type: "function", Function: ToolArguments{Name: name, Arguments: args}},
+				}},
+			}},
+			"usage": Usage{PromptTokens: 120, CompletionTokens: 30},
+		})
+		if err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	prof := Profile{Name: "router", Adapter: "openai", BaseURL: srv.URL, ModelID: "flash"}
+	g := NewGateway(pool, map[string]Profile{"router": prof}, map[string]Adapter{"openai": OpenAI{}}, prices(), schemas, pol, decimal.NewFromInt(30))
+	out, meta, err := g.Complete(t.Context(), Request{
+		Workspace: workspace, StepKey: "conversation_agent", Profile: "router", Messages: messages,
+		MaxOutput: 384, Schema: "conversation-answer-output", EraseContent: true,
+		Tools: []ToolSpec{{Name: name, Schema: "conversation-window-tool"}},
+	})
+	if err != nil || len(out) != 0 || meta.ToolCall == nil || meta.ToolCall.Function.Arguments != validArgs || hits.Load() != 2 {
+		t.Fatalf("out=%s meta=%+v err=%v calls=%d", out, meta, err, hits.Load())
+	}
+	if !slices.Equal(messages, original) {
+		t.Fatal("repair mutated the caller's messages")
 	}
 }
 

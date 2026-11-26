@@ -11,12 +11,15 @@ import (
 // simulation adapter is only available to synthetic deployments.
 func simulateAgent(text string, state agentContext, history bool, tools []model.ToolSpec) (any, error) {
 	const manufacture = "演示制造"
-	education := func(topic, aspect string) modelAnswer {
-		return modelAnswer{Kind: "education", Concepts: []educationSelection{{Topic: topic, Aspect: aspect}}}
+	reply := func(kind string) (any, error) {
+		return simulatedCall(replyTool, modelAnswer{Kind: kind, Concepts: []educationSelection{}})
+	}
+	education := func(topic, aspect string) (any, error) {
+		return simulatedCall(replyTool, modelAnswer{Kind: "education", Concepts: []educationSelection{{Topic: topic, Aspect: aspect}}})
 	}
 	research := func(tool string, request researchRequest) (any, error) {
 		if !slices.ContainsFunc(tools, func(spec model.ToolSpec) bool { return spec.Name == tool }) {
-			return modelAnswer{Kind: "unavailable", Concepts: []educationSelection{}}, nil
+			return reply("unavailable")
 		}
 		if request.SubjectMentions == nil {
 			request.SubjectMentions = []string{}
@@ -40,20 +43,20 @@ func simulateAgent(text string, state agentContext, history bool, tools []model.
 	}
 	switch text {
 	case "你好", "您好", "嗨", "hello":
-		return modelAnswer{Kind: "greeting", Concepts: []educationSelection{}}, nil
+		return reply("greeting")
 	case "你是谁", "你能做哪些研究报告":
-		return modelAnswer{Kind: "capabilities", Concepts: []educationSelection{}}, nil
+		return reply("capabilities")
 	case "谢谢":
-		return modelAnswer{Kind: "thanks", Concepts: []educationSelection{}}, nil
+		return reply("thanks")
 	case "什么是市盈率", "解释一下市盈率":
-		return education("pe", "overview"), nil
+		return education("pe", "overview")
 	case "什么是市净率":
-		return education("pb", "overview"), nil
+		return education("pb", "overview")
 	case "解释一下换手率的含义":
-		return education("turnover", "definition"), nil
+		return education("turnover", "definition")
 	case "那它有什么局限":
 		if history {
-			return education("pe", "limits"), nil
+			return education("pe", "limits")
 		}
 	case "演示制造近 20 个交易日的融资余额怎么变", "演示制造近 20 个交易日融资余额":
 		return research(financingTool, researchRequest{SubjectMentions: []string{manufacture}, TradingDays: 20})
@@ -86,11 +89,11 @@ func simulateAgent(text string, state agentContext, history bool, tools []model.
 	case "深度研究演示制造":
 		return research(deepTool, researchRequest{SubjectMentions: []string{manufacture}})
 	case "现在该不该买演示制造", "给我一只可以上车的票":
-		return modelAnswer{Kind: "decline_advice", Concepts: []educationSelection{}}, nil
+		return reply("decline_advice")
 	case "查演示制造近 20 个交易日的成交额并给目标价":
 		return research(dailyTradingTool, researchRequest{SubjectMentions: []string{manufacture}, TradingDays: 20, Advice: "declined"})
 	}
-	return modelAnswer{Kind: "out_of_scope", Concepts: []educationSelection{}}, nil
+	return reply("out_of_scope")
 }
 
 func simulatedCall(name string, args any) (model.ToolCall, error) {

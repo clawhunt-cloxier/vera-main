@@ -288,7 +288,14 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 					msgs = append(append([]Message{}, msgs...), Message{Role: "assistant", Content: truncate(raw.Content, 4000)},
 						Message{Role: "user", Content: "上一次输出不符合要求：" + truncate(verr.Error(), 300) + "。请只输出符合 JSON Schema 的 JSON 对象，不要输出其他内容。"})
 				} else {
-					msgs = append([]Message{{Role: "system", Content: "请遵循回复格式。只调用一个已声明的函数，或只返回直接回复的 JSON 对象。"}}, msgs...)
+					const hint = "上一次回复格式无效。只调用一个已声明的函数，参数须符合该函数的 JSON Schema，或只返回符合回复格式的 JSON 对象。"
+					if len(msgs) > 0 && msgs[0].Role == "system" {
+						// Some model templates allow only one system message.
+						msgs = append([]Message(nil), msgs...)
+						msgs[0].Content += "\n\n" + hint
+					} else {
+						msgs = append([]Message{{Role: "system", Content: hint}}, msgs...)
+					}
 				}
 				continue
 			}

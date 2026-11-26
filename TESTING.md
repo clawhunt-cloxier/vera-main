@@ -49,7 +49,7 @@ go test -race ./internal/conversation ./internal/httpapi ./internal/harness ./in
   -run 'TestConversation|TestCloseConversationSourceWithRiver|TestGatewayOpenAI|TestObservationBriefDelivery|TestAdminUsageReportAndReconcile'
 ```
 
-测试使用独立 PostgreSQL、实际 River 工作者和模拟模型。`TestConversationNativeToolCalls` 使用本地模型 HTTP 替身，检查七种已登记的工具声明、口语问法、澄清后自动执行、手选历史轮次优先、日期范围不适用、原始计算引用、直接金融回答及计费留痕。未声明工具、虚构标的和非法参数均不创建任务。验收还覆盖纯荐股请求、混合历史研究和目标价请求、伪造教育回复的自由文本，以及旧客户端确认计划。对话的数据准备保留队列容量限制，同标的复用作业，独立入口的每日次数单独计数。其余回归覆盖两类短研究、冻结序列、幂等发送、账户隔离、权限撤回、删除和过期、迟到记账、时限及完整研报 PDF。合成 Choice 动态库与本地 S3 替身检查图表、明细和证据一致性以及快照留存。
+测试使用独立 PostgreSQL、实际 River 工作者和模拟模型。`TestConversationNativeToolCalls` 使用本地模型 HTTP 替身，检查七种研究工具与结构化答复工具、口语问法、澄清后自动执行、手选历史轮次优先、日期范围不适用、原始计算引用及计费留痕。工具与直接 JSON 回复均拒绝未经许可的自由文本。`TestGatewayOpenAIToolFormatRepair` 检查工具参数无效时的重试只发送一条系统消息。未声明工具、虚构标的和非法参数均不创建任务。验收还覆盖纯荐股请求、混合历史研究和目标价请求，以及旧客户端确认计划。对话的数据准备保留队列容量限制，同标的复用作业，独立入口的每日次数单独计数。其余回归覆盖两类短研究、冻结序列、幂等发送、账户隔离、权限撤回、删除和过期、迟到记账、时限及完整研报 PDF。合成 Choice 动态库与本地 S3 替身检查图表、明细和证据一致性以及快照留存。
 
 按 [演示启动指南](README-MVP.md) 启动模拟 Vera 并建立两个工作区。把本地演示密码保存在私有文本文件。安装 Chromium 后在 `web/` 运行：
 

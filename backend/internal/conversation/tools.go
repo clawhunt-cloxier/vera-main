@@ -24,6 +24,7 @@ const (
 	deepTool         = "run_deep_research"
 	refineTool       = "refine_research"
 	referenceTool    = "reference_research"
+	replyTool        = "respond_to_user"
 )
 
 type researchTool struct {
@@ -40,6 +41,7 @@ var researchTools = []researchTool{
 
 func (s Service) agentTools() []model.ToolSpec {
 	tools := []model.ToolSpec{
+		{Name: replyTool, Schema: "conversation-answer-output", Description: "选择服务展示的回复。问候 greeting，致谢 thanks，身份或功能 capabilities，金融知识 education，禁止的投资建议 decline_advice，非金融问题 out_of_scope，缺少必要信息 clarify，无相关数据或能力 unavailable。不生成正文，不创建研究。"},
 		{Name: refineTool, Schema: "conversation-window-tool", Description: "Keep the topic of the selected result, latest clarification or prior research. Use to change only the trading-day window or to provide or replace the subject for that topic."},
 		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "Show the original result, sources or calculation from the selected or latest delivered report in this conversation. Does not perform new research."},
 	}

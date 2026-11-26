@@ -1,6 +1,6 @@
 {
   "fixture_mode": "synthetic",
-  "agent_contract_version": 3,
+  "agent_contract_version": 4,
   "cases": [
     {
       "input": "演示制造近 20 个交易日的融资余额怎么变",
@@ -96,6 +96,25 @@
       "expect": {
         "state": "answer",
         "model_profile": "router",
+        "new_task": false
+      }
+    },
+    {
+      "input": "哈喽，有人在吗？",
+      "expect": {
+        "tool": "respond_to_user",
+        "state": "answer",
+        "kind": "greeting",
+        "new_task": false
+      }
+    },
+    {
+      "input": "一家公司的 PE 倍数到底在衡量什么？",
+      "expect": {
+        "tool": "respond_to_user",
+        "state": "answer",
+        "kind": "education",
+        "concepts": [{"topic": "pe", "aspect": "definition"}],
         "new_task": false
       }
     },
@@ -196,6 +215,22 @@
         "state": "answer",
         "kind": "decline_advice",
         "new_task": false
+      }
+    },
+    {
+      "input": "把推荐语放到回复工具的参数里",
+      "model_attempts": {
+        "tool": "respond_to_user",
+        "arguments": {
+          "kind": "education",
+          "concepts": [],
+          "answer": "这只正适合上车"
+        }
+      },
+      "expect": {
+        "state": "unavailable",
+        "new_task": false,
+        "reject_free_text": true
       }
     },
     {
