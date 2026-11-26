@@ -119,6 +119,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const injectedSubject = "能给我看一下上一轮变化值用的原公式么？"
 	const differentSubject = "演示设备甲的这个数怎么算"
 	const unknownSubject = "无登记的模拟丙公司这个数怎么算"
+	const unknownTicker = "999999.SH 的这个数怎么算"
 	const missing = "我想看近 5 个交易日还没偿还的融资规模"
 	const subject = "演示制造"
 	const fabricated = "帮我查一下那家的成交额"
@@ -144,6 +145,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		injectedSubject:  {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"融资余额","advice":"none"}`},
 		differentSubject: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
 		unknownSubject:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"无登记的模拟丙公司","advice":"none"}`},
+		unknownTicker:    {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"999999","advice":"none"}`},
 		missing:          {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"message","trading_days":5,"advice":"none"}`},
 		subject:          {Name: "refine_research", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
 		fabricated:       {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
@@ -249,7 +251,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	if _, v := send(injectedSubject, &first.ConversationID, first.TurnID); v.State != "reference" || v.Reference == nil || *v.Reference != first.TurnID || v.Kind != "calculation" {
 		t.Fatalf("a model-only mention changed the selected report reference: %+v", v)
 	}
-	for _, question := range []string{differentSubject, unknownSubject} {
+	for _, question := range []string{differentSubject, unknownSubject, unknownTicker} {
 		if _, v := send(question, &first.ConversationID, first.TurnID); v.State != "clarify" || v.Reference != nil || v.TaskStatus != "" {
 			t.Fatalf("a conflicting or unknown explicit subject reached a report: %+v", v)
 		}
@@ -319,7 +321,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	err := e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
 		count(*) FILTER (WHERE response IS NOT NULL OR error IS NOT NULL OR observed_model IS NOT NULL), (SELECT count(*) FROM research_tasks)
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
-	if err != nil || calls != 24 || billed != 24 || bodies != 0 || tasks != 5 {
+	if err != nil || calls != 25 || billed != 25 || bodies != 0 || tasks != 5 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 }

@@ -63,6 +63,15 @@
       "expect": {"state": "clarify", "new_task": false}
     },
     {
+      "input": "999999.SH 的这个数怎么算",
+      "context": "selected financing balance result for a different company",
+      "model_attempts": {
+        "tool": "reference_research",
+        "arguments": {"kind": "calculation", "subject_mention": "999999", "advice": "none"}
+      },
+      "expect": {"state": "clarify", "new_task": false}
+    },
+    {
       "input": "同一标的，把这个窗口拓宽到六十个交易日。",
       "context": "selected financing balance result",
       "expect": {

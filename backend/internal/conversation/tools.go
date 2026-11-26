@@ -218,10 +218,11 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 	if len(conflicts) != 0 {
 		return s.update(ctx, args, "clarify", missing, in)
 	}
-	// The workspace anchor fixes the report identity. Only a name supplied by
-	// the user can make that reference ambiguous.
+	// Ignore a mention invented by the model. If the proposed name occurs in
+	// the message, require an exact reference so a truncated ticker cannot
+	// fall back to the old report.
 	mention := strings.TrimSpace(request.SubjectMention)
-	if containsSubject(turn.Text, mention) {
+	if mention != "" && strings.Contains(strings.ToLower(turn.Text), strings.ToLower(mention)) {
 		ids, unresolved, err := s.subjects(ctx, turn.Text, nil, []string{mention})
 		if err != nil {
 			return err
