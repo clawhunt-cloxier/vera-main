@@ -71,6 +71,11 @@ type knowledgeDraft struct {
 	Message string `json:"message"`
 }
 
+type knowledgeEvidence struct {
+	Explanation string              `json:"explanation"`
+	Sources     []model.WebCitation `json:"sources"`
+}
+
 func knowledgeOptions(entries map[string]string) string {
 	items := make([]string, 0, len(entries))
 	for _, id := range slices.Sorted(maps.Keys(entries)) {
@@ -90,12 +95,12 @@ func publicKnowledgeMessages(input knowledgeDraft) []model.Message {
 }
 
 func (s Service) lookupKnowledge(ctx context.Context, args resolveArgs, call model.ToolCall, question string, history []model.Message,
-	send func(context.Context, func() (model.Raw, error)) (model.Raw, error)) (draft json.RawMessage, sources []model.WebCitation) {
+	send func(context.Context, func() (model.Raw, error)) (model.Raw, error)) (json.RawMessage, *knowledgeEvidence) {
 	var input knowledgeDraft
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &input); err != nil {
 		return nil, nil
 	}
-	draft, _ = json.Marshal(modelAnswer{Kind: "education", Message: input.Message})
+	draft, _ := json.Marshal(modelAnswer{Kind: "education", Message: input.Message})
 	messages := publicKnowledgeMessages(input)
 	if len(messages) == 0 {
 		return draft, nil
@@ -111,17 +116,17 @@ func (s Service) lookupKnowledge(ctx context.Context, args resolveArgs, call mod
 	if err != nil {
 		return draft, nil
 	}
-	sources = publicCitations(meta.WebCitations)
-	var evidence modelAnswer
-	if len(sources) == 0 || json.Unmarshal(raw, &evidence) != nil || !validReplyFormat(evidence.Message) {
+	sources := publicCitations(meta.WebCitations)
+	var result modelAnswer
+	if len(sources) == 0 || json.Unmarshal(raw, &result) != nil || !validReplyFormat(result.Message) {
 		return draft, nil
 	}
+	evidence := knowledgeEvidence{Explanation: result.Message, Sources: sources}
 	payload, err := json.Marshal(struct {
-		Question string              `json:"question"`
-		History  []model.Message     `json:"recent_dialogue,omitempty"`
-		Evidence string              `json:"public_explanation"`
-		Sources  []model.WebCitation `json:"public_sources"`
-	}{question, history, evidence.Message, sources})
+		Question string            `json:"question"`
+		History  []model.Message   `json:"recent_dialogue,omitempty"`
+		Evidence knowledgeEvidence `json:"public_research"`
+	}{question, history, evidence})
 	if err != nil {
 		return draft, nil
 	}
@@ -138,7 +143,7 @@ func (s Service) lookupKnowledge(ctx context.Context, args resolveArgs, call mod
 	if err != nil || json.Unmarshal(raw, &composed) != nil || composed.Kind != "education" {
 		return draft, nil
 	}
-	return raw, sources
+	return raw, &evidence
 }
 
 func publicCitations(citations []model.WebCitation) []model.WebCitation {

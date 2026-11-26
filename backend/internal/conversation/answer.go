@@ -148,18 +148,18 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 		}
 		return s.fail(ctx, args, "这次未能生成回复，请稍后重试。")
 	}
-	var sources []model.WebCitation
+	var evidence *knowledgeEvidence
 	if call := meta.ToolCall; call != nil {
 		switch call.Function.Name {
 		case replyTool:
 			raw = json.RawMessage(call.Function.Arguments)
 		case knowledgeTool:
-			raw, sources = s.lookupKnowledge(callCtx, args, *call, turn.Text, history, send)
+			raw, evidence = s.lookupKnowledge(callCtx, args, *call, turn.Text, history, send)
 		default:
 			return s.runTool(ctx, args, turn, state, *call)
 		}
 	}
-	answer, err := s.checkedReply(callCtx, args, turn.Text, raw, history, tools, sources, send)
+	answer, err := s.checkedReply(callCtx, args, turn.Text, raw, history, tools, evidence, send)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -170,11 +170,11 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 		// Offer the model one chance to write a simpler response. This
 		// request cannot execute research and omits the rejected draft.
 		request.Tools = nil
-		sources = nil
+		evidence = nil
 		request.Messages[0].Content = rewritePrompt + "\n\n当前登记能力：\n" + capabilities(tools)
 		raw, _, err = gateway.Complete(callCtx, request)
 		if err == nil {
-			answer, err = s.checkedReply(callCtx, args, turn.Text, raw, history, tools, sources, send)
+			answer, err = s.checkedReply(callCtx, args, turn.Text, raw, history, tools, nil, send)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -187,6 +187,10 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 	if !turn.Automatic {
 		// Older clients display the message for this state.
 		replyState = "unavailable"
+	}
+	var sources []model.WebCitation
+	if evidence != nil {
+		sources = evidence.Sources
 	}
 	return s.update(ctx, args, replyState, answer.Message, intent{
 		FinanceAnswer: answer.Kind == "education" || answer.Kind == "clarify",
