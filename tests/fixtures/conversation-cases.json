@@ -174,6 +174,15 @@
       "expect": {"tool": "reference_research", "result_turn": 1, "state": "reference", "reference_kind": "calculation", "new_task": false}
     },
     {
+      "input": "回到海螺水泥那轮，余额变化的原公式呢？",
+      "context": "turn 1 delivered 5 sessions of financing for 海螺水泥; turn 2 delivered the same indicator for 中国石化; 水泥 is a registered industry",
+      "model_attempts": {
+        "tool": "reference_research",
+        "arguments": {"kind": "calculation", "subject_mention": "水泥", "result_turn": 2, "advice": "none"}
+      },
+      "expect": {"state": "reference", "bound_result_turn": 1, "reference_kind": "calculation", "new_task": false}
+    },
+    {
       "input": "演示制造和演示设备甲的成交额",
       "expect": {
         "state": "clarify",

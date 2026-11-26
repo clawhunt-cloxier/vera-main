@@ -88,6 +88,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const unavailableReference = "查看第九十九轮的计算"
 	const alternateTrading = "演示银行近 5 个交易日的日成交"
 	const namedReference = "回到演示制造那轮的结果"
+	const industryReference = "演示制造和制造行业那轮的计算"
 	const differentSubject = "演示设备甲的这个数怎么算"
 	const unknownSubject = "无登记的模拟丙公司这个数怎么算"
 	const unknownTicker = "999999.SH 的这个数怎么算"
@@ -136,7 +137,8 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		earlierCalculation:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","result_turn":1,"advice":"none"}`},
 		unavailableReference: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":99,"advice":"none"}`},
 		alternateTrading:     {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示银行"],"subject_source":"message","trading_days":5,"advice":"none"}`},
-		namedReference:       {Name: "reference_research", Arguments: `{"kind":"result","subject_mention":"演示制造","result_turn":0,"advice":"none"}`},
+		namedReference:       {Name: "reference_research", Arguments: `{"kind":"result","subject_mention":"制造","result_turn":2,"advice":"none"}`},
+		industryReference:    {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","result_turn":1,"advice":"none"}`},
 		differentSubject:     {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":0,"advice":"none"}`},
 		unknownSubject:       {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"无登记的模拟丙公司","result_turn":0,"advice":"none"}`},
 		unknownTicker:        {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"999999","result_turn":0,"advice":"none"}`},
@@ -457,8 +459,14 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	if _, second := send(alternateTrading, &otherThread.ConversationID); !previous.Result || !second.Result || previous.Scope == nil || second.Scope == nil || second.Scope.SubjectID == previous.Scope.SubjectID {
 		t.Fatalf("expected two separate stocks for historical reference: %+v and %+v", previous, second)
 	}
+	if _, err := e.pool.Exec(t.Context(), `INSERT INTO entities(kind,code,name,synthetic) VALUES('industry','OVERLAP.DEMO','制造',true)`); err != nil {
+		t.Fatal(err)
+	}
 	if _, v := send(namedReference, &otherThread.ConversationID); v.State != "reference" || v.Reference == nil || *v.Reference != otherThread.TurnID || v.TaskStatus != "" {
-		t.Fatalf("the explicit subject should bind the unique older result: %+v", v)
+		t.Fatalf("the full entity name should bind the unique older result: %+v", v)
+	}
+	if _, v := send(industryReference, &otherThread.ConversationID); v.State != "clarify" || v.Reference != nil || v.TaskStatus != "" {
+		t.Fatalf("the separately named industry conflicts with the stock report: %+v", v)
 	}
 	if _, v := send(calendar, &first.ConversationID); v.State != "clarify" || v.NeedsSubject || v.Scope == nil ||
 		v.Scope.Topic != harness.DailyTradingTopic || v.Scope.Window != 20 || v.Scope.SubjectID != result.Scope.SubjectID {
@@ -534,7 +542,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	err := e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
 		count(*) FILTER (WHERE response IS NOT NULL OR error IS NOT NULL OR observed_model IS NOT NULL), (SELECT count(*) FROM research_tasks)
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
-	if err != nil || calls != 60 || billed != 60 || bodies != 0 || tasks != 9 {
+	if err != nil || calls != 61 || billed != 61 || bodies != 0 || tasks != 9 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 	var title string

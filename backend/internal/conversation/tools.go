@@ -1,10 +1,12 @@
 package conversation
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"slices"
 	"strconv"
 	"strings"
@@ -239,7 +241,11 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 		}
 		anchor = references[selected]
 	}
-	matches, err := s.referenceMatches(ctx, turn.Text, anchor.Scope(), request.SubjectMention)
+	spans, err := s.explicitSubjectSpans(ctx, turn.Text, nil)
+	if err != nil {
+		return err
+	}
+	matches, err := s.referenceMatches(ctx, turn.Text, anchor.Scope(), request.SubjectMention, spans)
 	if err != nil {
 		return err
 	}
@@ -251,7 +257,7 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 			if candidate.ID == proposed || !matchesTradingDays(turn.Text, 0, candidate.Scope().Window) {
 				continue
 			}
-			compatible, err := s.referenceMatches(ctx, turn.Text, candidate.Scope(), request.SubjectMention)
+			compatible, err := s.referenceMatches(ctx, turn.Text, candidate.Scope(), request.SubjectMention, spans)
 			if err != nil {
 				return err
 			}
@@ -274,13 +280,9 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 	return s.update(ctx, args, "reference", "已找到该轮研究的原始结果。", in)
 }
 
-func (s Service) referenceMatches(ctx context.Context, question string, scope Scope, mention string) (bool, error) {
+func (s Service) referenceMatches(ctx context.Context, question string, scope Scope, mention string, spans []subjectSpan) (bool, error) {
 	selected := scopeSubjects(scope)
-	conflicts, err := s.scopeConflicts(ctx, question, nil, selected)
-	if err != nil {
-		return false, err
-	}
-	if len(conflicts) != 0 {
+	if slices.ContainsFunc(spans, func(span subjectSpan) bool { return !slices.Contains(selected, span.id) }) {
 		return false, nil
 	}
 	// Ignore a mention invented by the model. If the proposed name occurs in
@@ -289,7 +291,8 @@ func (s Service) referenceMatches(ctx context.Context, question string, scope Sc
 	mention = strings.TrimSpace(mention)
 	includedIndex := scope.Comparison != nil && containsSubject(question, mention) &&
 		slices.Contains(scope.Comparison.BroadIndexes, dataservice.ResolveComparisonBroadIndex(mention))
-	if !includedIndex && mention != "" && strings.Contains(strings.ToLower(question), strings.ToLower(mention)) {
+	if !includedIndex && mention != "" && strings.Contains(strings.ToLower(question), strings.ToLower(mention)) &&
+		!insideSubjectNames(question, mention, spans) {
 		ids, unresolved, err := s.subjects(ctx, question, nil, []string{mention}, false)
 		if err != nil {
 			return false, err
@@ -314,20 +317,69 @@ func (s Service) subjectConflicts(ctx context.Context, text string, kinds []stri
 }
 
 func (s Service) scopeConflicts(ctx context.Context, text string, kinds []string, selected []uuid.UUID) ([]uuid.UUID, error) {
-	references, err := s.catalog().ExplicitScopeReferences(ctx, text, kinds)
+	spans, err := s.explicitSubjectSpans(ctx, text, kinds)
 	if err != nil {
 		return nil, err
 	}
 	var others []uuid.UUID
-	for _, ref := range references {
-		if !slices.Contains(selected, ref.ID) && !slices.Contains(others, ref.ID) && containsSubject(text, ref.Mention) {
-			others = append(others, ref.ID)
+	for _, span := range spans {
+		if !slices.Contains(selected, span.id) && !slices.Contains(others, span.id) {
+			others = append(others, span.id)
 			if len(others) == 9 {
 				break
 			}
 		}
 	}
 	return others, nil
+}
+
+type subjectSpan struct {
+	id         uuid.UUID
+	start, end int
+}
+
+func (s Service) explicitSubjectSpans(ctx context.Context, question string, kinds []string) ([]subjectSpan, error) {
+	references, err := s.catalog().ExplicitScopeReferences(ctx, question, kinds)
+	if err != nil {
+		return nil, err
+	}
+	var spans []subjectSpan
+	for _, ref := range references {
+		width := len(strings.ToLower(ref.Mention))
+		for start := range subjectOccurrences(question, ref.Mention) {
+			spans = append(spans, subjectSpan{id: ref.ID, start: start, end: start + width})
+		}
+	}
+	slices.SortStableFunc(spans, func(a, b subjectSpan) int {
+		return cmp.Or(cmp.Compare(a.start, b.start), cmp.Compare(b.end, a.end))
+	})
+	// A name inside a longer name at the same location is not a separate
+	// subject. Keep separate occurrences and preserve identical-name ambiguity.
+	kept := spans[:0]
+	for _, span := range spans {
+		if len(kept) == 0 || !kept[len(kept)-1].strictlyContains(span) {
+			kept = append(kept, span)
+		}
+	}
+	return kept, nil
+}
+
+func (span subjectSpan) strictlyContains(other subjectSpan) bool {
+	return span.start <= other.start && span.end >= other.end &&
+		(span.start < other.start || span.end > other.end)
+}
+
+func insideSubjectNames(question, mention string, spans []subjectSpan) bool {
+	width := len(strings.ToLower(mention))
+	nested := false
+	for start := range subjectOccurrences(question, mention) {
+		part := subjectSpan{start: start, end: start + width}
+		if !slices.ContainsFunc(spans, func(span subjectSpan) bool { return span.strictlyContains(part) }) {
+			return false
+		}
+		nested = true
+	}
+	return nested
 }
 
 var errStockDirectory = errors.New("stock directory unavailable")
@@ -392,36 +444,47 @@ func containsSubject(question, mention string) bool {
 }
 
 func subjectIndex(question, mention string) int {
-	if mention == "" || utf8.RuneCountInString(mention) > 120 {
-		return -1
-	}
-	// Do not accept an ASCII ticker embedded inside another ticker or word.
-	isASCIIWord := func(r rune) bool {
-		return r <= unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.')
-	}
-	question, mention = strings.ToLower(question), strings.ToLower(mention)
-	if strings.ContainsFunc(mention, func(r rune) bool { return !isASCIIWord(r) }) {
-		return strings.Index(question, mention)
-	}
-	for start := 0; start < len(question); {
-		index := strings.Index(question[start:], mention)
-		if index < 0 {
-			break
-		}
-		i := start + index
-		before, _ := utf8.DecodeLastRuneInString(question[:i])
-		suffix := question[i+len(mention):]
-		after, _ := utf8.DecodeRuneInString(suffix)
-		if after == '.' {
-			following, _ := utf8.DecodeRuneInString(suffix[1:])
-			if !isASCIIWord(following) {
-				after = following
-			}
-		}
-		if !isASCIIWord(before) && !isASCIIWord(after) {
-			return i
-		}
-		start = i + 1
+	for start := range subjectOccurrences(question, mention) {
+		return start
 	}
 	return -1
+}
+
+func subjectOccurrences(question, mention string) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		if mention == "" || utf8.RuneCountInString(mention) > 120 {
+			return
+		}
+		// Do not accept an ASCII ticker embedded inside another ticker or word.
+		isASCIIWord := func(r rune) bool {
+			return r <= unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.')
+		}
+		text, needle := strings.ToLower(question), strings.ToLower(mention)
+		textAlias := strings.ContainsFunc(needle, func(r rune) bool { return !isASCIIWord(r) })
+		for from := 0; from < len(text); {
+			offset := strings.Index(text[from:], needle)
+			if offset < 0 {
+				return
+			}
+			start := from + offset
+			from = start + 1
+			if !textAlias {
+				before, _ := utf8.DecodeLastRuneInString(text[:start])
+				suffix := text[start+len(needle):]
+				after, _ := utf8.DecodeRuneInString(suffix)
+				if after == '.' {
+					following, _ := utf8.DecodeRuneInString(suffix[1:])
+					if !isASCIIWord(following) {
+						after = following
+					}
+				}
+				if isASCIIWord(before) || isASCIIWord(after) {
+					continue
+				}
+			}
+			if !yield(start) {
+				return
+			}
+		}
+	}
 }
