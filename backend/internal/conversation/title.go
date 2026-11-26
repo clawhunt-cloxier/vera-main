@@ -142,7 +142,7 @@ func (s Service) generateTitle(ctx context.Context, args titleArgs, first string
 }
 
 func validTitle(title string) bool {
-	if n := utf8.RuneCountInString(title); n < 2 || n > 32 || !validReplyText(title) || !strings.ContainsFunc(title, unicode.IsLetter) {
+	if n := utf8.RuneCountInString(title); n < 2 || n > 32 || !validReplyFormat(title) || !strings.ContainsFunc(title, unicode.IsLetter) {
 		return false
 	}
 	for _, r := range title {

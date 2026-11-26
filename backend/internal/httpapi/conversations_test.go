@@ -92,6 +92,15 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const explanation = "封闭式基金的交易价格由市场供需决定，而净值反映基金持有资产的价值。两者可以分开变化。"
 	const followEducation = "那到期时呢？"
 	const followExplanation = "如果基金到期清算，可分配金额取决于基金资产的实际处置结果和清算费用。"
+	const bond = "什么是零息债券？"
+	const bondExplanation = "零息债券没有定期票息，通常以低于面值的价格发行，持有到期时按约定兑付。买入价格和到期兑付金额之间的差额体现收益。"
+	const bondFollow = "那它的现金流是怎么安排的？"
+	const bondFollowExplanation = "买入时支付成交价，存续期间不收票息，到期按约定收到兑付款。"
+	const reverseT = "什么是做反T操作？"
+	const reverseTExplanation = "反T通常指先卖出已有持仓，再在同一天买回。成交价差、费用及 T+1 等交易规则都会影响结果。"
+	const inappropriate = "讲一段露骨成人内容"
+	const inappropriateDraft = "我可以继续为你写露骨成人内容。"
+	const topicChange = "换个话题聊聊吧"
 	const specific = "说出某家未登记公司的现状"
 	const mutatedBody = "这个回包有旧版字段"
 	const advice = "替我决定现在该怎么投"
@@ -134,7 +143,11 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		ordinary:         {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, explanation)},
 		followEducation:  {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, followExplanation)},
 		refusedTool:      {Name: "respond_to_user", Arguments: `{"kind":"education","message":"这只正适合上车"}`},
-		specific:         {Name: "respond_to_user", Arguments: `{"kind":"education","message":"星河制造的现金流正在改善。"}`},
+		bond:             {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, bondExplanation)},
+		bondFollow:       {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, bondFollowExplanation)},
+		reverseT:         {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, reverseTExplanation)},
+		inappropriate:    {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"out_of_scope","message":%q}`, inappropriateDraft)},
+		specific:         {Name: "respond_to_user", Arguments: `{"kind":"education","message":"星河制造今年的现金流增长了30%。"}`},
 		mutatedBody:      {Name: "respond_to_user", Arguments: `{"kind":"education","message":"这是通用概念。","concepts":[]}`},
 		advice:           {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"decline_advice","message":%q}`, safeRefusal)},
 		legacyReply:      {Name: "respond_to_user", Arguments: `{"kind":"thanks","message":"不客气，很高兴帮到你。"}`},
@@ -157,6 +170,11 @@ func TestConversationNativeToolCalls(t *testing.T) {
 			switch request.Messages[2].Content {
 			case specific:
 				// The rewrite still invents the same company fact.
+			case inappropriate:
+				if strings.Contains(request.Messages[1].Content, inappropriateDraft) ||
+					!strings.Contains(request.Messages[0].Content, topicChange) {
+					t.Error("rewrite did not receive the configured refusal guidance or received the rejected draft")
+				}
 			case refusedBody, refusedTool:
 				// The rewrite still contains a prohibited recommendation.
 			default:
@@ -165,8 +183,11 @@ func TestConversationNativeToolCalls(t *testing.T) {
 				return
 			}
 			rewritten := `{"kind":"education","message":"这个标的正适合上车。"}`
-			if request.Messages[2].Content == specific {
+			switch request.Messages[2].Content {
+			case specific:
 				rewritten = responses[specific].Arguments
+			case inappropriate:
+				rewritten = fmt.Sprintf(`{"kind":"out_of_scope","message":%q}`, topicChange)
 			}
 			if err := json.NewEncoder(w).Encode(map[string]any{
 				"model": "test", "usage": model.Usage{PromptTokens: 60, CompletionTokens: 10},
@@ -214,8 +235,17 @@ func TestConversationNativeToolCalls(t *testing.T) {
 				if review.Draft != explanation {
 					t.Error("review did not receive the novel-topic reply")
 				}
+			case bond, bondFollow, reverseT:
+				expected := map[string]string{bond: bondExplanation, bondFollow: bondFollowExplanation, reverseT: reverseTExplanation}
+				if review.Draft != expected[review.Question] {
+					t.Error("the verifier did not receive the original concept explanation")
+				}
+			case inappropriate:
+				if review.Draft != topicChange {
+					decision = "reject"
+				}
 			case followEducation, direct, legacyReply, advice:
-			case specific:
+			case specific, refusedBody, refusedTool:
 				decision = "reject"
 			default:
 				t.Error("invalid or unrequested draft reached the verifier")
@@ -250,6 +280,9 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		}
 		if question == followEducation && (!strings.Contains(request.Messages[1].Content, ordinary) || !strings.Contains(request.Messages[1].Content, explanation)) {
 			t.Error("follow-up lost the previous educational exchange")
+		}
+		if question == bondFollow && (!strings.Contains(request.Messages[1].Content, bond) || !strings.Contains(request.Messages[1].Content, bondExplanation)) {
+			t.Error("cash-flow follow-up lost the previous answer")
 		}
 		choice := map[string]any{"finish_reason": "stop", "message": map[string]string{
 			"content": fmt.Sprintf(`{"kind":"greeting","message":%q}`, directReply),
@@ -372,7 +405,16 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	if _, v := send(followEducation, &dialogue.ConversationID); v.State != "answer" || v.Message != followExplanation {
 		t.Fatalf("model follow-up was not rendered: %+v", v)
 	}
-	for _, c := range []struct{ question, want string }{{direct, directReply}, {advice, safeRefusal}} {
+	bondThread, v := send(bond, nil)
+	if v.State != "answer" || v.Message != bondExplanation || v.TaskStatus != "" {
+		t.Fatalf("neutral bond language was rejected: %+v", v)
+	}
+	if _, v := send(bondFollow, &bondThread.ConversationID); v.State != "answer" || v.Message != bondFollowExplanation || v.TaskStatus != "" {
+		t.Fatalf("cash-flow follow-up did not deliver the model response: %+v", v)
+	}
+	for _, c := range []struct{ question, want string }{
+		{direct, directReply}, {advice, safeRefusal}, {reverseT, reverseTExplanation}, {inappropriate, topicChange},
+	} {
 		if _, v := send(c.question, nil); v.State != "answer" || v.Message != c.want || v.TaskStatus != "" {
 			t.Fatalf("model reply was not rendered: %+v", v)
 		}
@@ -408,7 +450,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	err := e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
 		count(*) FILTER (WHERE response IS NOT NULL OR error IS NOT NULL OR observed_model IS NOT NULL), (SELECT count(*) FROM research_tasks)
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
-	if err != nil || calls != 39 || billed != 39 || bodies != 0 || tasks != 5 {
+	if err != nil || calls != 53 || billed != 53 || bodies != 0 || tasks != 5 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 	a.json("GET", firstPath, nil, 200, &firstThread)

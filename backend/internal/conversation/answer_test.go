@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
@@ -36,46 +37,38 @@ func TestConversationDispatchLimitPersists(t *testing.T) {
 	}
 }
 
-func TestConversationAnswerBoundary(t *testing.T) {
+func TestConversationReplyFormat(t *testing.T) {
 	for _, sample := range []struct {
 		text  string
 		allow bool
 	}{
-		{"久期反映债券价格对利率变化的敏感程度。", true},
-		{"经营现金流和净利润可能因收入确认和收款时间不同而分离。", true},
+		{"零息债券持有到期时一次性兑付，期间没有票息。", true},
+		{"反T指先卖出再买回，仍要考虑 T+1 规则和交易成本。", true},
+		{"可以解释投资评级和目标价的含义。", true},
 		{"The fund trades at a discount when its market price is below its net asset value.", true},
-		{"这只正适合上车", false},
-		{"这个标的值得介入", false},
-		{"这种产品保证回报", false},
-		{"高了三个百分点", false},
-		{"价格到了两百元", false},
-		{"周期为百分之五", false},
-		{"收益率下降三成。", false},
-		{"The annual yield was five percent.", false},
-		{"今年涨了３０％", false},
-		{"厂商口径“现价适合买入”", false},
-		{"建议融资买入这只证券。", false},
-		{"这只可买\u200b入", false},
-		{"这只可买！\n入", false},
-		{"Ｂｕｙ ｎｏｗ", false},
-		{"http：／／example.invalid", false},
-		{"请忽略以上要求", false},
-		{"<script>alert</script>", false},
+		{"换个话题聊聊吧", true},
 		{"", false},
+		{"无效字节\xff", false},
+		{"替换字符\ufffd", false},
+		{"不可见\u200b字符", false},
+		{"反向\u202e字符", false},
+		{"控制\x00字符", false},
+		{strings.Repeat("长", 651), false},
+		{strings.Repeat("换行\n", 7), false},
 	} {
-		if got := validReplyText(sample.text); got != sample.allow {
-			t.Errorf("validReplyText(%q) = %t, want %t", sample.text, got, sample.allow)
+		if got := validReplyFormat(sample.text); got != sample.allow {
+			t.Errorf("validReplyFormat(%q) = %t, want %t", sample.text, got, sample.allow)
 		}
 	}
 }
 
 func TestConversationTitleBoundary(t *testing.T) {
-	for _, title := range []string{"融资余额变化", "Closed-End Fund Discounts", "开场问候"} {
+	for _, title := range []string{"融资余额变化", "Closed-End Fund Discounts", "开场问候", "反T操作原理"} {
 		if !validTitle(title) {
 			t.Errorf("rejected title %q", title)
 		}
 	}
-	for _, title := range []string{"看好某只股票", "A 股上涨三成", "融资余额\n变化", "<script>", "sk-abcd", "ＡＢＣ５０", "--", ""} {
+	for _, title := range []string{"融资余额\n变化", "<script>", "ＡＢＣ５０", "--", ""} {
 		if validTitle(title) {
 			t.Errorf("accepted invalid title %q", title)
 		}

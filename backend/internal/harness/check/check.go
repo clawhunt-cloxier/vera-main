@@ -188,16 +188,6 @@ func Forbidden(text string) *Failure {
 	for _, e := range exempt {
 		t = strings.ReplaceAll(t, e, "")
 	}
-	return forbiddenExpression(t)
-}
-
-// ForbiddenConversation applies R-06 to the full reply. A direct reply has
-// no evidence or vendor name that can justify the report exceptions.
-func ForbiddenConversation(text string) *Failure {
-	return forbiddenExpression(text)
-}
-
-func forbiddenExpression(t string) *Failure {
 	for _, f := range forbidden {
 		if m := f.re.FindString(t); m != "" {
 			return fail("R-06", "命中禁用表达（%s）：%s", f.name, m)

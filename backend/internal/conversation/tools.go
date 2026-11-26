@@ -41,7 +41,7 @@ var researchTools = []researchTool{
 
 func (s Service) agentTools() []model.ToolSpec {
 	tools := []model.ToolSpec{
-		{Name: replyTool, Schema: "conversation-answer-output", Description: "把你为本轮用户写的纯文本回复放在 message。问候 greeting，致谢 thanks，身份或功能 capabilities，通用金融知识 education，婉拒代做投资决策 decline_advice，非金融任务 out_of_scope，需用户补充 clarify，缺能力或数据 unavailable。不创建研究。"},
+		{Name: replyTool, Schema: "conversation-answer-output", Description: "把你为本轮用户写的纯文本回复放在 message。问候 greeting，致谢 thanks，身份或功能 capabilities，通用金融知识 education，婉拒代做投资决策 decline_advice，非金融或不宜继续的话题 out_of_scope，需用户补充 clarify，缺能力或数据 unavailable。不创建研究。"},
 		{Name: refineTool, Schema: "conversation-window-tool", Description: "调整所选结果或上一轮研究的窗口，或补充、更换同主题的标的。沿用标的时用 subject_source=context 和 subject_mentions=[]。"},
 		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "解释所选或最近报告里的结果、出处或原公式。问某个已交付的数怎么计算时用 kind=calculation。仅查看已交付内容。"},
 	}
