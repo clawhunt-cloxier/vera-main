@@ -24,6 +24,7 @@ const (
 )
 
 var comparisonTicker = regexp.MustCompile(`(?i)[0-9]{6}\.(SH|SZ|BJ)`)
+var comparisonWindowReference = regexp.MustCompile(`这[[:space:]　]*([0-9０１２３４５６７８９零〇一二两三四五六七八九十百千]+)[[:space:]　]*天`)
 
 type comparisonRequest struct {
 	Kind              string   `json:"kind"`
@@ -170,7 +171,13 @@ func (s Service) startComparison(ctx context.Context, args resolveArgs, turn Tur
 			window = spec.Windows[i-1]
 		}
 	}
-	if !slices.Contains(spec.Windows, window) || !matchesTradingDays(turn.Text, request.TradingDays, window) {
+	windowText := turn.Text
+	if request.Kind == comparePrevious && window == previous.Window && request.WindowChange == "keep" {
+		// The model kept the previous window. Validate a stated reference back
+		// to that window against the already selected trading-day count.
+		windowText = comparisonWindowReference.ReplaceAllString(windowText, "${1}个交易日")
+	}
+	if !slices.Contains(spec.Windows, window) || !matchesTradingDays(windowText, request.TradingDays, window) {
 		in.Scope.Window = spec.DefaultWindow
 		if slices.Contains(spec.Windows, previous.Window) {
 			in.Scope.Window = previous.Window

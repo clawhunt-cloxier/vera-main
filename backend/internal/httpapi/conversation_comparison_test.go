@@ -22,6 +22,7 @@ func TestConversationStockComparison(t *testing.T) {
 		fixDays = "20 个交易日"
 		named   = "比较演示银行和演示制造近 20 个交易日的股价"
 		change  = "同一组，改成 60 个交易日"
+		keep    = "就按这六十天，重新比较这两只"
 		formula = "演示制造的这个涨跌幅差怎么算？"
 		ignored = "比较演示银行、演示制造和演示设备甲"
 		ticker  = "比较演示银行、演示制造和 699999.SH"
@@ -35,6 +36,7 @@ func TestConversationStockComparison(t *testing.T) {
 			fixDays: {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":20,"advice":"none"` + comparisonKeep + `}`},
 			named:   {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示制造","演示银行"],"subject_source":"message","trading_days":20,"advice":"none"` + comparisonKeep + `}`},
 			change:  {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"` + comparisonKeep + `}`},
+			keep:    {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
 			formula: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","advice":"none"}`},
 			ignored: {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
 			ticker:  {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
@@ -119,7 +121,9 @@ func TestConversationStockComparison(t *testing.T) {
 	if updated.Scope.SubjectID != original.Scope.SubjectID || !slices.Equal(updated.Scope.Comparison.OtherIDs, original.Scope.Comparison.OtherIDs) {
 		t.Fatalf("comparison set changed: %+v vs %+v", updated.Scope, original.Scope)
 	}
-	if _, reference := send(formula, explicit.ConversationID); reference.State != "reference" || reference.Reference == nil || *reference.Reference != updated.ID {
+	kept, keptTurn := send(keep, explicit.ConversationID)
+	verifyResult(kept, keptTurn, 60, 2)
+	if _, reference := send(formula, explicit.ConversationID); reference.State != "reference" || reference.Reference == nil || *reference.Reference != keptTurn.ID {
 		t.Fatalf("the secondary subject did not reference the original calculation: %+v", reference)
 	}
 	for _, input := range []string{ignored, ticker, bad} {
