@@ -141,9 +141,9 @@ func (s Service) plan(ctx context.Context, args resolveArgs, in intent, turn Tur
 		}
 		prep, err = s.Engine.PrepareIndicator(ctx, args.Workspace, args.Turn, args.Revision, subject, scope.Topic, scope.Window)
 	} else if subject.Kind == "stock" && s.Engine.PrepareTuShareSubject != nil {
-		registered, err := s.Engine.Store.ResearchSubjectPrepared(ctx, subject.Code)
-		if err != nil {
-			return err
+		registered, readErr := s.Engine.Store.ResearchSubjectPrepared(ctx, subject.Code)
+		if readErr != nil {
+			return readErr
 		}
 		if !registered {
 			if time.Since(turn.CreatedAt) > 30*time.Minute {

@@ -86,6 +86,8 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const injectedSubject = "能给我看一下上一轮变化值用的原公式么？"
 	const earlierCalculation = "回到最开始的融资余额，演示制造的变化怎么算？"
 	const unavailableReference = "查看第九十九轮的计算"
+	const alternateTrading = "演示银行近 5 个交易日的日成交"
+	const namedReference = "回到演示制造那轮的结果"
 	const differentSubject = "演示设备甲的这个数怎么算"
 	const unknownSubject = "无登记的模拟丙公司这个数怎么算"
 	const unknownTicker = "999999.SH 的这个数怎么算"
@@ -133,6 +135,8 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		injectedSubject:      {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"融资余额","result_turn":99,"advice":"none"}`},
 		earlierCalculation:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","result_turn":1,"advice":"none"}`},
 		unavailableReference: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":99,"advice":"none"}`},
+		alternateTrading:     {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示银行"],"subject_source":"message","trading_days":5,"advice":"none"}`},
+		namedReference:       {Name: "reference_research", Arguments: `{"kind":"result","subject_mention":"演示制造","result_turn":0,"advice":"none"}`},
 		differentSubject:     {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":0,"advice":"none"}`},
 		unknownSubject:       {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"无登记的模拟丙公司","result_turn":0,"advice":"none"}`},
 		unknownTicker:        {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"999999","result_turn":0,"advice":"none"}`},
@@ -449,6 +453,13 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	if _, v := send(unavailableReference, &first.ConversationID); v.State != "clarify" || v.Reference != nil || v.TaskStatus != "" {
 		t.Fatalf("a turn outside the delivered scopes reached a report: %+v", v)
 	}
+	otherThread, previous := send(firstTrading, nil)
+	if _, second := send(alternateTrading, &otherThread.ConversationID); !previous.Result || !second.Result || previous.Scope == nil || second.Scope == nil || second.Scope.SubjectID == previous.Scope.SubjectID {
+		t.Fatalf("expected two separate stocks for historical reference: %+v and %+v", previous, second)
+	}
+	if _, v := send(namedReference, &otherThread.ConversationID); v.State != "reference" || v.Reference == nil || *v.Reference != otherThread.TurnID || v.TaskStatus != "" {
+		t.Fatalf("the explicit subject should bind the unique older result: %+v", v)
+	}
 	if _, v := send(calendar, &first.ConversationID); v.State != "clarify" || v.NeedsSubject || v.Scope == nil ||
 		v.Scope.Topic != harness.DailyTradingTopic || v.Scope.Window != 20 || v.Scope.SubjectID != result.Scope.SubjectID {
 		t.Fatalf("unsupported calendar range failed to preserve the verified scope: %+v", v)
@@ -523,7 +534,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	err := e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
 		count(*) FILTER (WHERE response IS NOT NULL OR error IS NOT NULL OR observed_model IS NOT NULL), (SELECT count(*) FROM research_tasks)
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
-	if err != nil || calls != 57 || billed != 57 || bodies != 0 || tasks != 7 {
+	if err != nil || calls != 60 || billed != 60 || bodies != 0 || tasks != 9 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 	var title string

@@ -54,7 +54,7 @@ var publicKnowledgeFocus = map[string]string{
 	"rules":          "制度背景与一般限制",
 }
 
-var knowledgeRoutingPrompt = `对通用金融概念、机制或相关追问，优先用 lookup_finance_knowledge。根据当前问题和最近问答选择最相关的 topic 和 focus 标识。可以选一个更广的同类主题查证细分概念。例：解释零息债券后问“它的现金流呢”，使用 topic=zero_coupon_bond 和 focus=cash_flows。message 是找不到可用网页来源时的简短通用解释。没有相关主题时用 respond_to_user。问候、投资决策请求和具体证券事实使用各自的工具。
+var knowledgeRoutingPrompt = `有适用的公开主题时，通用金融概念、机制和相关追问使用 lookup_finance_knowledge。根据当前问题和最近问答选择最相关的 topic 和 focus，可以选范围更广的同类主题。用户问“什么是零息债券”或要求这类解释附来源时，选 topic=zero_coupon_bond、focus=definition。随后问“它的现金流呢”，选同一 topic、focus=cash_flows。message 是查证工具找不到来源时使用的简短解释。没有适用的公开主题时用 respond_to_user。问候、投资决策请求和具体证券事实使用各自的工具。
 
 可选择的 topic：` + knowledgeOptions(publicKnowledgeTopics) + `
 可选择的 focus：` + knowledgeOptions(publicKnowledgeFocus)

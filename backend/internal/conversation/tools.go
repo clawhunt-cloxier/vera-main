@@ -48,9 +48,10 @@ func (s Service) agentTools() []model.ToolSpec {
 		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "引用本会话已交付的结果、证据或原公式。点选的结果优先。用户明确回到一轮时，从 delivered_scopes 选择对应的 result_turn。新指标使用各自的研究工具。"},
 	}
 	if s.Engine.Gateway.Profiles["router"].SupportsEducationSearch() {
+		tools[0].Description += " 通用金融知识能归入登记公开主题时，使用 lookup_finance_knowledge。"
 		tools = append(tools, model.ToolSpec{
 			Name: knowledgeTool, Schema: "conversation-knowledge-tool",
-			Description: "选择系统提示中的公开主题和侧重点，查证通用金融知识与概念追问。具体证券、市场报价和研报使用各自的研究工具。",
+			Description: "为已登记主题的通用金融概念、机制、交易术语及其追问查证公开资料。定义类问题也使用此工具。具体证券数据和研报使用各自的研究工具。",
 		})
 	}
 	if spec, ok := s.Engine.ConversationResearchSpec("stock_analysis", harness.ComparisonTopic); ok {
@@ -238,35 +239,64 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 		}
 		anchor = references[selected]
 	}
-	if !matchesTradingDays(turn.Text, 0, anchor.Scope().Window) {
-		return s.update(ctx, args, "clarify", "消息中的时间范围与原报告不同。请说明要按新范围研究，还是查看原报告。", in)
-	}
-	scope := anchor.Scope()
-	selected := scopeSubjects(scope)
-	conflicts, err := s.scopeConflicts(ctx, turn.Text, nil, selected)
+	matches, err := s.referenceMatches(ctx, turn.Text, anchor.Scope(), request.SubjectMention)
 	if err != nil {
 		return err
 	}
-	if len(conflicts) != 0 {
+	if !matches && turn.ReplyTo == nil {
+		// The tool chose to reference an existing result. If the proposed turn
+		// conflicts with the stated subject, use only a unique compatible result.
+		proposed := anchor.ID
+		for _, candidate := range references {
+			if candidate.ID == proposed || !matchesTradingDays(turn.Text, 0, candidate.Scope().Window) {
+				continue
+			}
+			compatible, err := s.referenceMatches(ctx, turn.Text, candidate.Scope(), request.SubjectMention)
+			if err != nil {
+				return err
+			}
+			if compatible {
+				if matches {
+					return s.update(ctx, args, "clarify", missing, in)
+				}
+				matches = true
+				anchor = candidate
+			}
+		}
+	}
+	if !matches {
 		return s.update(ctx, args, "clarify", missing, in)
+	}
+	if !matchesTradingDays(turn.Text, 0, anchor.Scope().Window) {
+		return s.update(ctx, args, "clarify", "消息中的时间范围与原报告不同。请说明要按新范围研究，还是查看原报告。", in)
+	}
+	in.Reference, in.ReferenceKind = &anchor.ID, request.Kind
+	return s.update(ctx, args, "reference", "已找到该轮研究的原始结果。", in)
+}
+
+func (s Service) referenceMatches(ctx context.Context, question string, scope Scope, mention string) (bool, error) {
+	selected := scopeSubjects(scope)
+	conflicts, err := s.scopeConflicts(ctx, question, nil, selected)
+	if err != nil {
+		return false, err
+	}
+	if len(conflicts) != 0 {
+		return false, nil
 	}
 	// Ignore a mention invented by the model. If the proposed name occurs in
 	// the message, require an exact reference so a truncated ticker cannot
 	// fall back to the old report.
-	mention := strings.TrimSpace(request.SubjectMention)
-	includedIndex := scope.Comparison != nil && containsSubject(turn.Text, mention) &&
+	mention = strings.TrimSpace(mention)
+	includedIndex := scope.Comparison != nil && containsSubject(question, mention) &&
 		slices.Contains(scope.Comparison.BroadIndexes, dataservice.ResolveComparisonBroadIndex(mention))
-	if !includedIndex && mention != "" && strings.Contains(strings.ToLower(turn.Text), strings.ToLower(mention)) {
-		ids, unresolved, err := s.subjects(ctx, turn.Text, nil, []string{mention}, false)
+	if !includedIndex && mention != "" && strings.Contains(strings.ToLower(question), strings.ToLower(mention)) {
+		ids, unresolved, err := s.subjects(ctx, question, nil, []string{mention}, false)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if unresolved || len(ids) != 1 || !slices.Contains(selected, ids[0]) {
-			return s.update(ctx, args, "clarify", missing, in)
-		}
+		return !unresolved && len(ids) == 1 && slices.Contains(selected, ids[0]), nil
 	}
-	in.Reference, in.ReferenceKind = &anchor.ID, request.Kind
-	return s.update(ctx, args, "reference", "已找到该轮研究的原始结果。", in)
+	return true, nil
 }
 
 func scopeSubjects(scope Scope) []uuid.UUID {
