@@ -196,14 +196,8 @@ func (a *App) PrepareTuShareSubject(ctx context.Context, code string) error {
 	return err
 }
 
-func (a *App) prepareTuShareComparison(ctx context.Context, anchor string, others []string) (dataservice.ComparisonSample, error) {
-	var sample dataservice.ComparisonSample
-	_, err := a.Store.SyncResearchObserved(ctx, a.TuShare.ID(), func(ctx context.Context) (dataservice.Provider, error) {
-		observed, selected, err := a.TuShare.CollectComparison(ctx, anchor, others, a.TuShare.Now())
-		sample = selected
-		return observed, err
-	})
-	return sample, err
+func (a *App) prepareTuShareComparison(ctx context.Context, request dataservice.ComparisonPreparation) (dataservice.ComparisonSample, error) {
+	return a.TuShare.PrepareComparison(ctx, a.Store, request)
 }
 
 // Sync loads provider data into the store (idempotent).

@@ -66,6 +66,10 @@ func (c *marketCollector) checkSuspensions(w map[string]string, bars map[string]
 // stockPrices publishes the canonical daily bars, adjustment factors and
 // valuations shared by single-stock research and comparison.
 func (c *marketCollector) stockPrices() (map[string]Row, error) {
+	return c.closingPrices(true)
+}
+
+func (c *marketCollector) closingPrices(withValuations bool) (map[string]Row, error) {
 	c.latestVal = Row{}
 	w := c.window(c.code, c.from)
 	raw, err := c.rows("daily", w, "ts_code trade_date open high low close pre_close vol amount", 5000, false)
@@ -90,23 +94,11 @@ func (c *marketCollector) stockPrices() (map[string]Row, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err = c.rows("daily_basic", w, marketValFields, 5000, false)
-	if err != nil {
-		return nil, err
-	}
-	vals, err := marketUnique(raw, "trade_date")
-	if err != nil {
-		return nil, err
-	}
-	for _, day := range slices.Sorted(maps.Keys(vals)) {
-		r := vals[day]
-		rec, ok, err := marketValuation(r)
+	var vals map[string]Row
+	if withValuations {
+		vals, err = c.stockValuations(w)
 		if err != nil {
 			return nil, err
-		}
-		if ok {
-			c.Records = append(c.Records, rec)
-			c.latestVal = r
 		}
 	}
 	joins := marketJoins{}
@@ -162,6 +154,29 @@ func (c *marketCollector) stockPrices() (map[string]Row, error) {
 		return nil, err
 	}
 	return bars, nil
+}
+
+func (c *marketCollector) stockValuations(window map[string]string) (map[string]Row, error) {
+	raw, err := c.rows("daily_basic", window, marketValFields, 5000, false)
+	if err != nil {
+		return nil, err
+	}
+	values, err := marketUnique(raw, "trade_date")
+	if err != nil {
+		return nil, err
+	}
+	for _, day := range slices.Sorted(maps.Keys(values)) {
+		row := values[day]
+		record, ok, err := marketValuation(row)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			c.Records = append(c.Records, record)
+			c.latestVal = row
+		}
+	}
+	return values, nil
 }
 
 func (c *marketCollector) index(api, code string, amountShift int32) error {

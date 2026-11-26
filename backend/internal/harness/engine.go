@@ -48,7 +48,7 @@ type Engine struct {
 	WithCloseResearchUse     func(context.Context, func() error) error
 	CloseResearchCutoff      func(context.Context) (time.Time, error)
 	PrepareTuShareSubject    func(context.Context, string) error
-	PrepareTuShareComparison func(context.Context, string, []string) (dataservice.ComparisonSample, error)
+	PrepareTuShareComparison func(context.Context, dataservice.ComparisonPreparation) (dataservice.ComparisonSample, error)
 	ResearchSupplements      []dataservice.ResearchSupplementSource
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
@@ -54,7 +55,7 @@ func (s Service) agentTools() []model.ToolSpec {
 	}
 	if spec, ok := s.Engine.ConversationResearchSpec("stock_analysis", harness.ComparisonTopic); ok {
 		tools = append(tools, model.ToolSpec{Name: comparisonTool, Schema: "conversation-comparison-tool",
-			Description: fmt.Sprintf("对比多只 A 股的历史收盘价、复权走势和同期涨跌幅。支持用户点名、比较当前标的与其申万二级同行样本、继续上一组。即使用户只追问‘相对同行呢’，也使用本工具。支持 %v 个交易日，默认 %d。", spec.Windows, spec.DefaultWindow)})
+			Description: fmt.Sprintf("对比多只 A 股的历史收盘价、复权走势和同期涨跌幅。支持用户点名、比较当前标的与其申万二级同行样本、继续上一组。支持一只股票与指数比较，或在多股比较里加入申万二级行业指数、沪深300、中证500、中证1000。简短追问“大盘呢”沿用已有范围并默认加入沪深300。支持 %v 个交易日，默认 %d。", spec.Windows, spec.DefaultWindow)})
 	}
 	for _, tool := range researchTools {
 		spec, ok := s.Engine.ConversationResearchSpec(tool.Skill, tool.Topic)
@@ -240,7 +241,9 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 	// the message, require an exact reference so a truncated ticker cannot
 	// fall back to the old report.
 	mention := strings.TrimSpace(request.SubjectMention)
-	if mention != "" && strings.Contains(strings.ToLower(turn.Text), strings.ToLower(mention)) {
+	includedIndex := scope.Comparison != nil && containsSubject(turn.Text, mention) &&
+		slices.Contains(scope.Comparison.BroadIndexes, dataservice.ResolveComparisonBroadIndex(mention))
+	if !includedIndex && mention != "" && strings.Contains(strings.ToLower(turn.Text), strings.ToLower(mention)) {
 		ids, unresolved, err := s.subjects(ctx, turn.Text, nil, []string{mention}, false)
 		if err != nil {
 			return err

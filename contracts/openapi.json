@@ -2775,7 +2775,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["stocks", "industry_peers"]
+            "enum": ["stocks", "industry_peers", "stock_indexes"]
           },
           "other_ids": {
             "type": "array",
@@ -2786,6 +2786,17 @@
             "type": "string",
             "format": "date",
             "description": "Date of the industry membership and market-value sample."
+          },
+          "industry_index": {
+            "type": "boolean",
+            "description": "The anchor stock's SW level-2 index was requested."
+          },
+          "broad_indexes": {
+            "type": "array",
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {"type": "string", "enum": ["000300.SH", "000905.SH", "000852.SH"]},
+            "description": "Requested registered broad market index symbols, including any with insufficient data."
           }
         },
         "required": ["kind"]

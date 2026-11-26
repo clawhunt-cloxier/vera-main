@@ -62,6 +62,19 @@ VERA_CHAT_PASSWORD_FILE=/path/to/private-password npm run test:conversation-ui
 
 在启用 TuShare 收盘研究的预览验证横向对比。先提交「看看宁德时代近 20 个交易日的日成交」，接着问「相对新能源行业内其他公司呢？」。核对申万二级同行、20 个共同交易日和多线图。追问「这几只保持不变，改成 60 个交易日」后核对同组选股、相对基准差、证据、刷新与手机视口。另开会话验证点名比较。自动化测试核对不足覆盖、复权、同区间、各行收盘价和基准差，以及不同工作区之间的证据与公式隔离。
 
+真实模型和行情预览的网页回归在 `web/` 下运行。使用已创建的本机测试工作区，并开启公开金融知识搜索。
+
+```bash
+VERA_CHAT_URL=http://127.0.0.1:18096 VERA_CHAT_USER=administrator \
+VERA_CHAT_PASSWORD_FILE=/path/to/private-password npm run test:conversation-live
+```
+
+脚本从工作台输入框发送多轮问题，并从对话历史重开会话。场景覆盖金融概念与网页来源、个股指标切换和指定上一轮追问、同行对比、点名对比与窗口澄清、行业和宽基指数及其口语追问，以及金融输出边界。每组会话保留在测试工作区，命令输出其页面路径。可以用逗号分隔的 `VERA_CHAT_CASES` 选择 `knowledge`、`indicators`、`peers`、`stocks`、`benchmarks`、`market`、`banks`、`liquor`、`appliances`、`boundaries`。
+
+`benchmarks` 从「同行呢」接续至「行业指数也画上，大盘也看看」和「拉长一点」，核对曲线、共同交易日覆盖、百分点差、证据、指数替换与历史重开。`market` 验证一只股票与默认宽基比较。`banks`、`liquor` 和 `appliances` 验证不同行业的股票和指数。
+
+在 `backend/` 运行 `go test ./internal/dataservice/tushare -run TestComparisonPreparationUsesCanonicalCoverage`。此用例用 PostgreSQL 和厂商替身核对请求明细。全量命中读取数据库，追加指数只请求该指数，扩大窗口只补缺失日期。验收同时覆盖数据源撤权和记录质量隔离。
+
 使用启用搜索的 DeepSeek router 验收网页来源时，额外设置 `VERA_CHAT_EXPECT_WEB_SOURCES=1`。向对话提出金融概念问题及其追问，打开回复下的参考来源，并刷新页面确认来源随历史保留。`TestConversationPublicKnowledgeMessages` 检查公开搜索请求只来自登记标识。`TestConversationLegacyTitleClaimSurvivesInterruption` 核对中断后保存的标题与会话版本。运行 `cd backend && go test ./internal/harness/model -run '^TestOpenAIEducationSearch$'` 可核对返回来源与重定向处理。
 
 ## 2. 按任务补齐的测试

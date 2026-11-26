@@ -4,13 +4,13 @@
   "properties": {
     "kind": {
       "type": "string",
-      "enum": ["stocks", "industry_peers", "previous"],
-      "description": "Use stocks for named stock comparisons, industry_peers for a stock versus its own registered industry peers, or previous to keep the previous comparison set."
+      "enum": ["stocks", "industry_peers", "stock_indexes", "previous"],
+      "description": "Use stocks for named stock comparisons, industry_peers for a stock versus its own registered industry peers, stock_indexes for one stock against one or more indexes, or previous to keep the previous comparison set."
     },
     "stock_mentions": {
       "type": "array",
       "items": {"type": "string"},
-      "description": "Exact A-share company names or codes in the current message. Copy every explicitly asked-for stock. With industry_peers, supply only the anchor if named. With previous, pass []."
+      "description": "Exact A-share company names or codes in the current message. Copy every explicitly asked-for stock. With industry_peers or stock_indexes, supply only the anchor if named. With previous, pass []."
     },
     "subject_source": {
       "type": "string",
@@ -20,6 +20,37 @@
     "trading_days": {
       "type": "integer",
       "description": "Explicit trading-day count (5, 10, 20, 60). Pass 0 when the user omits it, or -1 for explicit unsupported time ranges."
+    },
+    "industry_index": {
+      "type": "string",
+      "enum": ["keep", "include", "exclude"],
+      "description": "Include or exclude the anchor stock's SW level-2 index. Omit or use keep to leave the selection unchanged."
+    },
+    "broad_index_add": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {"type": "string"},
+      "description": "Verbatim names or full symbols in the latest message for benchmarks to add. Supported: 沪深300 (000300.SH), 中证500 (000905.SH), 中证1000 (000852.SH)."
+    },
+    "broad_index_remove": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {"type": "string"},
+      "description": "Verbatim names or full symbols in the latest message for the registered benchmarks to remove."
+    },
+    "clear_broad_indexes": {
+      "type": "boolean",
+      "description": "Clear the previous broad-index selection before adding any explicit new benchmark. Omit or pass false to keep the other benchmarks."
+    },
+    "default_broad_index": {
+      "type": "string",
+      "enum": ["keep", "include", "exclude"],
+      "description": "Include CSI 300 if the user generically asks for a broad market benchmark or 大盘, exclude if the user asks to remove the default benchmark. For a specific named index use broad_index_add or broad_index_remove instead."
+    },
+    "window_change": {
+      "type": "string",
+      "enum": ["keep", "longer", "shorter"],
+      "description": "When trading_days is 0 and a user loosely requests a longer or shorter lookback, move to the adjacent supported window. Otherwise omit or keep."
     },
     "advice": {
       "type": "string",

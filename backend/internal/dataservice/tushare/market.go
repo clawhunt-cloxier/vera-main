@@ -173,6 +173,16 @@ func marketNumbers(r Row, dest map[string]any, fields ...marketField) (bool, err
 }
 
 func (c *marketCollector) calendar() error {
+	if err := c.collectCalendar(); err != nil {
+		return err
+	}
+	if c.day == "" {
+		return fmt.Errorf("TuShare: no completed trading day in the requested calendar")
+	}
+	return nil
+}
+
+func (c *marketCollector) collectCalendar() error {
 	// The canonical research calendar is the common mainland stock session calendar.
 	rs, err := c.rows("trade_cal", map[string]string{"exchange": "SSE", "start_date": c.from, "end_date": c.until}, "exchange cal_date is_open", 3000, false)
 	if err != nil {
@@ -196,9 +206,6 @@ func (c *marketCollector) calendar() error {
 			c.day = s
 		}
 		c.Records = append(c.Records, marketRecord(r, "ref.trading_calendar", "", s, "exchange", "L2", "TuShare 上交所交易日历", &d, map[string]any{"trade_date": d.Format(time.DateOnly), "is_open": open == "1"}))
-	}
-	if c.day == "" {
-		return fmt.Errorf("TuShare: no completed trading day in the requested calendar")
 	}
 	return nil
 }

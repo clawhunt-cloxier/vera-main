@@ -18,6 +18,7 @@ const answerPrompt = `你是 Vera，金融投研助手。根据最后一条用�
 
 - 问候、致谢和身份说明使用 respond_to_user。通用金融知识和相关追问优先使用已登记的知识查证工具。未登记该工具时，用 respond_to_user 的 education 解释产品结构、术语、机制和研究方法。纯问候简短回应。需要补充问题时用 clarify。
 - 对涉及具体数据、计算或历史研究交付的问题调用登记工具。缺少能力时如实说明。只描述当前登记能力。
+- 理解简短口语和省略。先判断用户想看什么，再用上下文补全标的、窗口和比较对象。只有在无法合理确定标的或范围时才问一个具体问题。已有个股上下文时，“它最近咋样”按近况研究，“成交呢”按日成交，“同行呢”按同行比较。用户只说“帮我看看”且没有上下文时，简短请用户说出股票或金融主题。
 
 ` + replyWritingPrompt + `
 
@@ -26,8 +27,11 @@ const answerPrompt = `你是 Vera，金融投研助手。根据最后一条用�
 
 2. 确定本轮要看的指标
 - compare_stock_performance 出现在工具列表时，若用户要求比较多只股票的股价、近期表现或涨跌幅，或者追问上一只股票相对其同行的表现，就调用 compare_stock_performance。不要改成个股报告或文字猜测。用 kind=stocks 提交用户在本条消息点名的股票。只点名新的对手并指代上一只时设 subject_source=context。例：“比较一下比亚迪和宁德时代” → compare_stock_performance({"kind":"stocks","stock_mentions":["比亚迪","宁德时代"],"subject_source":"message","trading_days":0,"advice":"none"})。
-- “相对新能源行业内其他公司呢？”紧接对宁德时代走势的研究时，用 compare_stock_performance 的 kind=industry_peers、stock_mentions=[]、subject_source=context。该范围取上一只股票所属的申万二级同行样本。点名锚点并要求和其同行比时，传一只股票且 subject_source=message。用户明确要求其他行业、主题成分股、指数或本工具不支持的对比指标时，说明当前范围或请用户点名股票。
-- 前一轮已完成横向对比或刚在澄清对比范围，用户仅改变窗口或明确要求沿用这组股票，仍调用 compare_stock_performance，kind=previous、stock_mentions=[]、subject_source=context。不要改成与单一股票比较。比较工具不可用时用 kind=unavailable 说明。只有追问已经展示的计算、来源或原结果时才引用。
+- “相对新能源行业内其他公司呢？”紧接对宁德时代走势的研究时，用 compare_stock_performance 的 kind=industry_peers、stock_mentions=[]、subject_source=context。该范围取上一只股票所属的申万二级同行样本。点名锚点并要求和其同行比时，传一只股票且 subject_source=message。用户要求其他行业、主题成分股或不支持的指标时，说明范围或请用户点名股票。
+- 前一轮有对比范围时，“大盘呢”“也画上行业指数”“拉长一点”等用 compare_stock_performance，kind=previous、stock_mentions=[]、subject_source=context。保留该组和本轮未修改的指数。“拉长一点／缩短一点”用 window_change=longer／shorter、trading_days=0，由服务选择相邻窗口。用户明确给出交易日数时直接传交易日数。仅追问已展示的结果、公式或来源时才引用。
+- 如果只有一只股票，用户要求与指数比（如“跟大盘比比”），用 kind=stock_indexes。依据消息或上下文确定这一只股票，按请求加入指数。用户要“和同行比”才取同行，问“行业指数呢”则加入基准股所属行业指数。
+- 股价对比的指数是可选参数。industry_index 为 include（加入基准股所属申万二级指数）、exclude（移除）、keep（无变更）。宽基支持沪深300（000300.SH）、中证500（000905.SH）、中证1000（000852.SH）。把本轮明确加入和移除的宽基名称或完整代码原样摘录到 broad_index_add 和 broad_index_remove，禁止把指数写入 stock_mentions。明确要移除全部宽基才用 clear_broad_indexes=true。未要求加减指数时，可省略指数参数。“加个宽基”“跟大盘比比”泛指 A 股市场时用 default_broad_index=include，服务加入沪深300。具体点名的宽基只放到 broad_index_add 或 broad_index_remove。要求未登记的指数时，请澄清并列出可用选项。请求“只保留股票”时清空宽基并排除行业指数。
+- 例：已有一组横向对比，用户追问“加上行业指数和沪深 300” → compare_stock_performance({"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":0,"advice":"none","industry_index":"include","broad_index_add":["沪深 300"]})。例：“行业指数保留，去掉沪深300，换成中证500” → kind=previous，industry_index=keep，broad_index_remove=["沪深300"]，broad_index_add=["中证500"]。
 - 先按最后一条消息选择具体指标或报告工具，再从上下文补全省略的标的。用户换了指标时，始终调用新指标对应的工具，即使只说了一个指标名。例：上一轮查了中国移动近 20 个交易日的日成交，“融资余额呢？” → inspect_financing_balance({"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"})。上一轮查了融资余额，“这只股票每天成交多少” → inspect_daily_trading，标的仍来自 context。
 - 仅改窗口、换标的或补充上轮澄清需要的标的时，继续调用原指标对应的工具。参照用户选中的范围，其次是紧邻的澄清，最后是前次研究。例如上一轮查了融资余额，“同一标的，改成六十个交易日” → inspect_financing_balance({"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"})。无法确定指标或标的时请澄清。
 - 会话环境有 has_delivered_research=true 时，用户要求查看已交付的结果、出处或原公式才用 reference_research，分别传 kind=result、evidence、calculation。例如“这个数怎么算出来的？” → reference_research({"kind":"calculation","subject_mention":"","advice":"none"})。subject_mention 只接受最后一条消息中原样出现的证券、行业或市场名称或代码，未指名时传空字符串。
@@ -49,12 +53,14 @@ type agentContext struct {
 }
 
 type contextScope struct {
-	Skill          string `json:"skill"`
-	Topic          string `json:"topic,omitempty"`
-	Window         int    `json:"trading_days,omitempty"`
-	Coverage       string `json:"coverage,omitempty"`
-	HasSubject     bool   `json:"has_subject"`
-	ComparisonKind string `json:"comparison_kind,omitempty"`
+	Skill          string   `json:"skill"`
+	Topic          string   `json:"topic,omitempty"`
+	Window         int      `json:"trading_days,omitempty"`
+	Coverage       string   `json:"coverage,omitempty"`
+	HasSubject     bool     `json:"has_subject"`
+	ComparisonKind string   `json:"comparison_kind,omitempty"`
+	IndustryIndex  bool     `json:"industry_index,omitempty"`
+	BroadIndexes   []string `json:"broad_indexes,omitempty"`
 }
 
 func scopeForModel(scope Scope) *contextScope {
@@ -64,6 +70,8 @@ func scopeForModel(scope Scope) *contextScope {
 	result := &contextScope{Skill: scope.Skill, Topic: scope.Topic, Window: scope.Window, Coverage: scope.Mode, HasSubject: scope.SubjectID != uuid.Nil}
 	if scope.Comparison != nil {
 		result.ComparisonKind = scope.Comparison.Kind
+		result.IndustryIndex = scope.Comparison.IndustryIndex
+		result.BroadIndexes = scope.Comparison.BroadIndexes
 	}
 	return result
 }

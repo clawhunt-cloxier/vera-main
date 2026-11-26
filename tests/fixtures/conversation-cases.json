@@ -3,6 +3,35 @@
   "agent_contract_version": 13,
   "cases": [
     {
+      "input": "同行呢？",
+      "context": "recent market research for 宁德时代 with a 20-trading-day window",
+      "expect": {"tool": "compare_stock_performance", "kind": "industry_peers", "window": 20, "auto_start": true}
+    },
+    {
+      "input": "行业指数也画上，大盘也看看",
+      "context": "existing comparison with a pinned industry peer sample",
+      "expect": {"tool": "compare_stock_performance", "kind": "previous", "industry_index": true, "broad_indexes": ["000300.SH"], "same_comparison_set": true}
+    },
+    {
+      "input": "拉长一点",
+      "context": "20-trading-day stock comparison with an industry and broad index",
+      "expect": {"tool": "compare_stock_performance", "kind": "previous", "window": 60, "same_comparison_set": true, "same_indexes": true}
+    },
+    {
+      "input": "沪深300换成中证500，再加上中证1000",
+      "context": "comparison includes 沪深300 and the industry index",
+      "expect": {"tool": "compare_stock_performance", "kind": "previous", "industry_index": true, "broad_indexes": ["000905.SH", "000852.SH"]}
+    },
+    {
+      "input": "只看股票",
+      "context": "existing multi-stock comparison with industry and broad indexes",
+      "expect": {"tool": "compare_stock_performance", "kind": "previous", "industry_index": false, "broad_indexes": [], "same_comparison_set": true}
+    },
+    {
+      "input": "中国移动和大盘比比",
+      "expect": {"tool": "compare_stock_performance", "kind": "stock_indexes", "broad_indexes": ["000300.SH"], "window": 20, "auto_start": true}
+    },
+    {
       "input": "什么是零息债券？",
       "context": "public knowledge lookup is enabled",
       "expect": {"tool": "lookup_finance_knowledge", "public_topic": "zero_coupon_bond", "focus": "definition", "state": "answer", "web_sources": true, "new_task": false}
@@ -149,7 +178,12 @@
     {
       "input": "这几只保持不变，改成 60 个交易日",
       "context": "previous comparison with the automatic industry sample",
-      "expect": {"tool": "compare_stock_performance", "kind": "previous", "window": 60, "same_comparison_set": true, "state": "research", "auto_start": true}
+      "expect": {"tool": "compare_stock_performance", "kind": "previous", "window": 60, "same_comparison_set": true, "same_sample_evidence": true, "state": "research", "auto_start": true}
+    },
+    {
+      "input": "20 个交易日",
+      "context": "first automatic peer request had an unsupported window and was clarified",
+      "expect": {"tool": "compare_stock_performance", "kind": "previous", "window": 20, "state": "research", "auto_start": true}
     },
     {
       "input": "演示制造的这个涨跌幅差怎么算？",
@@ -158,6 +192,15 @@
     },
     {
       "input": "比较演示银行、演示制造和演示设备甲",
+      "model_attempts": {
+        "tool": "compare_stock_performance",
+        "arguments": {"kind": "stocks", "stock_mentions": ["演示银行", "演示制造"], "subject_source": "message", "trading_days": 0, "advice": "none"}
+      },
+      "expect": {"state": "clarify", "new_task": false}
+    },
+    {
+      "input": "比较演示银行、演示制造和 699999.SH",
+      "context": "third ticker is absent from the fixture directory",
       "model_attempts": {
         "tool": "compare_stock_performance",
         "arguments": {"kind": "stocks", "stock_mentions": ["演示银行", "演示制造"], "subject_source": "message", "trading_days": 0, "advice": "none"}

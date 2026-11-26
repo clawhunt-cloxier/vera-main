@@ -67,7 +67,9 @@ export function ConversationResult({
   const series = briefReference ? undefined : result.series[0];
   const table = briefReference ? undefined : result.tables[0];
   const tablePreview =
-    table && !expanded && table.rows.length > 8 ? { ...table, rows: table.rows.slice(-8) } : table;
+    table && !comparison && !expanded && table.rows.length > 8
+      ? { ...table, rows: table.rows.slice(-8) }
+      : table;
   return (
     <article className="chat-result">
       <header>
@@ -134,7 +136,7 @@ export function ConversationResult({
         <section className="chat-result-block">
           <ReportTable table={tablePreview} />
           <div className="chat-inline-actions">
-            {table.rows.length > 8 && (
+            {!comparison && table.rows.length > 8 && (
               <button
                 type="button"
                 className="chat-action"

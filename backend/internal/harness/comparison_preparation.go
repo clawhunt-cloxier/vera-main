@@ -15,10 +15,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
 
-type prepareComparisonArgs struct {
-	Anchor string   `json:"anchor"`
-	Others []string `json:"others"`
-}
+type prepareComparisonArgs dataservice.ComparisonPreparation
 
 func (prepareComparisonArgs) Kind() string { return "tushare_comparison_prepare" }
 
@@ -35,7 +32,7 @@ func (w *comparisonPreparationWorker) Work(ctx context.Context, job *river.Job[p
 	if !w.e.comparisonAvailable() || w.e.PrepareTuShareComparison == nil || KillSwitch(ctx, w.e.Pool) {
 		return errors.New(string(dataservice.ErrAuthFailed))
 	}
-	sample, err := w.e.PrepareTuShareComparison(ctx, job.Args.Anchor, job.Args.Others)
+	sample, err := w.e.PrepareTuShareComparison(ctx, dataservice.ComparisonPreparation(job.Args))
 	if err != nil {
 		var providerErr *dataservice.ProviderError
 		if errors.As(err, &providerErr) {
@@ -50,25 +47,41 @@ func (w *comparisonPreparationWorker) Work(ctx context.Context, job *river.Job[p
 }
 
 // PrepareComparison binds the request to an active turn. It coalesces matching
-// requests using only public stock codes, and briefly reuses completed batches
-// when users change the window. The result is available only after publication.
-func (e *Engine) PrepareComparison(ctx context.Context, ws, turn uuid.UUID, revision int64, anchor string, others []string) (SubjectPreparation, dataservice.ComparisonSample, error) {
+// requests using registered identifiers. The data service checks coverage on
+// every new job. The result is available only after publication.
+func (e *Engine) PrepareComparison(ctx context.Context, ws, turn uuid.UUID, revision int64, anchor dataservice.EntityRow, others []string, window int, p ComparisonParams) (SubjectPreparation, dataservice.ComparisonSample, error) {
 	var sample dataservice.ComparisonSample
 	result := SubjectPreparation{Status: "pending"}
 	if e.PrepareTuShareComparison == nil || e.River == nil || !e.comparisonAvailable() || KillSwitch(ctx, e.Pool) {
 		return result, sample, errs.Unavailable("PREPARATION_UNAVAILABLE", "股价对比数据准备当前不可用")
 	}
-	if len(others) >= dataservice.ComparisonSubjectLimit || !mainlandStockCode.MatchString(anchor) {
+	if len(others) >= dataservice.ComparisonSubjectLimit || !mainlandStockCode.MatchString(anchor.Code) || !p.ComparisonBenchmarks.Valid() {
 		return result, sample, errs.Unprocessable("INVALID_PARAMS", "请选择支持的 A 股比较对象")
 	}
 	codes := append([]string{}, others...)
 	slices.Sort(codes)
 	for i, code := range codes {
-		if !mainlandStockCode.MatchString(code) || code == anchor || (i > 0 && code == codes[i-1]) {
+		if !mainlandStockCode.MatchString(code) || code == anchor.Code || (i > 0 && code == codes[i-1]) {
 			return result, sample, errs.Unprocessable("INVALID_PARAMS", "请选择不同的 A 股比较对象")
 		}
 	}
-	args := prepareComparisonArgs{Anchor: anchor, Others: codes}
+	var sampleIndustry string
+	if p.IndustryIndex && p.SampleProof != "" {
+		samples, err := comparisonSampleRecords(ctx, e.Store, anchor.ID, p, e.Now())
+		if err != nil {
+			return result, sample, err
+		}
+		if len(samples) == 1 && dataservice.IsComparisonIndustryCode(str(samples[0], "level2_code")) {
+			sampleIndustry = str(samples[0], "level2_code")
+		}
+	}
+	benchmarks := p.ComparisonBenchmarks
+	broad := append([]string{}, benchmarks.BroadIndexes...)
+	slices.Sort(broad)
+	benchmarks.BroadIndexes = broad
+	args := prepareComparisonArgs{AnchorCode: anchor.Code, OtherCodes: codes, ComparisonBenchmarks: benchmarks,
+		SampleIndustry: sampleIndustry, SingleStock: p.SingleStock, Window: window,
+		CloseCutoff: dataservice.ComparisonCloseDay(e.Now()).Format(time.DateOnly)}
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
 		if _, err := lockPendingTurn(ctx, tx, turn, revision); err != nil {
 			return err
@@ -78,19 +91,11 @@ func (e *Engine) PrepareComparison(ctx context.Context, ws, turn uuid.UUID, revi
 		}
 		var state, failure string
 		var recent, reusable bool
-		err := tx.QueryRow(ctx, `SELECT state, coalesce(finalized_at > now()-interval '2 minutes',false),
-			coalesce(finalized_at > now()-interval '15 minutes',false),
+		err := tx.QueryRow(ctx, `SELECT state, coalesce(finalized_at > now()-interval '30 seconds',false),
+			coalesce(finalized_at > now()-interval '2 minutes',false),
 			coalesce(errors[array_upper(errors,1)]->>'error',''), coalesce(metadata->'output','{}'::jsonb)
-			FROM river_job WHERE kind=$1 AND args->>'anchor'=$2 AND (
-				(args->'others'=to_jsonb($3::text[]) AND (cardinality($3::text[]) > 0 OR state<>'completed'
-					OR metadata->'output'->>'proof_sha256' IS NOT NULL)) OR (
-					cardinality($3::text[]) > 0 AND args->'others'='[]'::jsonb AND state='completed'
-					AND finalized_at > now()-interval '15 minutes'
-					AND metadata->'output'->'codes' @> to_jsonb($3::text[])
-					AND metadata->'output'->'codes' <@ to_jsonb($3::text[])
-				)
-			)
-			ORDER BY id DESC LIMIT 1`, args.Kind(), anchor, codes).Scan(&state, &recent, &reusable, &failure, &sample)
+			FROM river_job WHERE kind=$1 AND args = to_jsonb($2::jsonb)
+			ORDER BY id DESC LIMIT 1`, args.Kind(), args).Scan(&state, &recent, &reusable, &failure, &sample)
 		if err == nil {
 			switch state {
 			case "completed":

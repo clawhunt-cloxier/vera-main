@@ -206,7 +206,7 @@ func TestComparisonArchivesRankedSample(t *testing.T) {
 	src.data["daily_basic"][1]["total_mv"] = "99" // Tie with 600002.SH below.
 	src.data["daily_basic"][2]["total_mv"] = "101"
 	p := Provider{source: src, codes: []string{anchor}}
-	obs, sample, err := p.CollectComparison(t.Context(), anchor, nil, end)
+	obs, sample, err := p.collectComparison(t.Context(), dataservice.ComparisonPreparation{AnchorCode: anchor}, dataservice.ComparisonCache{}, end, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestComparisonArchivesRankedSample(t *testing.T) {
 		t.Fatal("missing the exact anchor valuation input")
 	}
 	src.data["suspend_d"][0]["trade_date"] = "20261120"
-	if batch, _, err := p.CollectComparison(t.Context(), anchor, want, end); batch != nil || err == nil {
+	if batch, _, err := p.collectComparison(t.Context(), dataservice.ComparisonPreparation{AnchorCode: anchor, OtherCodes: want}, dataservice.ComparisonCache{}, end, false); batch != nil || err == nil {
 		t.Fatal("comparison accepted a daily bar during a full-session suspension")
 	}
 }

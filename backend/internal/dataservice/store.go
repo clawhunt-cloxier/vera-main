@@ -242,14 +242,17 @@ func syncEntity(ctx context.Context, tx pgx.Tx, p Provider, e Entity, protectDir
 			return id, err
 		}
 	}
-	attrs, _ := json.Marshal(e.Attrs)
+	attrs := []byte("{}")
+	if e.Attrs != nil {
+		attrs, _ = json.Marshal(e.Attrs)
+	}
 	err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
 		VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
 		ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status,
 		is_financial=CASE WHEN $10 AND excluded.classification IS NULL THEN entities.is_financial ELSE excluded.is_financial END,
 		classification=CASE WHEN $10 AND excluded.classification IS NULL THEN entities.classification ELSE excluded.classification END,
 		attrs=CASE WHEN $10 AND excluded.classification IS NULL THEN
-			  (entities.attrs || excluded.attrs) ||
+			  (coalesce(nullif(entities.attrs,'null'::jsonb),'{}'::jsonb) || excluded.attrs) ||
 			  CASE WHEN entities.attrs @> '{"tushare_research_subject":true}'::jsonb
 					OR EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
 				THEN '{"tushare_research_subject":true}'::jsonb ELSE '{}'::jsonb END
@@ -301,6 +304,7 @@ type StoredRecord struct {
 type Query struct {
 	DatasetIDs []string
 	EntityIDs  []uuid.UUID // empty = no entity filter
+	IndexCodes []string    // optional filter for global index bars
 	From, To   *time.Time  // period range, inclusive
 	AsOf       time.Time
 	ModelUse   bool // records will reach a model: only providers licensed for model processing
@@ -349,13 +353,14 @@ func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
 		FROM records r JOIN providers p ON p.id = r.provider_id AND p.enabled
 		WHERE r.dataset_id = ANY($1) AND ` + visibleAtCutoff + `
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
-		AND (NOT $6::bool OR p.allow_model_processing) AND ($8='' OR p.id=$8)` + fmt.Sprintf(realSourceFilter, "$7") + `
+		AND (NOT $6::bool OR p.allow_model_processing) AND ($8='' OR p.id=$8)
+		AND ($9::text[] IS NULL OR (r.dataset_id='mkt.index_bar' AND r.entity_id IS NULL AND r.payload->>'index_code'=ANY($9)))` + fmt.Sprintf(realSourceFilter, "$7") + `
 		AND r.quality_state IN ('PASS','WARN') AND ` + latestRevisionAt("$2")
 	var ents []uuid.UUID
 	if len(q.EntityIDs) > 0 {
 		ents = q.EntityIDs
 	}
-	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse, s.excludeSynthetic, s.providerID)
+	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse, s.excludeSynthetic, s.providerID, q.IndexCodes)
 	if err != nil {
 		return nil, err
 	}

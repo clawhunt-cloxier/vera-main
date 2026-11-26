@@ -606,13 +606,17 @@ export interface components {
         /** @description Resolved comparison scope. The primary subject_id is the reference stock. */
         ConversationComparison: {
             /** @enum {string} */
-            kind: "stocks" | "industry_peers";
+            kind: "stocks" | "industry_peers" | "stock_indexes";
             other_ids?: string[];
             /**
              * Format: date
              * @description Date of the industry membership and market-value sample.
              */
             sample_date?: string;
+            /** @description The anchor stock's SW level-2 index was requested. */
+            industry_index?: boolean;
+            /** @description Requested registered broad market index symbols, including any with insufficient data. */
+            broad_indexes?: ("000300.SH" | "000905.SH" | "000852.SH")[];
         };
         ConversationWebSource: {
             /** Format: uri */

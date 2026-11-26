@@ -26,7 +26,7 @@ const (
 )
 
 func isConversationSkill(version string) bool {
-	return IsCloseConversationVersion(version) || version == ConversationFixtureVersion || version == ComparisonFixtureVersion || version == emquant.ConversationObservationVersion
+	return IsCloseConversationVersion(version) || version == ConversationFixtureVersion || isFixtureComparisonVersion(version) || version == emquant.ConversationObservationVersion
 }
 
 func conversationObservationSkill() *Skill {
@@ -43,7 +43,7 @@ func conversationObservationSkill() *Skill {
 
 func ConversationWindows(topic string) []int {
 	if topic == ComparisonTopic {
-		return []int{5, 10, 20, 60}
+		return dataservice.ComparisonWindows()
 	}
 	if topic == FinancingBalanceTopic {
 		return []int{5, 20, 60, 120}

@@ -2,7 +2,17 @@ import type { ECharts, EChartsOption, SeriesOption } from 'echarts';
 import { useEffect, useRef, useState } from 'react';
 import type { ChartSeries } from '../api/client';
 
-const colors = ['#145ec5', '#a85d28', '#1b7568', '#6b5797', '#a23631'];
+const colors = [
+  '#145ec5',
+  '#a85d28',
+  '#1b7568',
+  '#6b5797',
+  '#a23631',
+  '#086880',
+  '#527521',
+  '#963f78',
+  '#534234',
+];
 const strokes = ['solid', 'dashed', 'dotted'] as const;
 const tickFormat = new Intl.NumberFormat('zh-CN', { maximumSignificantDigits: 8 });
 

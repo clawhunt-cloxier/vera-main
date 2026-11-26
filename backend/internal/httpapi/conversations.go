@@ -361,7 +361,7 @@ func (s *Server) conversationResult(w http.ResponseWriter, r *http.Request) erro
 	}
 	claimLimit := 3
 	if harness.IsComparisonVersion(doc.SkillVersion) {
-		claimLimit = dataservice.ComparisonSubjectLimit
+		claimLimit = dataservice.ComparisonLineLimit
 	}
 	for _, ref := range refs {
 		if c, ok := claimByRef[ref]; ok {

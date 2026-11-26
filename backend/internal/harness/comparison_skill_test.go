@@ -108,3 +108,46 @@ func TestStockComparisonPinsRankedSample(t *testing.T) {
 		t.Fatal("a different observation cannot justify the original ranked sample")
 	}
 }
+
+func TestStockComparisonRetainsMissingInputsAcrossSnapshot(t *testing.T) {
+	ctx := t.Context()
+	e, pool := testEngine(t)
+	anchor, err := e.Store.EntityByCode(ctx, "DM0001.DEMO")
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := e.Store.EntityByCode(ctx, "DM0004.DEMO")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sparse uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO entities(kind,code,name,synthetic)
+		VALUES('stock','MISSING.DEMO','演示无行情',true) RETURNING id`).Scan(&sparse); err != nil {
+		t.Fatal(err)
+	}
+	at := e.Now()
+	p := Params{Window: 20, Comparison: &ComparisonParams{
+		OtherIDs: []uuid.UUID{peer.ID, sparse},
+		ComparisonBenchmarks: dataservice.ComparisonBenchmarks{
+			BroadIndexes: []string{"000852.SH"},
+		},
+	}}
+	collected, err := collectComparison(ctx, e, anchor, p, at, ComparisonFixtureVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := e.Store.Freeze(ctx, at, collected.IDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := e.bundleFromSnapshot(ctx, anchor, collectOut{Snapshot: hash, Peers: collected.Peers}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coverage := alignComparison(frozen, p)
+	if !coverage.comparable() || coverage.lineCount() != 2 || len(coverage.lines) != 4 ||
+		coverage.lines[2].name != "演示无行情" || coverage.lines[2].missing != "覆盖不足" ||
+		coverage.lines[3].name != "中证1000" || coverage.lines[3].missing != "暂无可用数据" {
+		t.Fatalf("missing inputs lost or valid stocks dropped: %+v", coverage)
+	}
+}
