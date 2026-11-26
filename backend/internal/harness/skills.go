@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/check"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
@@ -47,9 +48,10 @@ type Availability struct {
 
 // Params are the validated skill parameters; zero values are filled with defaults by the skill.
 type Params struct {
-	Window int    `json:"window,omitempty"`
-	Mode   string `json:"mode,omitempty"`
-	Focus  string `json:"focus,omitempty"`
+	Window     int               `json:"window,omitempty"`
+	Mode       string            `json:"mode,omitempty"`
+	Focus      string            `json:"focus,omitempty"`
+	Comparison *ComparisonParams `json:"comparison,omitempty"`
 }
 
 type Skill struct {
@@ -65,7 +67,10 @@ type Skill struct {
 	Plan    func(ctx context.Context, e *Engine, subject dataservice.EntityRow, p *Params, asOf time.Time) (map[string]Availability, []string, error)
 	Collect func(ctx context.Context, e *Engine, subject dataservice.EntityRow, p Params, asOf time.Time) (*Bundle, error)
 	Compute func(b *builder, p Params)
-	Name    func(subject dataservice.EntityRow, p Params) string
+	// ClaimsFromFacts creates verbatim statements about deterministic results.
+	// It still goes through the same R-01–R-09 checks and write/verify ledger.
+	ClaimsFromFacts func(*facts.Sheet, Section) []check.Claim
+	Name            func(subject dataservice.EntityRow, p Params) string
 }
 
 func avail() Availability { return Availability{State: "available"} }

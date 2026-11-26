@@ -1,6 +1,6 @@
 {
   "fixture_mode": "synthetic",
-  "agent_contract_version": 12,
+  "agent_contract_version": 13,
   "cases": [
     {
       "input": "什么是零息债券？",
@@ -136,6 +136,33 @@
         "state": "clarify",
         "pick_one": true
       }
+    },
+    {
+      "input": "比较演示银行和演示制造近 20 个交易日的股价",
+      "expect": {"tool": "compare_stock_performance", "kind": "stocks", "window": 20, "state": "research", "auto_start": true, "deliver": ["table", "multi_line_series", "F12.period_return", "F13.excess_return"]}
+    },
+    {
+      "input": "相对行业内其他公司呢？",
+      "context": "previous 20-trading-day analysis of a registered stock",
+      "expect": {"tool": "compare_stock_performance", "kind": "industry_peers", "subject_source": "context", "window": 20, "show_sample_date": true, "state": "research", "auto_start": true}
+    },
+    {
+      "input": "这几只保持不变，改成 60 个交易日",
+      "context": "previous comparison with the automatic industry sample",
+      "expect": {"tool": "compare_stock_performance", "kind": "previous", "window": 60, "same_comparison_set": true, "state": "research", "auto_start": true}
+    },
+    {
+      "input": "演示制造的这个涨跌幅差怎么算？",
+      "context": "previous price comparison of 演示银行 and 演示制造",
+      "expect": {"tool": "reference_research", "state": "reference", "reference_kind": "calculation", "new_task": false}
+    },
+    {
+      "input": "比较演示银行、演示制造和演示设备甲",
+      "model_attempts": {
+        "tool": "compare_stock_performance",
+        "arguments": {"kind": "stocks", "stock_mentions": ["演示银行", "演示制造"], "subject_source": "message", "trading_days": 0, "advice": "none"}
+      },
+      "expect": {"state": "clarify", "new_task": false}
     },
     {
       "input": "查演示制造近 20 个交易日的成交额并给目标价",

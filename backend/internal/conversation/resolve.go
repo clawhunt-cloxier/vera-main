@@ -121,6 +121,9 @@ func (s Service) plan(ctx context.Context, args resolveArgs, in intent, turn Tur
 	if !slices.Contains(spec.Subjects, subject.Kind) || scope.Mode == "company_industry" && subject.Kind != "stock" {
 		return s.fail(ctx, args, "该研究能力不支持此对象类型。")
 	}
+	if scope.Topic == harness.ComparisonTopic {
+		return s.planComparison(ctx, args, in, turn)
+	}
 	if subject.Kind == "stock" && s.Engine.PrepareTuShareSubject != nil {
 		registered, err := s.Engine.Store.ResearchSubjectPrepared(ctx, subject.Code)
 		if err != nil {
@@ -147,12 +150,18 @@ func (s Service) plan(ctx context.Context, args resolveArgs, in intent, turn Tur
 			}
 		}
 	}
+	return s.launchResearch(ctx, args, in, turn, func(launch harness.ConversationLaunch) (*harness.Plan, error) {
+		return s.Engine.StartConversationResearch(ctx, args.Workspace, subject, scope.Skill, scope.Topic, scope.Window, scope.Mode, launch)
+	})
+}
+
+func (s Service) launchResearch(ctx context.Context, args resolveArgs, in intent, turn Turn, start func(harness.ConversationLaunch) (*harness.Plan, error)) error {
 	launch := harness.ConversationLaunch{TurnID: args.Turn, Revision: args.Revision, AutoRun: turn.Automatic}
 	launch.Bind = func(tx pgx.Tx, plan *harness.Plan) error {
 		if plan.Params.Window != 0 {
-			scope.Window = plan.Params.Window
+			in.Scope.Window = plan.Params.Window
 		}
-		in.Scope, in.Preparing = scope, false
+		in.Preparing = false
 		data, err := json.Marshal(in)
 		if err != nil {
 			return err
@@ -160,7 +169,7 @@ func (s Service) plan(ctx context.Context, args resolveArgs, in intent, turn Tur
 		_, err = tx.Exec(ctx, `UPDATE conversation_turns SET intent=$2 WHERE id=$1`, args.Turn, data)
 		return err
 	}
-	plan, err := s.Engine.StartConversationResearch(ctx, args.Workspace, subject, scope.Skill, scope.Topic, scope.Window, scope.Mode, launch)
+	plan, err := start(launch)
 	if err != nil {
 		if errs.As(err).Status != 500 {
 			return s.fail(ctx, args, errs.As(err).Message)

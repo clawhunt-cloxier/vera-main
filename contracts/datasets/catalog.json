@@ -1,5 +1,5 @@
 {
-  "version": "2",
+  "version": "3",
   "description": "Unified dataset field dictionary (DATA_SERVICE §3–4). Envelope fields (record_id, entity_id, published_at, available_at, provider_id, source_tier, ...) are common to every dataset and not repeated here. Monetary values are CNY yuan; ratios are decimal fractions (0.1234 = 12.34%).",
   "units": {
     "CNY": "人民币元",
@@ -175,6 +175,48 @@
           "unit": "none",
           "required": false,
           "description": "分类失效日，空表示当前有效"
+        }
+      ]
+    },
+    {
+      "id": "ref.industry_peer_sample",
+      "title": "行业同行样本",
+      "origin": "vendor_derived",
+      "default_tier": "L2",
+      "grain": [
+        "entity_id",
+        "trade_date",
+        "raw_sha256"
+      ],
+      "mvp": false,
+      "fields": [
+        {
+          "name": "trade_date",
+          "type": "date",
+          "unit": "none",
+          "required": true,
+          "description": "选取同行样本的交易日"
+        },
+        {
+          "name": "level2_code",
+          "type": "string",
+          "unit": "none",
+          "required": true,
+          "description": "选取时有效的申万 2021 二级行业代码"
+        },
+        {
+          "name": "level2_name",
+          "type": "string",
+          "unit": "none",
+          "required": true,
+          "description": "选取时有效的申万 2021 二级行业名称"
+        },
+        {
+          "name": "peer_codes",
+          "type": "string",
+          "unit": "none",
+          "required": true,
+          "description": "按当日市值距离排序的同行代码，用逗号分隔"
         }
       ]
     },

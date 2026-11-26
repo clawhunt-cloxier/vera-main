@@ -275,9 +275,9 @@ func TestConversationNativeToolCalls(t *testing.T) {
 			}
 			return
 		}
-		if len(request.Messages) != 3 || len(request.Tools) != 7 || request.ToolChoice != "auto" || request.Tools[0].Function.Name != "respond_to_user" ||
-			request.Tools[1].Function.Name != "reference_research" || request.Tools[2].Function.Name != "inspect_daily_trading" ||
-			request.Tools[3].Function.Name != "inspect_financing_balance" ||
+		if len(request.Messages) != 3 || len(request.Tools) != 8 || request.ToolChoice != "auto" || request.Tools[0].Function.Name != "respond_to_user" ||
+			request.Tools[1].Function.Name != "reference_research" || request.Tools[2].Function.Name != "compare_stock_performance" || request.Tools[3].Function.Name != "inspect_daily_trading" ||
+			request.Tools[4].Function.Name != "inspect_financing_balance" ||
 			!strings.Contains(request.Messages[0].Content, "你是 Vera") {
 			t.Error("agent did not send a valid function declaration and identity prompt")
 			w.WriteHeader(http.StatusBadRequest)
@@ -553,7 +553,7 @@ func TestConversationAPIWithRiver(t *testing.T) {
 	var me Me
 	a.json("POST", "/api/v1/onboarding", map[string]string{"invite_code": codes[0], "persona": "analyst"}, 200, &me)
 	b.json("POST", "/api/v1/onboarding", map[string]string{"invite_code": codes[1], "persona": "analyst"}, 200, nil)
-	if len(me.ConversationTopics) != 2 {
+	if len(me.ConversationTopics) != 3 {
 		t.Fatalf("capabilities: %v", me.ConversationTopics)
 	}
 

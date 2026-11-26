@@ -597,10 +597,22 @@ export interface components {
             subject_id: string;
             skill_id: components["schemas"]["SkillId"];
             /** @enum {string} */
-            topic?: "daily_trading" | "financing_balance";
+            topic?: "daily_trading" | "financing_balance" | "stock_comparison";
+            comparison?: components["schemas"]["ConversationComparison"];
             window?: number;
             /** @enum {string} */
             mode?: "company_industry";
+        };
+        /** @description Resolved comparison scope. The primary subject_id is the reference stock. */
+        ConversationComparison: {
+            /** @enum {string} */
+            kind: "stocks" | "industry_peers";
+            other_ids?: string[];
+            /**
+             * Format: date
+             * @description Date of the industry membership and market-value sample.
+             */
+            sample_date?: string;
         };
         ConversationWebSource: {
             /** Format: uri */
@@ -771,7 +783,7 @@ export interface components {
              * @enum {string}
              */
             research_protocol?: "observation.v1" | "v0.4";
-            conversation_topics?: ("daily_trading" | "financing_balance")[];
+            conversation_topics?: ("daily_trading" | "financing_balance" | "stock_comparison")[];
             /** @description 可用 application/json 请求基于已发布收盘数据的投研计划，可与 Choice 简报协议同时使用。各标的及章节按实际数据预检。 */
             closing_research_available?: boolean;
             /** @description 旧版 v0.4 客户端可用的严格实时能力标记；实际证券的行情仍须在采集时核验。 */

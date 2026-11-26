@@ -173,6 +173,7 @@ func (a *App) build(ctx context.Context) error {
 		a.Engine.Skills = harness.UnifiedCloseSkills()
 		a.Engine.WithCloseResearchUse = a.Store.WithResearchUse
 		a.Engine.CloseResearchCutoff = a.Store.PublicationCutoff
+		a.Engine.PrepareTuShareComparison = a.prepareTuShareComparison
 		if a.Brief != nil {
 			a.Engine.ResearchSupplements = []dataservice.ResearchSupplementSource{a.Brief}
 			a.Engine.PrepareTuShareSubject = a.PrepareTuShareSubject
@@ -193,6 +194,16 @@ func (a *App) PrepareTuShareSubject(ctx context.Context, code string) error {
 		return batch, err
 	})
 	return err
+}
+
+func (a *App) prepareTuShareComparison(ctx context.Context, anchor string, others []string) (dataservice.ComparisonSample, error) {
+	var sample dataservice.ComparisonSample
+	_, err := a.Store.SyncResearchObserved(ctx, a.TuShare.ID(), func(ctx context.Context) (dataservice.Provider, error) {
+		observed, selected, err := a.TuShare.CollectComparison(ctx, anchor, others, a.TuShare.Now())
+		sample = selected
+		return observed, err
+	})
+	return sample, err
 }
 
 // Sync loads provider data into the store (idempotent).

@@ -68,11 +68,12 @@ type Turn struct {
 }
 
 type Scope struct {
-	SubjectID uuid.UUID `json:"subject_id"`
-	Topic     string    `json:"topic,omitempty"`
-	Skill     string    `json:"skill_id"`
-	Window    int       `json:"window,omitempty"`
-	Mode      string    `json:"mode,omitempty"`
+	SubjectID  uuid.UUID        `json:"subject_id"`
+	Topic      string           `json:"topic,omitempty"`
+	Skill      string           `json:"skill_id"`
+	Window     int              `json:"window,omitempty"`
+	Mode       string           `json:"mode,omitempty"`
+	Comparison *comparisonScope `json:"comparison,omitempty"`
 }
 
 type intent struct {

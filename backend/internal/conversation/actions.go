@@ -9,15 +9,24 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
 
-func (t Turn) Scope() Scope            { return t.Intent.Scope }
+func (t Turn) Scope() Scope {
+	scope := t.Intent.Scope
+	if scope.Comparison != nil {
+		comparison := *scope.Comparison
+		comparison.SampleProof = ""
+		scope.Comparison = &comparison
+	}
+	return scope
+}
 func (t Turn) Candidates() []uuid.UUID { return slices.Clone(t.Intent.Candidates) }
 func (t Turn) Reference() *uuid.UUID   { return t.Intent.Reference }
 func (t Turn) NeedsSubject() bool {
-	return t.Intent.NeedsSubject || !t.Automatic && t.State == "clarify" && t.Intent.Scope.Skill != ""
+	return t.Intent.Scope.Topic != harness.ComparisonTopic && (t.Intent.NeedsSubject || !t.Automatic && t.State == "clarify" && t.Intent.Scope.Skill != "")
 }
 func (t Turn) AdviceDeclined() bool  { return t.Intent.AdviceDeclined }
 func (t Turn) ReferenceKind() string { return t.Intent.ReferenceKind }
@@ -52,7 +61,7 @@ func (s Service) Choose(ctx context.Context, ws, conv, turn, subject uuid.UUID, 
 		if actual > revision && in.Scope.SubjectID == subject && (status == "pending" || status == "research" || status == "confirm") {
 			return nil
 		}
-		if status != "clarify" || actual != revision || in.Scope.Skill == "" || automatic && !in.NeedsSubject {
+		if status != "clarify" || actual != revision || in.Scope.Skill == "" || in.Scope.Topic == harness.ComparisonTopic || automatic && !in.NeedsSubject {
 			return errs.Conflict("CONVERSATION_CHANGED", "该轮消息已更新，请刷新后重试")
 		}
 		var newest int64

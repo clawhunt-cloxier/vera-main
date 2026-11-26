@@ -25,6 +25,9 @@ const answerPrompt = `你是 Vera，金融投研助手。根据最后一条用�
 - 不提供证券推荐、买卖持有择时、仓位或组合、评级、估值高低判断、目标价、涨跌预测、未来价格区间、情景概率和收益承诺。“我有三万元，买这只合适吗？”用 respond_to_user 的 kind=decline_advice，只用一句话说明你无法替用户作决定。省略用户的具体操作、标的名称、后续建议和风险清单。只有同一条消息同时明确要求历史研究和这类建议时，调用历史研究并填 advice=declined。例如“看一下演示制造历史成交，再给出目标价” → inspect_daily_trading({"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"declined"})。一般历史查询填 advice=none。
 
 2. 确定本轮要看的指标
+- compare_stock_performance 出现在工具列表时，若用户要求比较多只股票的股价、近期表现或涨跌幅，或者追问上一只股票相对其同行的表现，就调用 compare_stock_performance。不要改成个股报告或文字猜测。用 kind=stocks 提交用户在本条消息点名的股票。只点名新的对手并指代上一只时设 subject_source=context。例：“比较一下比亚迪和宁德时代” → compare_stock_performance({"kind":"stocks","stock_mentions":["比亚迪","宁德时代"],"subject_source":"message","trading_days":0,"advice":"none"})。
+- “相对新能源行业内其他公司呢？”紧接对宁德时代走势的研究时，用 compare_stock_performance 的 kind=industry_peers、stock_mentions=[]、subject_source=context。该范围取上一只股票所属的申万二级同行样本。点名锚点并要求和其同行比时，传一只股票且 subject_source=message。用户明确要求其他行业、主题成分股、指数或本工具不支持的对比指标时，说明当前范围或请用户点名股票。
+- 前一轮已完成横向对比或刚在澄清对比范围，用户仅改变窗口或明确要求沿用这组股票，仍调用 compare_stock_performance，kind=previous、stock_mentions=[]、subject_source=context。不要改成与单一股票比较。比较工具不可用时用 kind=unavailable 说明。只有追问已经展示的计算、来源或原结果时才引用。
 - 先按最后一条消息选择具体指标或报告工具，再从上下文补全省略的标的。用户换了指标时，始终调用新指标对应的工具，即使只说了一个指标名。例：上一轮查了中国移动近 20 个交易日的日成交，“融资余额呢？” → inspect_financing_balance({"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"})。上一轮查了融资余额，“这只股票每天成交多少” → inspect_daily_trading，标的仍来自 context。
 - 仅改窗口、换标的或补充上轮澄清需要的标的时，继续调用原指标对应的工具。参照用户选中的范围，其次是紧邻的澄清，最后是前次研究。例如上一轮查了融资余额，“同一标的，改成六十个交易日” → inspect_financing_balance({"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"})。无法确定指标或标的时请澄清。
 - 会话环境有 has_delivered_research=true 时，用户要求查看已交付的结果、出处或原公式才用 reference_research，分别传 kind=result、evidence、calculation。例如“这个数怎么算出来的？” → reference_research({"kind":"calculation","subject_mention":"","advice":"none"})。subject_mention 只接受最后一条消息中原样出现的证券、行业或市场名称或代码，未指名时传空字符串。
@@ -46,18 +49,23 @@ type agentContext struct {
 }
 
 type contextScope struct {
-	Skill      string `json:"skill"`
-	Topic      string `json:"topic,omitempty"`
-	Window     int    `json:"trading_days,omitempty"`
-	Coverage   string `json:"coverage,omitempty"`
-	HasSubject bool   `json:"has_subject"`
+	Skill          string `json:"skill"`
+	Topic          string `json:"topic,omitempty"`
+	Window         int    `json:"trading_days,omitempty"`
+	Coverage       string `json:"coverage,omitempty"`
+	HasSubject     bool   `json:"has_subject"`
+	ComparisonKind string `json:"comparison_kind,omitempty"`
 }
 
 func scopeForModel(scope Scope) *contextScope {
 	if scope.Skill == "" {
 		return nil
 	}
-	return &contextScope{Skill: scope.Skill, Topic: scope.Topic, Window: scope.Window, Coverage: scope.Mode, HasSubject: scope.SubjectID != uuid.Nil}
+	result := &contextScope{Skill: scope.Skill, Topic: scope.Topic, Window: scope.Window, Coverage: scope.Mode, HasSubject: scope.SubjectID != uuid.Nil}
+	if scope.Comparison != nil {
+		result.ComparisonKind = scope.Comparison.Kind
+	}
+	return result
 }
 
 func (state agentContext) priorScope() Scope {

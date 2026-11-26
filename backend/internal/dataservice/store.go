@@ -60,14 +60,14 @@ func (s *Store) RegisteredResearchSubject(code string) bool {
 // Existing record keys are idempotent only when their content and provenance
 // agree; a conflicting key fails the entire sync without replacing either.
 func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
-	return s.sync(ctx, s.pool, p, false, "")
+	return s.sync(ctx, s.pool, p, false, "", false)
 }
 
 type txBeginner interface {
 	Begin(context.Context) (pgx.Tx, error)
 }
 
-func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bool, requestedCode string) (int, error) {
+func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bool, requestedCode string, researchUse bool) (int, error) {
 	if s.excludeSynthetic && p.Synthetic() {
 		return 0, fmt.Errorf("synthetic provider not permitted in vendor store")
 	}
@@ -97,10 +97,12 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 	n := 0
 	err = pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		var directoryUpdates map[string]bool
-		if requestedCode != "" {
+		if researchUse {
 			if err := s.RequireResearchUseTx(ctx, tx); err != nil {
 				return err
 			}
+		}
+		if requestedCode != "" {
 			validTarget := slices.ContainsFunc(ents, func(e Entity) bool {
 				return e.Kind == "stock" && e.Code == requestedCode && e.Attrs["tushare_research_subject"] == true
 			})
@@ -243,8 +245,15 @@ func syncEntity(ctx context.Context, tx pgx.Tx, p Provider, e Entity, protectDir
 	attrs, _ := json.Marshal(e.Attrs)
 	err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
 		VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
-		ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status, is_financial=excluded.is_financial, classification=excluded.classification,
-		attrs=CASE WHEN $10 AND EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
+		ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status,
+		is_financial=CASE WHEN $10 AND excluded.classification IS NULL THEN entities.is_financial ELSE excluded.is_financial END,
+		classification=CASE WHEN $10 AND excluded.classification IS NULL THEN entities.classification ELSE excluded.classification END,
+		attrs=CASE WHEN $10 AND excluded.classification IS NULL THEN
+			  (entities.attrs || excluded.attrs) ||
+			  CASE WHEN entities.attrs @> '{"tushare_research_subject":true}'::jsonb
+					OR EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
+				THEN '{"tushare_research_subject":true}'::jsonb ELSE '{}'::jsonb END
+			WHEN $10 AND EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
 			THEN excluded.attrs || '{"tushare_research_subject":true}'::jsonb ELSE excluded.attrs END
 		WHERE entities.synthetic=excluded.synthetic AND entities.kind=excluded.kind
 		RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs, p.ID() == "tushare").Scan(&id)

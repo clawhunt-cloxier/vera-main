@@ -24,6 +24,7 @@ const (
 	stockTool        = "analyze_stock"
 	flowTool         = "analyze_capital_flow"
 	deepTool         = "run_deep_research"
+	comparisonTool   = "compare_stock_performance"
 	referenceTool    = "reference_research"
 	replyTool        = "respond_to_user"
 )
@@ -35,7 +36,7 @@ type researchTool struct {
 var researchTools = []researchTool{
 	{dailyTradingTool, "stock_analysis", harness.DailyTradingTopic, "日成交：查看个股已公布的每日成交额、成交量或成交活跃度，提供图表与证据。"},
 	{financingTool, "capital_flow", harness.FinancingBalanceTopic, "融资余额：查看个股已披露的未偿还融资余额及区间变化。用户在任何个股研究后改问融资余额时，调用此工具，沿用该标的。"},
-	{stockTool, "stock_analysis", "", "Inspect a stock's recent market performance, including closing prices, and render an analysis from available evidence. Use for recent performance (最近表现、近期走势), broad stock analysis or an explicit request for a full stock report. Use inspect_daily_trading for a query specifically about volume or turnover amount."},
+	{stockTool, "stock_analysis", "", "Inspect a stock's recent market performance, including closing prices, and render an analysis from available evidence. For any relative share price comparison between stocks or against a same-industry sample, use compare_stock_performance instead. Use for recent performance (最近表现、近期走势), broad stock analysis or an explicit request for a full stock report. Use inspect_daily_trading for a query specifically about volume or turnover amount."},
 	{flowTool, "capital_flow", "", "Generate the formal capital flow report. Use for broad questions about 资金面, 资金动向, or disclosed holdings and flows. Only registered data and supported sections are used."},
 	{deepTool, "deep_research", "", "Generate a formal deep research report about a company or industry, as permitted by the listed scope. Use when the user requests deep research or analysis of the business, financials and industry together."},
 }
@@ -50,6 +51,10 @@ func (s Service) agentTools() []model.ToolSpec {
 			Name: knowledgeTool, Schema: "conversation-knowledge-tool",
 			Description: "选择系统提示中的公开主题和侧重点，查证通用金融知识与概念追问。具体证券、市场报价和研报使用各自的研究工具。",
 		})
+	}
+	if spec, ok := s.Engine.ConversationResearchSpec("stock_analysis", harness.ComparisonTopic); ok {
+		tools = append(tools, model.ToolSpec{Name: comparisonTool, Schema: "conversation-comparison-tool",
+			Description: fmt.Sprintf("对比多只 A 股的历史收盘价、复权走势和同期涨跌幅。支持用户点名、比较当前标的与其申万二级同行样本、继续上一组。即使用户只追问‘相对同行呢’，也使用本工具。支持 %v 个交易日，默认 %d。", spec.Windows, spec.DefaultWindow)})
 	}
 	for _, tool := range researchTools {
 		spec, ok := s.Engine.ConversationResearchSpec(tool.Skill, tool.Topic)
@@ -88,6 +93,13 @@ type referenceRequest struct {
 }
 
 func (s Service) runTool(ctx context.Context, args resolveArgs, turn Turn, state agentContext, call model.ToolCall) error {
+	if call.Function.Name == comparisonTool {
+		var request comparisonRequest
+		if err := json.Unmarshal([]byte(call.Function.Arguments), &request); err != nil {
+			return s.fail(ctx, args, "本轮对比参数无效，请重新描述问题。")
+		}
+		return s.startComparison(ctx, args, turn, state, request)
+	}
 	if call.Function.Name == referenceTool {
 		var request referenceRequest
 		if err := json.Unmarshal([]byte(call.Function.Arguments), &request); err != nil {
@@ -212,7 +224,12 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 	if !matchesTradingDays(turn.Text, 0, anchor.Scope().Window) {
 		return s.update(ctx, args, "clarify", "消息中的时间范围与原报告不同。请说明要按新范围研究，还是查看原报告。", in)
 	}
-	conflicts, err := s.subjectConflicts(ctx, turn.Text, nil, anchor.Scope().SubjectID)
+	scope := anchor.Scope()
+	selected := []uuid.UUID{scope.SubjectID}
+	if scope.Comparison != nil {
+		selected = append(selected, scope.Comparison.OtherIDs...)
+	}
+	conflicts, err := s.scopeConflicts(ctx, turn.Text, nil, selected)
 	if err != nil {
 		return err
 	}
@@ -228,7 +245,7 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 		if err != nil {
 			return err
 		}
-		if unresolved || len(ids) != 1 || ids[0] != anchor.Scope().SubjectID {
+		if unresolved || len(ids) != 1 || !slices.Contains(selected, ids[0]) {
 			return s.update(ctx, args, "clarify", missing, in)
 		}
 	}
@@ -239,13 +256,17 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 // A model can select a tool, but must not silently ignore another explicit
 // name or code. These catalog matches can only send the turn to clarification.
 func (s Service) subjectConflicts(ctx context.Context, text string, kinds []string, selected uuid.UUID) ([]uuid.UUID, error) {
+	return s.scopeConflicts(ctx, text, kinds, []uuid.UUID{selected})
+}
+
+func (s Service) scopeConflicts(ctx context.Context, text string, kinds []string, selected []uuid.UUID) ([]uuid.UUID, error) {
 	references, err := s.catalog().ExplicitScopeReferences(ctx, text, kinds)
 	if err != nil {
 		return nil, err
 	}
 	var others []uuid.UUID
 	for _, ref := range references {
-		if ref.ID != selected && !slices.Contains(others, ref.ID) && containsSubject(text, ref.Mention) {
+		if !slices.Contains(selected, ref.ID) && !slices.Contains(others, ref.ID) && containsSubject(text, ref.Mention) {
 			others = append(others, ref.ID)
 			if len(others) == 9 {
 				break
@@ -313,8 +334,12 @@ func (s Service) subjects(ctx context.Context, question string, kinds, mentions 
 }
 
 func containsSubject(question, mention string) bool {
+	return subjectIndex(question, mention) >= 0
+}
+
+func subjectIndex(question, mention string) int {
 	if mention == "" || utf8.RuneCountInString(mention) > 120 {
-		return false
+		return -1
 	}
 	// Do not accept an ASCII ticker embedded inside another ticker or word.
 	isASCIIWord := func(r rune) bool {
@@ -322,7 +347,7 @@ func containsSubject(question, mention string) bool {
 	}
 	question, mention = strings.ToLower(question), strings.ToLower(mention)
 	if strings.ContainsFunc(mention, func(r rune) bool { return !isASCIIWord(r) }) {
-		return strings.Contains(question, mention)
+		return strings.Index(question, mention)
 	}
 	for start := 0; start < len(question); {
 		index := strings.Index(question[start:], mention)
@@ -340,9 +365,9 @@ func containsSubject(question, mention string) bool {
 			}
 		}
 		if !isASCIIWord(before) && !isASCIIWord(after) {
-			return true
+			return i
 		}
 		start = i + 1
 	}
-	return false
+	return -1
 }

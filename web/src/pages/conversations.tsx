@@ -243,6 +243,9 @@ export function conversationExamples(me: Me) {
     ...(me.conversation_topics?.includes('financing_balance')
       ? [`${shortName}的融资余额怎么变`]
       : []),
+    ...(me.conversation_topics?.includes('stock_comparison')
+      ? [me.synthetic ? '比较演示制造和同行的股价走势' : '比较宁德时代和比亚迪近 20 个交易日的股价']
+      : []),
   ];
 }
 
@@ -483,7 +486,9 @@ function TurnBody({
               ? '日成交'
               : turn.scope?.topic === 'financing_balance'
                 ? '融资余额'
-                : skillTitle[plan.skill_id]}
+                : turn.scope?.topic === 'stock_comparison'
+                  ? '股价横向对比'
+                  : skillTitle[plan.skill_id]}
           </h3>
           {Boolean(turn.scope?.window) && <p>窗口为 {turn.scope?.window} 个交易日</p>}
           <p>

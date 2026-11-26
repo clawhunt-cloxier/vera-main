@@ -137,7 +137,7 @@ def strict_subset(node, where):
 
 
 for name in ('section-output', 'verify-output', 'summary-output', 'plan-parse-output', 'conversation-answer-output', 'conversation-review-output', 'conversation-title-output',
-             'conversation-window-tool', 'conversation-depth-tool', 'conversation-reference-tool', 'conversation-knowledge-tool'):
+             'conversation-window-tool', 'conversation-depth-tool', 'conversation-reference-tool', 'conversation-knowledge-tool', 'conversation-comparison-tool'):
     schema = json.loads((root/f'contracts/model/{name}.schema.json').read_text())
     Draft202012Validator.check_schema(schema)
     strict_subset(schema, name)
@@ -161,7 +161,7 @@ for ds in cat['datasets']:
     assert len(names) == len(set(names)), ds['id']
     assert ds['default_tier'] in ('L1', 'L2', 'L3', 'L4'), ds['id']
     for g in ds['grain']:
-        assert g in names or g in ('entity_id', 'provider_id'), f"{ds['id']}: grain {g}"
+        assert g in names or g in ('entity_id', 'provider_id', 'raw_sha256'), f"{ds['id']}: grain {g}"
     for f in ds['fields']:
         assert f['unit'] in units, f"{ds['id']}.{f['name']}: unit"
         assert f['type'] in ('string', 'text', 'date', 'datetime', 'decimal', 'integer', 'boolean', 'enum', 'enum_ref'), f['name']

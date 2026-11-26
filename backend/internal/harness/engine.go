@@ -45,10 +45,11 @@ type Engine struct {
 	// RealResearch is VERA_REAL_RESEARCH_ENABLED: required before plans and tasks run on real data or real models.
 	RealResearch bool
 	// WithCloseResearchUse holds current TuShare usage rights for the callback.
-	WithCloseResearchUse  func(context.Context, func() error) error
-	CloseResearchCutoff   func(context.Context) (time.Time, error)
-	PrepareTuShareSubject func(context.Context, string) error
-	ResearchSupplements   []dataservice.ResearchSupplementSource
+	WithCloseResearchUse     func(context.Context, func() error) error
+	CloseResearchCutoff      func(context.Context) (time.Time, error)
+	PrepareTuShareSubject    func(context.Context, string) error
+	PrepareTuShareComparison func(context.Context, string, []string) (dataservice.ComparisonSample, error)
+	ResearchSupplements      []dataservice.ResearchSupplementSource
 }
 
 const PromptVersion = "1.1.0"
@@ -773,7 +774,7 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
 	case emquant.ObservationBriefVersion, emquant.ConversationObservationVersion, MixedObservationVersion:
 		err = e.observationPipeline(runCtx, parent, t, sk)
-	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion, CloseUnifiedVersion, ConversationCloseVersion:
+	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion, CloseUnifiedVersion, ConversationCloseVersion, ComparisonCloseVersion, legacyComparisonCloseVersion:
 		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
 			err = e.pipeline(runCtx, parent, t, sk)
 		}

@@ -46,7 +46,7 @@ Verify 的 `workspace-browser` 在 Chromium 中运行上述模拟浏览器套件
 ```bash
 cd backend
 go test -race ./internal/conversation ./internal/httpapi ./internal/harness ./internal/harness/model ./internal/app ./cmd/vera \
-  -run 'TestConversation|TestCloseConversationSourceWithRiver|TestGatewayOpenAI|TestObservationBriefDelivery|TestAdminUsageReportAndReconcile'
+  -run 'TestConversation|TestStockComparison|TestCloseConversationSourceWithRiver|TestGatewayOpenAI|TestObservationBriefDelivery|TestAdminUsageReportAndReconcile'
 ```
 
 测试使用独立 PostgreSQL、实际 River 工作者和仅在测试时安装的模型替身。`TestConversationNativeToolCalls` 使用本地模型 HTTP 替身，检查独立的研究、历史引用和答复工具。查询日成交后问「融资余额呢」需复用标的和窗口，并运行融资余额研究。测试同时检查澄清后自动执行、手选历史轮次优先、日期范围不适用、原始计算引用及计费留痕。工具与直接 JSON 回复均验证通用解释正文由模型生成。回归覆盖金融概念及追问、带交易术语的教育说明、语义拒绝投资建议和未经核验的公司数据，以及不适宜话题的重写。`TestGatewayOpenAIPrivateFormatRepair` 检查私有调用的格式纠错只修改首条系统消息，无论是否附带工具。未声明工具、虚构标的和非法参数均不创建任务。验收还覆盖新会话生成摘要标题、旧会话补生成标题、纯荐股请求、混合历史研究和目标价请求，以及旧客户端确认计划。对话的数据准备保留队列容量限制，同标的复用作业，独立入口的每日次数单独计数。其余回归覆盖两类短研究、冻结序列、幂等发送、账户隔离、权限撤回、删除和过期、迟到记账、时限及完整研报 PDF。合成 Choice 动态库与本地 S3 替身检查图表、明细和证据一致性以及快照留存。
@@ -59,6 +59,8 @@ VERA_CHAT_PASSWORD_FILE=/path/to/private-password npm run test:conversation-ui
 ```
 
 浏览器检查 1440×960 和 390×844 的密码登录、问候、金融追问、零息债券、反 T、非金融问题、不适宜话题的婉拒、拒绝荐股、混合请求、自动研究、证据、公式、摘要标题、刷新、历史删除和旧计划确认。两个视口使用不同的工作区。
+
+在启用 TuShare 收盘研究的预览验证横向对比。先提交「看看宁德时代近 20 个交易日的日成交」，接着问「相对新能源行业内其他公司呢？」。核对申万二级同行、20 个共同交易日和多线图。追问「这几只保持不变，改成 60 个交易日」后核对同组选股、相对基准差、证据、刷新与手机视口。另开会话验证点名比较。自动化测试核对不足覆盖、复权、同区间、各行收盘价和基准差，以及不同工作区之间的证据与公式隔离。
 
 使用启用搜索的 DeepSeek router 验收网页来源时，额外设置 `VERA_CHAT_EXPECT_WEB_SOURCES=1`。向对话提出金融概念问题及其追问，打开回复下的参考来源，并刷新页面确认来源随历史保留。`TestConversationPublicKnowledgeMessages` 检查公开搜索请求只来自登记标识。`TestConversationLegacyTitleClaimSurvivesInterruption` 核对中断后保存的标题与会话版本。运行 `cd backend && go test ./internal/harness/model -run '^TestOpenAIEducationSearch$'` 可核对返回来源与重定向处理。
 

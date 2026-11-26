@@ -2745,8 +2745,12 @@
             "type": "string",
             "enum": [
               "daily_trading",
-              "financing_balance"
+              "financing_balance",
+              "stock_comparison"
             ]
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/ConversationComparison"
           },
           "window": {
             "type": "integer",
@@ -2763,6 +2767,28 @@
           "subject_id",
           "skill_id"
         ]
+      },
+      "ConversationComparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Resolved comparison scope. The primary subject_id is the reference stock.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["stocks", "industry_peers"]
+          },
+          "other_ids": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {"type": "string", "format": "uuid"}
+          },
+          "sample_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Date of the industry membership and market-value sample."
+          }
+        },
+        "required": ["kind"]
       },
       "ConversationWebSource": {
         "type": "object",
@@ -3438,7 +3464,8 @@
               "type": "string",
               "enum": [
                 "daily_trading",
-                "financing_balance"
+                "financing_balance",
+                "stock_comparison"
               ]
             }
           },

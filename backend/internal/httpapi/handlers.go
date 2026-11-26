@@ -836,14 +836,14 @@ func (s *Server) recordEvidence(w http.ResponseWriter, r *http.Request, ws, id u
 		Version string
 	}
 	var citations []citation
+	completed := append([]string{harness.CloseUnifiedVersion, harness.ConversationFixtureVersion, harness.ComparisonFixtureVersion}, harness.CloseConversationVersions()...)
+	versions := append(slices.Clone(completed), "1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion)
 	err := db.InWorkspace(ctx, s.Pool, ws, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT t.id,t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
 			JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
 			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]) AND t.skill_version=ANY($3::text[])
 			AND (t.skill_version<>ALL($4::text[]) OR t.status='COMPLETED') AND `+visibleShortResearch+`
-			ORDER BY (t.skill_version=ANY($4::text[])),t.id`, id, s.historyVersions(),
-			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion, harness.CloseUnifiedVersion, harness.ConversationCloseVersion, harness.ConversationFixtureVersion},
-			[]string{harness.CloseUnifiedVersion, harness.ConversationCloseVersion, harness.ConversationFixtureVersion})
+			ORDER BY (t.skill_version=ANY($4::text[])),t.id`, id, s.historyVersions(), versions, completed)
 		if err != nil {
 			return err
 		}
@@ -968,6 +968,8 @@ func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidenc
 		if rec.ProviderID == "tushare" {
 			var location string
 			switch rec.DatasetID {
+			case dataservice.ComparisonSampleDataset:
+				location = "申万行业名录及当日总市值 · " + str("trade_date")
 			case "flow.dragon_tiger_day":
 				location = "龙虎榜日查询 · " + str("trade_date")
 			case "flow.dragon_tiger":

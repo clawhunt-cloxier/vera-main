@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
@@ -358,11 +359,15 @@ func (s *Server) conversationResult(w http.ResponseWriter, r *http.Request) erro
 			}
 		}
 	}
+	claimLimit := 3
+	if harness.IsComparisonVersion(doc.SkillVersion) {
+		claimLimit = dataservice.ComparisonSubjectLimit
+	}
 	for _, ref := range refs {
 		if c, ok := claimByRef[ref]; ok {
 			claims = append(claims, c)
 		}
-		if len(claims) == 3 {
+		if len(claims) == claimLimit {
 			break
 		}
 	}

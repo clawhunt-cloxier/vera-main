@@ -36,7 +36,7 @@ func LoadSchemas(dir string) (Schemas, error) {
 	out := Schemas{}
 	for _, name := range []string{"section-output", "verify-output", "summary-output", "plan-parse-output",
 		"conversation-answer-output", "conversation-review-output", "conversation-title-output",
-		"conversation-window-tool", "conversation-depth-tool", "conversation-reference-tool", "conversation-knowledge-tool"} {
+		"conversation-window-tool", "conversation-depth-tool", "conversation-reference-tool", "conversation-knowledge-tool", "conversation-comparison-tool"} {
 		p, _ := filepath.Abs(filepath.Join(dir, name+".schema.json"))
 		raw, err := os.ReadFile(p)
 		if err != nil {

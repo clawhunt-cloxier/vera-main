@@ -26,7 +26,7 @@ const (
 )
 
 func isConversationSkill(version string) bool {
-	return version == ConversationCloseVersion || version == ConversationFixtureVersion || version == emquant.ConversationObservationVersion
+	return IsCloseConversationVersion(version) || version == ConversationFixtureVersion || version == ComparisonFixtureVersion || version == emquant.ConversationObservationVersion
 }
 
 func conversationObservationSkill() *Skill {
@@ -42,6 +42,9 @@ func conversationObservationSkill() *Skill {
 }
 
 func ConversationWindows(topic string) []int {
+	if topic == ComparisonTopic {
+		return []int{5, 10, 20, 60}
+	}
 	if topic == FinancingBalanceTopic {
 		return []int{5, 20, 60, 120}
 	}
@@ -128,7 +131,7 @@ func conversationSkill(id, version string) *Skill {
 }
 
 func conversationDays(b *Bundle, version string) []string {
-	if version != ConversationCloseVersion {
+	if !IsCloseConversationVersion(version) {
 		return b.Days
 	}
 	completed := b.AsOf.In(cst)
@@ -244,7 +247,11 @@ func (e *Engine) ConversationTopics() []string {
 	case e.realResearchDisabled():
 		return []string{}
 	case e.hasCloseSkills(), e.Synthetic && e.Brief == nil:
-		return []string{DailyTradingTopic, FinancingBalanceTopic}
+		topics := []string{DailyTradingTopic, FinancingBalanceTopic}
+		if e.comparisonAvailable() {
+			topics = append(topics, ComparisonTopic)
+		}
+		return topics
 	case e.Brief != nil:
 		return []string{DailyTradingTopic}
 	default:
@@ -263,6 +270,7 @@ type ConversationResearchSpec struct {
 func (e *Engine) ConversationResearchSpec(skill, topic string) (ConversationResearchSpec, bool) {
 	if topic != "" {
 		if !slices.Contains(e.ConversationTopics(), topic) ||
+			(topic == ComparisonTopic && skill != "stock_analysis") ||
 			(topic == DailyTradingTopic && skill != "stock_analysis") ||
 			(topic == FinancingBalanceTopic && skill != "capital_flow") {
 			return ConversationResearchSpec{}, false
@@ -297,7 +305,7 @@ type ConversationLaunch struct {
 
 func (e *Engine) StartConversationResearch(ctx context.Context, ws uuid.UUID, subject dataservice.EntityRow, skill, topic string, window int, mode string, launch ConversationLaunch) (*Plan, error) {
 	spec, ok := e.ConversationResearchSpec(skill, topic)
-	if !ok {
+	if !ok || topic == ComparisonTopic {
 		return nil, errs.Unprocessable("SKILL_UNAVAILABLE", "当前环境未开放该研究能力")
 	}
 	if !slices.Contains(spec.Subjects, subject.Kind) {
@@ -510,8 +518,8 @@ func (e *Engine) WithConversationSnapshot(ctx context.Context, ws, task uuid.UUI
 			JOIN research_plans p ON p.workspace_id=r.workspace_id AND p.id=r.plan_id
 			JOIN conversation_turns t ON t.workspace_id=r.workspace_id AND t.id=p.conversation_turn_id
 			JOIN conversations c ON c.workspace_id=r.workspace_id AND c.id=t.conversation_id
-			WHERE r.workspace_id=$1 AND r.id=$2 AND r.skill_version=$3 AND c.deleted_at IS NULL AND c.expires_at>clock_timestamp()
-			FOR SHARE OF c`, ws, task, ConversationCloseVersion).Scan(&hash)
+			WHERE r.workspace_id=$1 AND r.id=$2 AND r.skill_version=ANY($3::text[]) AND c.deleted_at IS NULL AND c.expires_at>clock_timestamp()
+			FOR SHARE OF c`, ws, task, CloseConversationVersions()).Scan(&hash)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errs.NotFound()
 		}

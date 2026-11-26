@@ -146,9 +146,9 @@ func (e *Engine) enqueueSubjectPreparation(ctx context.Context, ws uuid.UUID, co
 		}
 		var outstanding, daily int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FILTER(WHERE finalized_at IS NULL),
-			count(*) FILTER(WHERE args->>'workspace'=$2 AND created_at > now()-interval '24 hours'
-				AND args->>'source' IS DISTINCT FROM $3)
-			FROM river_job WHERE kind=$1`, args.Kind(), ws.String(), conversationPreparationSource).Scan(&outstanding, &daily); err != nil {
+			count(*) FILTER(WHERE kind=$2 AND args->>'workspace'=$3 AND created_at > now()-interval '24 hours'
+				AND args->>'source' IS DISTINCT FROM $4)
+			FROM river_job WHERE queue=$1`, prepareQueue, args.Kind(), ws.String(), conversationPreparationSource).Scan(&outstanding, &daily); err != nil {
 			return err
 		}
 		if args.Source != conversationPreparationSource && daily >= e.Policy.Quota.UserDailyTasks {

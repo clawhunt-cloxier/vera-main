@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["stocks", "industry_peers", "previous"],
+      "description": "Use stocks for named stock comparisons, industry_peers for a stock versus its own registered industry peers, or previous to keep the previous comparison set."
+    },
+    "stock_mentions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Exact A-share company names or codes in the current message. Copy every explicitly asked-for stock. With industry_peers, supply only the anchor if named. With previous, pass []."
+    },
+    "subject_source": {
+      "type": "string",
+      "enum": ["message", "context"],
+      "description": "Use context if the user refers to a stock or comparison set from this conversation. Use message if the user names the entire set or the industry anchor."
+    },
+    "trading_days": {
+      "type": "integer",
+      "description": "Explicit trading-day count (5, 10, 20, 60). Pass 0 when the user omits it, or -1 for explicit unsupported time ranges."
+    },
+    "advice": {
+      "type": "string",
+      "enum": ["none", "declined"],
+      "description": "Use declined only if the user separately asked for investment advice alongside this historical comparison."
+    }
+  },
+  "required": ["kind", "stock_mentions", "subject_source", "trading_days", "advice"]
+}
