@@ -120,7 +120,8 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 	tools := s.agentTools()
 	prompt := answerPrompt
 	dispatchLimit := 4
-	if gateway.Profiles["router"].SupportsEducationSearch() {
+	searchEnabled := profile.SupportsEducationSearch()
+	if searchEnabled {
 		prompt += "\n\n" + knowledgeRoutingPrompt
 		dispatchLimit += 2
 	}
@@ -148,14 +149,12 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 		return s.fail(ctx, args, "这次未能生成回复，请稍后重试。")
 	}
 	var sources []model.WebCitation
-	lookup := false
 	if call := meta.ToolCall; call != nil {
 		switch call.Function.Name {
 		case replyTool:
 			raw = json.RawMessage(call.Function.Arguments)
 		case knowledgeTool:
-			raw, sources = s.lookupKnowledge(callCtx, args, *call, send)
-			lookup = true
+			raw, sources = s.lookupKnowledge(callCtx, args, *call, turn.Text, history, send)
 		default:
 			return s.runTool(ctx, args, turn, state, *call)
 		}
@@ -191,7 +190,7 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 	}
 	return s.update(ctx, args, replyState, answer.Message, intent{
 		FinanceAnswer: answer.Kind == "education" || answer.Kind == "clarify",
-		WebSources:    sources, SearchWithoutSources: lookup && len(sources) == 0 && answer.Kind == "education",
+		WebSources:    sources, SearchWithoutSources: searchEnabled && len(sources) == 0 && answer.Kind == "education",
 	})
 }
 

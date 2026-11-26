@@ -140,7 +140,7 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 			return err
 		}
 		if conversationID == nil {
-			if err := tx.QueryRow(ctx, `INSERT INTO conversations(workspace_id,title) VALUES($1,'') RETURNING id`, sender.Workspace).Scan(&out.ConversationID); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO conversations(workspace_id,title) VALUES($1,$2) RETURNING id`, sender.Workspace, defaultConversationTitle).Scan(&out.ConversationID); err != nil {
 				return err
 			}
 		} else {
@@ -202,9 +202,11 @@ func touch(ctx context.Context, tx pgx.Tx, conv uuid.UUID) error {
 	return err
 }
 
+const defaultConversationTitle = "新会话"
 const titleDeadline = `c.created_at+interval '1 minute'>clock_timestamp()`
 
-const summaryColumns = `c.id,coalesce(nullif(c.title,''),'新会话'),c.revision,c.updated_at,c.title='' AND ` + titleDeadline
+const summaryColumns = `c.id,coalesce(nullif(c.title,''),'` + defaultConversationTitle + `'),c.revision,c.updated_at,
+	c.title IN ('','` + defaultConversationTitle + `') AND ` + titleDeadline
 
 func (s Service) List(ctx context.Context, ws uuid.UUID, n int, at *time.Time, id *uuid.UUID) ([]Summary, error) {
 	items := []Summary{}

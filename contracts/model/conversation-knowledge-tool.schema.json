@@ -1,11 +1,15 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["query", "message"],
+  "required": ["topic", "focus", "message"],
   "properties": {
-    "query": {
+    "topic": {
       "type": "string",
-      "description": "Self-contained, anonymous public finance question. Do not include URLs, names of people or securities, or portfolio details."
+      "description": "Exact public financial topic identifier from the system prompt."
+    },
+    "focus": {
+      "type": "string",
+      "description": "Exact public explanation focus identifier from the system prompt."
     },
     "message": {
       "type": "string",

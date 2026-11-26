@@ -1,4 +1,5 @@
 {
-  "query": "什么是零息债券？",
+  "topic": "zero_coupon_bond",
+  "focus": "definition",
   "message": "零息债券通常在存续期内没有定期票息，到期按条款一次性兑付。"
 }

@@ -48,7 +48,7 @@ func (s Service) agentTools() []model.ToolSpec {
 	if s.Engine.Gateway.Profiles["router"].SupportsEducationSearch() {
 		tools = append(tools, model.ToolSpec{
 			Name: knowledgeTool, Schema: "conversation-knowledge-tool",
-			Description: "用 DeepSeek 联网查找通用金融术语、产品机制和研究方法的公开资料。不用于证券、市场报价、完整报告、私人信息或打开用户提供的链接。",
+			Description: "选择系统提示中的公开主题和侧重点，查证通用金融知识与概念追问。具体证券、市场报价和研报使用各自的研究工具。",
 		})
 	}
 	for _, tool := range researchTools {

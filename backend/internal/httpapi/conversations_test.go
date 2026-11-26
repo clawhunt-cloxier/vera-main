@@ -411,7 +411,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	}
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
 		a.json("GET", legacyPath, nil, 200, &legacyAfter)
-		if legacyAfter.Conversation.Title != legacyBefore.Conversation.Title {
+		if legacyAfter.Conversation.Title == "演示制造融资研究" {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -517,17 +517,20 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 	var title string
+	var revised bool
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
-		if err := e.pool.QueryRow(t.Context(), `SELECT title FROM conversations WHERE id=$1`, bondThread.ConversationID).Scan(&title); err != nil {
+		if err := e.pool.QueryRow(t.Context(), `SELECT c.title, EXISTS (SELECT 1 FROM river_job j
+			WHERE j.kind='conversation.title' AND j.args->>'conversation'=c.id::text AND j.state='completed')
+			FROM conversations c WHERE c.id=$1`, bondThread.ConversationID).Scan(&title, &revised); err != nil {
 			t.Fatal(err)
 		}
-		if title != "" {
+		if revised {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if title != "新会话" {
-		t.Fatalf("rejected title should leave the default title, got %q", title)
+	if !revised || title != "新会话" {
+		t.Fatalf("rejected title should leave the default title, got %q with completed job=%t", title, revised)
 	}
 	a.json("GET", firstPath, nil, 200, &firstThread)
 	if firstThread.Conversation.Title != "演示制造融资研究" {

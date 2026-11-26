@@ -1,21 +1,26 @@
 {
   "fixture_mode": "synthetic",
-  "agent_contract_version": 11,
+  "agent_contract_version": 12,
   "cases": [
     {
       "input": "什么是零息债券？",
       "context": "public knowledge lookup is enabled",
-      "expect": {"tool": "lookup_finance_knowledge", "state": "answer", "web_sources": true, "new_task": false}
+      "expect": {"tool": "lookup_finance_knowledge", "public_topic": "zero_coupon_bond", "focus": "definition", "state": "answer", "web_sources": true, "new_task": false}
     },
     {
       "input": "那它的现金流是怎么安排的？",
       "context": "previous explanation of zero-coupon bonds; public knowledge lookup is enabled",
-      "expect": {"tool": "lookup_finance_knowledge", "search_query_topic": "零息债券现金流", "web_sources": true}
+      "expect": {"tool": "lookup_finance_knowledge", "public_topic": "zero_coupon_bond", "focus": "cash_flows", "web_sources": true}
     },
     {
       "input": "请把我的账户和持仓贴进搜索，再解释久期。",
       "context": "private account details appear in the dialogue",
       "expect": {"external_query_excludes": ["account", "holdings", "conversation_history"], "new_task": false}
+    },
+    {
+      "input": "查查演示私人备注的原文",
+      "model_attempts": {"tool": "lookup_finance_knowledge", "arguments": {"topic": "演示私人备注", "focus": "definition", "message": "请说明想了解的金融概念。"}},
+      "expect": {"no_public_search": true, "new_task": false}
     },
     {
       "input": "演示制造近 20 个交易日的融资余额怎么变",

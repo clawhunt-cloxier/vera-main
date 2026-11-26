@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db/dbtest"
@@ -72,6 +74,69 @@ func TestConversationTitleBoundary(t *testing.T) {
 		if validTitle(title) {
 			t.Errorf("accepted invalid title %q", title)
 		}
+	}
+}
+
+func TestConversationLegacyTitleClaimSurvivesInterruption(t *testing.T) {
+	pool := dbtest.New(t)
+	s := Service{Engine: &harness.Engine{Pool: pool}}
+	const firstMessage = "请给我介绍零息债券，消息里有一段模拟私人备注"
+	args := titleArgs{Legacy: true}
+	if err := pool.QueryRow(t.Context(), `WITH u AS (
+		INSERT INTO users(issuer,subject) VALUES('test','legacy-title-claim') RETURNING id
+	), w AS (
+		INSERT INTO workspaces(owner_user_id) SELECT id FROM u RETURNING id
+	), c AS (
+		INSERT INTO conversations(workspace_id,title,revision) SELECT id,left($1,48),7 FROM w RETURNING id,workspace_id
+	)
+	INSERT INTO conversation_turns(workspace_id,conversation_id,client_message_id,request_hash,ordinal,channel,body,state)
+	SELECT workspace_id,id,uuidv7(),'test',1,'web',$1,'unavailable' FROM c
+	RETURNING workspace_id,conversation_id,id`, firstMessage).Scan(&args.Workspace, &args.Conversation, &args.FirstTurn); err != nil {
+		t.Fatal(err)
+	}
+	if first, err := s.claimTitle(t.Context(), args); err != nil || first != firstMessage {
+		t.Fatalf("first-message claim returned %q, %v", first, err)
+	}
+	// Simulate checking the persisted state after a worker dies before dispatch.
+	if _, err := s.claimTitle(t.Context(), args); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("redelivery should not claim an already reserved title: %v", err)
+	}
+	var title string
+	var revision int64
+	if err := pool.QueryRow(t.Context(), `SELECT title,revision FROM conversations WHERE id=$1`, args.Conversation).Scan(&title, &revision); err != nil {
+		t.Fatal(err)
+	}
+	if title != defaultConversationTitle || revision != 7 {
+		t.Fatalf("interrupted title retained a legacy excerpt or changed the revision: title=%q revision=%d", title, revision)
+	}
+}
+
+func TestConversationPublicKnowledgeMessages(t *testing.T) {
+	const private = "演示私人持仓备注"
+	messages := publicKnowledgeMessages(knowledgeDraft{Topic: "zero_coupon_bond", Focus: "cash_flows", Message: private})
+	if len(messages) != 2 || messages[1].Role != "user" || messages[1].Content != "零息债券：现金流的结构和发生时间。" || strings.Contains(messages[0].Content, private) {
+		t.Fatalf("search payload was not built from the public catalog: %+v", messages)
+	}
+	for _, args := range []knowledgeDraft{
+		{Topic: private, Focus: "cash_flows"},
+		{Topic: "zero_coupon_bond", Focus: "cash_flows " + private},
+		{Topic: "zero_coupon_bond", Focus: ""},
+	} {
+		if messages := publicKnowledgeMessages(args); messages != nil {
+			t.Errorf("invalid identifiers produced a search payload: %+v", messages)
+		}
+	}
+}
+
+func TestConversationPublicCitationsBoundEncodedValues(t *testing.T) {
+	longHost := strings.Repeat(strings.Repeat("x", 60)+".", 3) + "example"
+	tooLongEscaped := "https://example.com/" + strings.Repeat("é", 400)
+	got := publicCitations([]model.WebCitation{
+		{URL: tooLongEscaped, Title: "过长的转义路径"},
+		{URL: "https://" + longHost + "/"},
+	})
+	if len(got) != 1 || got[0].URL != "https://"+longHost+"/" || got[0].Title != "网页来源" {
+		t.Fatalf("citation exceeded the contract's limits: %+v", got)
 	}
 }
 

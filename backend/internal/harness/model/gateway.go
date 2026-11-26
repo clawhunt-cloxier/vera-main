@@ -548,7 +548,7 @@ const UnknownReleaseAfter = 24 * time.Hour
 func (g *Gateway) ReleaseUnknown(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error) {
 	rows, err := g.Pool.Query(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=0, auto_released_at=now(), finished_at=coalesce(finished_at, now()),
 		error=CASE WHEN content_erased_at IS NULL THEN left(coalesce(error,'') || ' [auto-released: no reconciliation within 24h]', 1000) END
-		WHERE (status='UNKNOWN' OR (status='SENT' AND step_key IN ('conversation_agent','conversation_education_search'))) AND sent_at < $1 RETURNING id`, cutoff)
+		WHERE (status='UNKNOWN' OR (status='SENT' AND step_key IN ('conversation_agent','conversation_education_search','conversation_title'))) AND sent_at < $1 RETURNING id`, cutoff)
 	if err != nil {
 		return nil, err
 	}

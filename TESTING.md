@@ -60,7 +60,7 @@ VERA_CHAT_PASSWORD_FILE=/path/to/private-password npm run test:conversation-ui
 
 浏览器检查 1440×960 和 390×844 的密码登录、问候、金融追问、零息债券、反 T、非金融问题、不适宜话题的婉拒、拒绝荐股、混合请求、自动研究、证据、公式、摘要标题、刷新、历史删除和旧计划确认。两个视口使用不同的工作区。
 
-使用启用搜索的 DeepSeek router 验收网页来源时，额外设置 `VERA_CHAT_EXPECT_WEB_SOURCES=1`。向对话提出金融概念问题及其追问，打开回复下的参考来源，并刷新页面确认来源随历史保留。链路级回归可运行 `cd backend && go test ./internal/harness/model -run '^TestOpenAIEducationSearch$'`，核对返回来源与重定向处理。
+使用启用搜索的 DeepSeek router 验收网页来源时，额外设置 `VERA_CHAT_EXPECT_WEB_SOURCES=1`。向对话提出金融概念问题及其追问，打开回复下的参考来源，并刷新页面确认来源随历史保留。`TestConversationPublicKnowledgeMessages` 检查公开搜索请求只来自登记标识。`TestConversationLegacyTitleClaimSurvivesInterruption` 核对中断后保存的标题与会话版本。运行 `cd backend && go test ./internal/harness/model -run '^TestOpenAIEducationSearch$'` 可核对返回来源与重定向处理。
 
 ## 2. 按任务补齐的测试
 

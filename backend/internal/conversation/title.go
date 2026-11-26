@@ -105,7 +105,7 @@ func (s Service) nameConversation(ctx context.Context, args titleArgs) error {
 	if !s.hasTitleModel(ctx) {
 		return nil
 	}
-	first, original, err := s.claimTitle(ctx, args)
+	first, err := s.claimTitle(ctx, args)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -114,31 +114,32 @@ func (s Service) nameConversation(ctx context.Context, args titleArgs) error {
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	title := s.generateTitle(callCtx, args, first, original)
+	title := s.generateTitle(callCtx, args, first)
 	if title == "" {
-		title = "新会话"
+		return nil // The claim already stored the fallback title.
 	}
 	return db.InWorkspace(ctx, s.Engine.Pool, args.Workspace, func(tx pgx.Tx) error {
 		// Metadata changes leave the revision and history ordering untouched.
 		_, err := tx.Exec(ctx, `UPDATE conversations c SET title=$2
-			WHERE c.id=$1 AND c.title=$3 AND c.title_started AND `+visible, args.Conversation, title, original)
+			WHERE c.id=$1 AND c.title=$3 AND c.title_started AND `+visible, args.Conversation, title, defaultConversationTitle)
 		return err
 	})
 }
 
-// Reserve the title before calling the vendor so a restarted worker cannot
-// dispatch a second generation.
-func (s Service) claimTitle(ctx context.Context, args titleArgs) (string, string, error) {
-	var first, original string
+// Reserve the title and replace any legacy excerpt in the same transaction.
+// If a worker stops after this point, the fallback is already persisted and
+// a restarted worker cannot dispatch another generation.
+func (s Service) claimTitle(ctx context.Context, args titleArgs) (string, error) {
+	var first string
 	err := db.InWorkspace(ctx, s.Engine.Pool, args.Workspace, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `UPDATE conversations c SET title_started=true
+		return tx.QueryRow(ctx, `UPDATE conversations c SET title_started=true,title=$4
 			FROM conversation_turns t WHERE c.id=$1 AND t.id=$2 AND t.ordinal=1
 			AND t.conversation_id=c.id AND t.workspace_id=c.workspace_id
 			AND NOT c.title_started AND `+visible+`
-			AND CASE WHEN $3 THEN c.title<>'' AND c.title=left(t.body,48) ELSE c.title='' AND `+titleDeadline+` END
-			RETURNING t.body,c.title`, args.Conversation, args.FirstTurn, args.Legacy).Scan(&first, &original)
+			AND CASE WHEN $3 THEN c.title<>'' AND c.title=left(t.body,48) ELSE c.title IN ('',$4) AND `+titleDeadline+` END
+			RETURNING t.body`, args.Conversation, args.FirstTurn, args.Legacy, defaultConversationTitle).Scan(&first)
 	})
-	return first, original, err
+	return first, err
 }
 
 func (s Service) hasTitleModel(ctx context.Context) bool {
@@ -150,7 +151,7 @@ func (s Service) hasTitleModel(ctx context.Context) bool {
 	return ok && profile.Adapter != "sim" && profile.Adapter != "record"
 }
 
-func (s Service) generateTitle(ctx context.Context, args titleArgs, first, original string) string {
+func (s Service) generateTitle(ctx context.Context, args titleArgs, first string) string {
 	gateway := s.Engine.Gateway
 	send := func(ctx context.Context, dispatch func() (model.Raw, error)) (raw model.Raw, err error) {
 		err = db.InWorkspace(ctx, s.Engine.Pool, args.Workspace, func(tx pgx.Tx) error {
@@ -159,7 +160,7 @@ func (s Service) generateTitle(ctx context.Context, args titleArgs, first, origi
 			}
 			var id uuid.UUID
 			if err := tx.QueryRow(ctx, `SELECT c.id FROM conversations c WHERE c.id=$1 AND c.title=$2 AND c.title_started AND `+visible+
-				` AND ($3 OR `+titleDeadline+`)`, args.Conversation, original, args.Legacy).Scan(&id); err != nil {
+				` AND ($3 OR `+titleDeadline+`)`, args.Conversation, defaultConversationTitle, args.Legacy).Scan(&id); err != nil {
 				return err
 			}
 			raw, err = dispatch()
