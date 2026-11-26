@@ -11,25 +11,25 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// ComparisonCache reads the canonical vendor publications at a fixed cutoff.
+// MarketWindowCache reads the canonical vendor publications at a fixed cutoff.
 // The collector uses it inside the provider's publication lock.
-type ComparisonCache struct {
+type MarketWindowCache struct {
 	store *Store
 	asOf  time.Time
 }
 
-func (s *Store) ComparisonCache(asOf time.Time) ComparisonCache {
-	return ComparisonCache{store: s, asOf: asOf}
+func (s *Store) MarketWindowCache(asOf time.Time) MarketWindowCache {
+	return MarketWindowCache{store: s, asOf: asOf}
 }
 
-type ComparisonDateRange struct {
+type MarketDateRange struct {
 	From, To time.Time
 }
 
-// ComparisonMissingRanges returns runs of missing dates in the supplied calendar.
+// MarketMissingRanges returns runs of missing dates in the supplied calendar.
 // Dates must be in order. The resulting queries can span nontrading days.
-func ComparisonMissingRanges(days []time.Time, covered map[string]bool) []ComparisonDateRange {
-	var gaps []ComparisonDateRange
+func MarketMissingRanges(days []time.Time, covered map[string]bool) []MarketDateRange {
+	var gaps []MarketDateRange
 	open := false
 	for _, day := range days {
 		if covered[day.Format(time.DateOnly)] {
@@ -39,14 +39,14 @@ func ComparisonMissingRanges(days []time.Time, covered map[string]bool) []Compar
 		if open {
 			gaps[len(gaps)-1].To = day
 		} else {
-			gaps = append(gaps, ComparisonDateRange{From: day, To: day})
+			gaps = append(gaps, MarketDateRange{From: day, To: day})
 			open = true
 		}
 	}
 	return gaps
 }
 
-func (c ComparisonCache) Calendar(ctx context.Context, from, to time.Time) (map[string]bool, error) {
+func (c MarketWindowCache) Calendar(ctx context.Context, from, to time.Time) (map[string]bool, error) {
 	rows, err := c.rows(ctx, "ref.trading_calendar", nil, nil, &from, &to)
 	days := make(map[string]bool, len(rows))
 	for _, row := range rows {
@@ -57,7 +57,7 @@ func (c ComparisonCache) Calendar(ctx context.Context, from, to time.Time) (map[
 	return days, err
 }
 
-func (c ComparisonCache) Stock(ctx context.Context, code string) (EntityRow, error) {
+func (c MarketWindowCache) Stock(ctx context.Context, code string) (EntityRow, error) {
 	if c.store == nil {
 		return EntityRow{}, nil
 	}
@@ -68,22 +68,41 @@ func (c ComparisonCache) Stock(ctx context.Context, code string) (EntityRow, err
 	return entity, err
 }
 
-func (c ComparisonCache) StockGaps(ctx context.Context, entity EntityRow, days []time.Time) ([]ComparisonDateRange, error) {
-	if entity.ID == uuid.Nil {
-		return ComparisonMissingRanges(days, nil), nil
+func (c MarketWindowCache) StockGaps(ctx context.Context, entity EntityRow, days []time.Time) ([]MarketDateRange, error) {
+	return c.stockGaps(ctx, entity, days, "mkt.daily_bar", func(row StoredRecord) bool {
+		suspended, _ := row.Payload["suspended"].(bool)
+		return suspended || (comparisonPositive(row, "close") && comparisonPositive(row, "adj_factor"))
+	})
+}
+
+func (c MarketWindowCache) IndicatorGaps(ctx context.Context, entity EntityRow, days []time.Time, dataset string) ([]MarketDateRange, error) {
+	return c.stockGaps(ctx, entity, days, dataset, func(row StoredRecord) bool {
+		if dataset == "flow.margin" {
+			return nonnegativeField(row, "financing_balance")
+		}
+		suspended, _ := row.Payload["suspended"].(bool)
+		return suspended || (nonnegativeField(row, "amount") && nonnegativeField(row, "volume"))
+	})
+}
+
+func (c MarketWindowCache) stockGaps(ctx context.Context, entity EntityRow, days []time.Time, dataset string, validRow func(StoredRecord) bool) ([]MarketDateRange, error) {
+	if len(days) == 0 {
+		return nil, nil
 	}
-	rows, err := c.rows(ctx, "mkt.daily_bar", []uuid.UUID{entity.ID}, nil, &days[0], &days[len(days)-1])
+	if entity.ID == uuid.Nil {
+		return MarketMissingRanges(days, nil), nil
+	}
+	rows, err := c.rows(ctx, dataset, []uuid.UUID{entity.ID}, nil, &days[0], &days[len(days)-1])
 	valid := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		suspended, _ := row.Payload["suspended"].(bool)
-		if suspended || (comparisonPositive(row, "close") && comparisonPositive(row, "adj_factor")) {
+		if validRow(row) {
 			valid[comparisonString(row, "trade_date")] = true
 		}
 	}
-	return ComparisonMissingRanges(days, valid), err
+	return MarketMissingRanges(days, valid), err
 }
 
-func (c ComparisonCache) IndexGaps(ctx context.Context, code string, days []time.Time) ([]ComparisonDateRange, error) {
+func (c MarketWindowCache) IndexGaps(ctx context.Context, code string, days []time.Time) ([]MarketDateRange, error) {
 	rows, err := c.rows(ctx, "mkt.index_bar", nil, []string{code}, &days[0], &days[len(days)-1])
 	valid := make(map[string]bool, len(rows))
 	for _, row := range rows {
@@ -91,10 +110,10 @@ func (c ComparisonCache) IndexGaps(ctx context.Context, code string, days []time
 			valid[comparisonString(row, "trade_date")] = true
 		}
 	}
-	return ComparisonMissingRanges(days, valid), err
+	return MarketMissingRanges(days, valid), err
 }
 
-func (c ComparisonCache) Industry(ctx context.Context, anchor EntityRow, day time.Time) (string, error) {
+func (c MarketWindowCache) Industry(ctx context.Context, anchor EntityRow, day time.Time) (string, error) {
 	if anchor.ID == uuid.Nil {
 		return "", nil
 	}
@@ -110,7 +129,7 @@ func (c ComparisonCache) Industry(ctx context.Context, anchor EntityRow, day tim
 	return code, err
 }
 
-func (c ComparisonCache) Sample(ctx context.Context, anchor EntityRow, day time.Time) (ComparisonSample, error) {
+func (c MarketWindowCache) Sample(ctx context.Context, anchor EntityRow, day time.Time) (ComparisonSample, error) {
 	var sample ComparisonSample
 	if anchor.ID == uuid.Nil {
 		return sample, nil
@@ -130,7 +149,7 @@ func (c ComparisonCache) Sample(ctx context.Context, anchor EntityRow, day time.
 	return sample, err
 }
 
-func (c ComparisonCache) rows(ctx context.Context, dataset string, entities []uuid.UUID, indexes []string, from, to *time.Time) ([]StoredRecord, error) {
+func (c MarketWindowCache) rows(ctx context.Context, dataset string, entities []uuid.UUID, indexes []string, from, to *time.Time) ([]StoredRecord, error) {
 	if c.store == nil {
 		return nil, nil
 	}
@@ -146,4 +165,9 @@ func comparisonString(row StoredRecord, field string) string {
 func comparisonPositive(row StoredRecord, field string) bool {
 	value, err := decimal.NewFromString(comparisonString(row, field))
 	return err == nil && value.IsPositive()
+}
+
+func nonnegativeField(row StoredRecord, field string) bool {
+	value, err := decimal.NewFromString(comparisonString(row, field))
+	return err == nil && !value.IsNegative()
 }

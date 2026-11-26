@@ -34,16 +34,20 @@ func (w *comparisonPreparationWorker) Work(ctx context.Context, job *river.Job[p
 	}
 	sample, err := w.e.PrepareTuShareComparison(ctx, dataservice.ComparisonPreparation(job.Args))
 	if err != nil {
-		var providerErr *dataservice.ProviderError
-		if errors.As(err, &providerErr) {
-			return errors.New(string(providerErr.Class))
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return errors.New("TuShare 对比数据采集或发布失败")
+		return marketPreparationError(ctx, err, "TuShare 对比数据采集或发布失败")
 	}
 	return river.RecordOutput(ctx, sample)
+}
+
+func marketPreparationError(ctx context.Context, err error, fallback string) error {
+	var providerErr *dataservice.ProviderError
+	if errors.As(err, &providerErr) {
+		return errors.New(string(providerErr.Class))
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return errors.New(fallback)
 }
 
 // PrepareComparison binds the request to an active turn. It coalesces matching
@@ -82,6 +86,12 @@ func (e *Engine) PrepareComparison(ctx context.Context, ws, turn uuid.UUID, revi
 	args := prepareComparisonArgs{AnchorCode: anchor.Code, OtherCodes: codes, ComparisonBenchmarks: benchmarks,
 		SampleIndustry: sampleIndustry, SingleStock: p.SingleStock, Window: window,
 		CloseCutoff: dataservice.ComparisonCloseDay(e.Now()).Format(time.DateOnly)}
+	result, err := e.requestWindowPreparation(ctx, ws, turn, revision, args, &sample)
+	return result, sample, err
+}
+
+func (e *Engine) requestWindowPreparation(ctx context.Context, ws, turn uuid.UUID, revision int64, args river.JobArgs, output any) (SubjectPreparation, error) {
+	result := SubjectPreparation{Status: "pending"}
 	err := db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
 		if _, err := lockPendingTurn(ctx, tx, turn, revision); err != nil {
 			return err
@@ -95,7 +105,7 @@ func (e *Engine) PrepareComparison(ctx context.Context, ws, turn uuid.UUID, revi
 			coalesce(finalized_at > now()-interval '2 minutes',false),
 			coalesce(errors[array_upper(errors,1)]->>'error',''), coalesce(metadata->'output','{}'::jsonb)
 			FROM river_job WHERE kind=$1 AND args = to_jsonb($2::jsonb)
-			ORDER BY id DESC LIMIT 1`, args.Kind(), args).Scan(&state, &recent, &reusable, &failure, &sample)
+			ORDER BY id DESC LIMIT 1`, args.Kind(), args).Scan(&state, &recent, &reusable, &failure, output)
 		if err == nil {
 			switch state {
 			case "completed":
@@ -107,7 +117,7 @@ func (e *Engine) PrepareComparison(ctx context.Context, ws, turn uuid.UUID, revi
 				if recent {
 					message := preparationFailure(failure)
 					if failure == context.DeadlineExceeded.Error() {
-						message = "对比行情准备超过时限，请稍后重试。"
+						message = "研究数据准备超过时限，请稍后重试。"
 					}
 					result = SubjectPreparation{Status: "failed", Message: message}
 					return nil
@@ -128,5 +138,5 @@ func (e *Engine) PrepareComparison(ctx context.Context, ws, turn uuid.UUID, revi
 		_, err = e.River.InsertTx(ctx, tx, args, &river.InsertOpts{Queue: prepareQueue, MaxAttempts: 1})
 		return err
 	})
-	return result, sample, err
+	return result, err
 }

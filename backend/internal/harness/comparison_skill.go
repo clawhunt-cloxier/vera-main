@@ -39,11 +39,15 @@ func isFixtureComparisonVersion(version string) bool {
 }
 
 func IsCloseConversationVersion(version string) bool {
-	return version == ConversationCloseVersion || IsCloseComparisonVersion(version)
+	return isCloseIndicatorVersion(version) || IsCloseComparisonVersion(version)
+}
+
+func isCloseIndicatorVersion(version string) bool {
+	return version == ConversationCloseVersion || version == legacyConversationCloseVersion
 }
 
 func CloseConversationVersions() []string {
-	return []string{ConversationCloseVersion, ComparisonCloseVersion, rankedComparisonCloseVersion, legacyComparisonCloseVersion}
+	return []string{ConversationCloseVersion, legacyConversationCloseVersion, ComparisonCloseVersion, rankedComparisonCloseVersion, legacyComparisonCloseVersion}
 }
 
 // ComparisonParams stores the resolved comparison set. The subject of the

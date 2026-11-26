@@ -15,7 +15,7 @@ import (
 	ds "github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 )
 
-var errComparisonCacheMiss = errors.New("comparison coverage missing")
+var errMarketWindowCacheMiss = errors.New("comparison coverage missing")
 
 // PrepareComparison serves authorized canonical records on a complete cache hit.
 // On a miss, recheck coverage inside the provider's collection lock so concurrent
@@ -29,28 +29,28 @@ func (p *Provider) PrepareComparison(ctx context.Context, store *ds.Store, reque
 	if err != nil {
 		return sample, err
 	}
-	_, sample, err = p.collectComparison(ctx, request, store.ComparisonCache(at), at, true)
-	if !errors.Is(err, errComparisonCacheMiss) {
+	_, sample, err = p.collectComparison(ctx, request, store.MarketWindowCache(at), at, true)
+	if !errors.Is(err, errMarketWindowCacheMiss) {
 		return sample, err
 	}
 	_, err = store.SyncResearchObserved(ctx, p.ID(), func(ctx context.Context) (ds.Provider, error) {
 		at := p.Now()
-		batch, selected, err := p.collectComparison(ctx, request, store.ComparisonCache(at), at, false)
+		batch, selected, err := p.collectComparison(ctx, request, store.MarketWindowCache(at), at, false)
 		sample = selected
 		return batch, err
 	})
 	return sample, err
 }
 
-type comparisonCollector struct {
+type marketWindowCollector struct {
 	marketCollector
-	cache     ds.ComparisonCache
+	cache     ds.MarketWindowCache
 	cacheOnly bool
 }
 
 // collectComparison uses the canonical closing mappings. The sample is picked
 // against the dated industry roster before inspecting any closing prices.
-func (p *Provider) collectComparison(ctx context.Context, request ds.ComparisonPreparation, cache ds.ComparisonCache, end time.Time, cacheOnly bool) (ds.Provider, ds.ComparisonSample, error) {
+func (p *Provider) collectComparison(ctx context.Context, request ds.ComparisonPreparation, cache ds.MarketWindowCache, end time.Time, cacheOnly bool) (ds.Provider, ds.ComparisonSample, error) {
 	var sample ds.ComparisonSample
 	anchor, others, benchmarks := request.AnchorCode, request.OtherCodes, request.ComparisonBenchmarks
 	codes := append([]string{anchor}, others...)
@@ -81,11 +81,11 @@ func (p *Provider) collectComparison(ctx context.Context, request ds.ComparisonP
 		}
 		through = day
 	}
-	c := comparisonCollector{
+	c := marketWindowCollector{
 		marketCollector: marketCollector{Source: p.source, ctx: ctx, code: anchor, until: through.Format(marketDay)},
 		cache:           cache, cacheOnly: cacheOnly,
 	}
-	days, calendarRanges, err := c.comparisonDays(through, window)
+	days, calendarRanges, err := c.tradingDays(through, window)
 	if err != nil {
 		return nil, sample, err
 	}
@@ -105,7 +105,7 @@ func (p *Provider) collectComparison(ctx context.Context, request ds.ComparisonP
 		reusedSample = sample.ProofSHA256 != ""
 		if !reusedSample {
 			if cacheOnly {
-				return nil, sample, errComparisonCacheMiss
+				return nil, sample, errMarketWindowCacheMiss
 			}
 			if _, err := c.stockValuations(c.window(anchor, days[max(0, len(days)-2)].Format(marketDay))); err != nil {
 				return nil, sample, err
@@ -131,7 +131,7 @@ func (p *Provider) collectComparison(ctx context.Context, request ds.ComparisonP
 			return nil, sample, err
 		}
 		if cacheOnly && (len(gaps) > 0 || !knownComparisonStock(known)) {
-			return nil, sample, errComparisonCacheMiss
+			return nil, sample, errMarketWindowCacheMiss
 		}
 		if cacheOnly {
 			continue
@@ -173,7 +173,7 @@ func (p *Provider) collectComparison(ctx context.Context, request ds.ComparisonP
 
 // Each optional index is collected independently. A vendor error cannot
 // discard the stock batch or publish part of a malformed index response.
-func (c *comparisonCollector) comparisonIndexes(anchor ds.EntityRow, b ds.ComparisonBenchmarks,
+func (c *marketWindowCollector) comparisonIndexes(anchor ds.EntityRow, b ds.ComparisonBenchmarks,
 	industryCode string, days []time.Time) (int, error) {
 	if !b.HasIndexes() {
 		return 0, nil
@@ -188,7 +188,7 @@ func (c *comparisonCollector) comparisonIndexes(anchor ds.EntityRow, b ds.Compar
 			return err
 		}
 		if c.cacheOnly && len(gaps) > 0 {
-			return errComparisonCacheMiss
+			return errMarketWindowCacheMiss
 		}
 		for _, gap := range gaps {
 			if ctx.Err() != nil {
@@ -230,7 +230,7 @@ func (c *comparisonCollector) comparisonIndexes(anchor ds.EntityRow, b ds.Compar
 	}
 	if industryCode == "" {
 		if c.cacheOnly {
-			return total, errComparisonCacheMiss
+			return total, errMarketWindowCacheMiss
 		}
 		// Use the actual latest session after fetching any earlier index gaps.
 		partial.day = c.day
@@ -253,7 +253,7 @@ func (c *comparisonCollector) comparisonIndexes(anchor ds.EntityRow, b ds.Compar
 	return total, c.ctx.Err()
 }
 
-func (c *comparisonCollector) comparisonDays(through time.Time, window int) ([]time.Time, int, error) {
+func (c *marketWindowCollector) tradingDays(through time.Time, window int) ([]time.Time, int, error) {
 	from := through.AddDate(0, 0, -(window*2 + 25))
 	known, err := c.cache.Calendar(c.ctx, from, through)
 	if err != nil {
@@ -275,9 +275,9 @@ func (c *comparisonCollector) comparisonDays(through time.Time, window int) ([]t
 		}
 	}
 	slices.Reverse(dates)
-	gaps := ds.ComparisonMissingRanges(dates, covered)
+	gaps := ds.MarketMissingRanges(dates, covered)
 	if c.cacheOnly && len(gaps) > 0 {
-		return nil, 0, errComparisonCacheMiss
+		return nil, 0, errMarketWindowCacheMiss
 	}
 	for _, gap := range gaps {
 		partial := marketCollector{Source: c.Source, ctx: c.ctx, from: gap.From.Format(marketDay), until: gap.To.Format(marketDay)}

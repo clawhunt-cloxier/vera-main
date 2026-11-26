@@ -35,6 +35,7 @@ func TestComparisonPreparationUsesCanonicalCoverage(t *testing.T) {
 	const (
 		anchor = "699991.SH"
 		peer   = "699992.SH"
+		added  = "699993.SH"
 		broad  = ds.ComparisonDefaultBroadIndex
 		sw     = "801011.SI"
 	)
@@ -53,7 +54,7 @@ func TestComparisonPreparationUsesCanonicalCoverage(t *testing.T) {
 	through := start.AddDate(0, 0, 11)
 	var seed Batch
 	raw := Row{RawRef: "synthetic/ref", RawSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RawLocator: "test", ReceivedAt: through}
-	for _, code := range []string{anchor, peer} {
+	for _, code := range []string{anchor, peer, added} {
 		seed.Entities = append(seed.Entities, ds.Entity{Kind: "stock", Code: code, Name: code, Status: "listed", Exchange: "SH"})
 	}
 	for day := start; !day.After(through); day = day.AddDate(0, 0, 1) {
@@ -64,13 +65,15 @@ func TestComparisonPreparationUsesCanonicalCoverage(t *testing.T) {
 		if !open {
 			continue
 		}
-		for _, code := range []string{anchor, peer} {
+		for _, code := range []string{anchor, peer, added} {
 			src.data["daily"] = append(src.data["daily"], map[string]string{"ts_code": code, "trade_date": date,
 				"open": "10", "high": "11", "low": "9", "close": "10", "pre_close": "10", "vol": "5", "amount": "5"})
 			src.data["adj_factor"] = append(src.data["adj_factor"], map[string]string{"ts_code": code, "trade_date": date, "adj_factor": "1"})
 		}
 		src.data["index_daily"] = append(src.data["index_daily"], map[string]string{"ts_code": broad,
 			"trade_date": date, "close": "3500", "amount": "10"})
+		src.data["margin_detail"] = append(src.data["margin_detail"], map[string]string{"ts_code": anchor,
+			"trade_date": date, "rzye": "200", "rzmre": "5"})
 	}
 	for _, code := range []string{anchor, peer} {
 		c := marketCollector{Source: src, ctx: ctx, code: code, from: "20240108", day: "20240112", until: "20240112"}
@@ -120,6 +123,22 @@ func TestComparisonPreparationUsesCanonicalCoverage(t *testing.T) {
 	}
 
 	src.requests = nil
+	withAdded := request
+	withAdded.OtherCodes = []string{peer, added}
+	withAdded.IndustryIndex, withAdded.SampleIndustry = false, ""
+	if _, err := p.PrepareComparison(ctx, store, withAdded); err != nil {
+		t.Fatal(err)
+	}
+	want = []comparisonRequestLog{{"daily", added, "20240108", "20240112"},
+		{"suspend_d", added, "20240108", "20240112"}, {"adj_factor", added, "20240108", "20240112"}}
+	if !slices.Equal(src.requests, want) {
+		t.Fatalf("adding an uncached stock requested %+v, want %+v", src.requests, want)
+	}
+	src.requests = nil
+	if _, err := p.PrepareComparison(ctx, store, withAdded); err != nil || len(src.requests) != 0 {
+		t.Fatalf("the changed basket was not reused: calls=%+v err=%v", src.requests, err)
+	}
+
 	request.IndustryIndex, request.SampleIndustry, request.Window = false, "", 10
 	if _, err := p.PrepareComparison(ctx, store, request); err != nil {
 		t.Fatal(err)
@@ -139,6 +158,32 @@ func TestComparisonPreparationUsesCanonicalCoverage(t *testing.T) {
 		t.Fatalf("the wider window was not reused: calls=%+v err=%v", src.requests, err)
 	}
 
+	marginSeed := marketCollector{Source: src, ctx: ctx, code: anchor, day: "20240112", until: "20240112"}
+	marginSeed.Entities = seed.Entities[:1]
+	if err := marginSeed.margin(marginSeed.window(anchor, "20240111")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SyncObserved(ctx, p.ID(), func(context.Context) (ds.Provider, error) { return observation{p, marginSeed.Batch}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	indicator := ds.IndicatorPreparation{Code: anchor, DatasetID: "mkt.daily_bar", Window: 10, CloseCutoff: request.CloseCutoff}
+	src.requests = nil
+	if err := p.PrepareIndicator(ctx, store, indicator); err != nil || len(src.requests) != 0 {
+		t.Fatalf("daily trading should reuse comparison prices: calls=%+v err=%v", src.requests, err)
+	}
+	indicator.DatasetID, indicator.Window = "flow.margin", 5
+	if err := p.PrepareIndicator(ctx, store, indicator); err != nil {
+		t.Fatal(err)
+	}
+	want = []comparisonRequestLog{{"margin_detail", anchor, "20240108", "20240110"}}
+	if !slices.Equal(src.requests, want) {
+		t.Fatalf("switching to financing balance requested %+v, want %+v", src.requests, want)
+	}
+	src.requests = nil
+	if err := p.PrepareIndicator(ctx, store, indicator); err != nil || len(src.requests) != 0 {
+		t.Fatalf("financing balance should reuse the publication: calls=%+v err=%v", src.requests, err)
+	}
+
 	for _, row := range seed.Records {
 		if row.DatasetID == "mkt.daily_bar" && row.EntityCode == anchor && row.Period.Equal(through) {
 			row.QualityState = "QUARANTINED"
@@ -149,13 +194,13 @@ func TestComparisonPreparationUsesCanonicalCoverage(t *testing.T) {
 	if _, err := store.SyncObserved(ctx, p.ID(), func(context.Context) (ds.Provider, error) { return observation{p, seed}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	cache := store.ComparisonCache(time.Now())
+	cache := store.MarketWindowCache(time.Now())
 	stock, err := cache.Stock(ctx, anchor)
 	if err != nil {
 		t.Fatal(err)
 	}
 	gaps, err := cache.StockGaps(ctx, stock, []time.Time{through})
-	if err != nil || !slices.Equal(gaps, []ds.ComparisonDateRange{{From: through, To: through}}) {
+	if err != nil || !slices.Equal(gaps, []ds.MarketDateRange{{From: through, To: through}}) {
 		t.Fatalf("a quarantined revision allowed the older bar to count: %+v, %v", gaps, err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE providers SET allow_model_processing=false WHERE id='tushare'`); err != nil {
@@ -165,5 +210,8 @@ func TestComparisonPreparationUsesCanonicalCoverage(t *testing.T) {
 	var denied *ds.ProviderError
 	if !errors.As(err, &denied) || denied.Class != ds.ErrAuthFailed || len(src.requests) != 0 {
 		t.Fatalf("revoked research rights: calls=%+v err=%v", src.requests, err)
+	}
+	if err := p.PrepareIndicator(ctx, store, indicator); !errors.As(err, &denied) || denied.Class != ds.ErrAuthFailed || len(src.requests) != 0 {
+		t.Fatalf("revoked indicator research rights: calls=%+v err=%v", src.requests, err)
 	}
 }

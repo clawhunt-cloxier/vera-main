@@ -84,6 +84,8 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const nextFinancing = "融资余额呢？"
 	const followup = "展示上一项计算使用的原始公式"
 	const injectedSubject = "能给我看一下上一轮变化值用的原公式么？"
+	const earlierCalculation = "回到最开始的融资余额，演示制造的变化怎么算？"
+	const unavailableReference = "查看第九十九轮的计算"
 	const differentSubject = "演示设备甲的这个数怎么算"
 	const unknownSubject = "无登记的模拟丙公司这个数怎么算"
 	const unknownTicker = "999999.SH 的这个数怎么算"
@@ -124,39 +126,41 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const ignoredCalendar = "看演示制造 2025-01-06 的成交额"
 	const wrongReference = "看近 120 个交易日这个数怎么算"
 	responses := map[string]model.ToolArguments{
-		ask:              {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
-		firstTrading:     {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":5,"advice":"none"}`},
-		nextFinancing:    {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
-		followup:         {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
-		injectedSubject:  {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"融资余额","advice":"none"}`},
-		differentSubject: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
-		unknownSubject:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"无登记的模拟丙公司","advice":"none"}`},
-		unknownTicker:    {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"999999","advice":"none"}`},
-		missing:          {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"message","trading_days":5,"advice":"none"}`},
-		subject:          {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-		fabricated:       {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
-		calendar:         {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":-1,"advice":"none"}`},
-		selected:         {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"}`},
-		mixed:            {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"declined"}`},
-		legacy:           {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-		omittedSubject:   {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
-		omittedPeer:      {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-		wrongWindow:      {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
-		ignoredCalendar:  {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-		wrongReference:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
-		undeclared:       {Name: "fetch_url", Arguments: `{}`},
-		invalid:          {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"previous","trading_days":20,"advice":"none"}`},
-		ordinary:         {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, explanation)},
-		followEducation:  {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, followExplanation)},
-		refusedTool:      {Name: "respond_to_user", Arguments: `{"kind":"education","message":"这只正适合上车"}`},
-		bond:             {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, bondExplanation)},
-		bondFollow:       {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, bondFollowExplanation)},
-		reverseT:         {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, reverseTExplanation)},
-		inappropriate:    {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"out_of_scope","message":%q}`, inappropriateDraft)},
-		specific:         {Name: "respond_to_user", Arguments: `{"kind":"education","message":"星河制造今年的现金流增长了30%。"}`},
-		mutatedBody:      {Name: "respond_to_user", Arguments: `{"kind":"education","message":"这是通用概念。","concepts":[]}`},
-		advice:           {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"decline_advice","message":%q}`, safeRefusal)},
-		legacyReply:      {Name: "respond_to_user", Arguments: `{"kind":"thanks","message":"不客气，很高兴帮到你。"}`},
+		ask:                  {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		firstTrading:         {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":5,"advice":"none"}`},
+		nextFinancing:        {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
+		followup:             {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":0,"advice":"none"}`},
+		injectedSubject:      {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"融资余额","result_turn":99,"advice":"none"}`},
+		earlierCalculation:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","result_turn":1,"advice":"none"}`},
+		unavailableReference: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":99,"advice":"none"}`},
+		differentSubject:     {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":0,"advice":"none"}`},
+		unknownSubject:       {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"无登记的模拟丙公司","result_turn":0,"advice":"none"}`},
+		unknownTicker:        {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"999999","result_turn":0,"advice":"none"}`},
+		missing:              {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"message","trading_days":5,"advice":"none"}`},
+		subject:              {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":5,"advice":"none"}`},
+		fabricated:           {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		calendar:             {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":-1,"advice":"none"}`},
+		selected:             {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"}`},
+		mixed:                {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"declined"}`},
+		legacy:               {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		omittedSubject:       {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
+		omittedPeer:          {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		wrongWindow:          {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		ignoredCalendar:      {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		wrongReference:       {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":0,"advice":"none"}`},
+		undeclared:           {Name: "fetch_url", Arguments: `{}`},
+		invalid:              {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"previous","trading_days":20,"advice":"none"}`},
+		ordinary:             {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, explanation)},
+		followEducation:      {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, followExplanation)},
+		refusedTool:          {Name: "respond_to_user", Arguments: `{"kind":"education","message":"这只正适合上车"}`},
+		bond:                 {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, bondExplanation)},
+		bondFollow:           {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, bondFollowExplanation)},
+		reverseT:             {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"education","message":%q}`, reverseTExplanation)},
+		inappropriate:        {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"out_of_scope","message":%q}`, inappropriateDraft)},
+		specific:             {Name: "respond_to_user", Arguments: `{"kind":"education","message":"星河制造今年的现金流增长了30%。"}`},
+		mutatedBody:          {Name: "respond_to_user", Arguments: `{"kind":"education","message":"这是通用概念。","concepts":[]}`},
+		advice:               {Name: "respond_to_user", Arguments: fmt.Sprintf(`{"kind":"decline_advice","message":%q}`, safeRefusal)},
+		legacyReply:          {Name: "respond_to_user", Arguments: `{"kind":"thanks","message":"不客气，很高兴帮到你。"}`},
 	}
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
@@ -439,6 +443,12 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	if _, v := send(mixed, &first.ConversationID); !v.Result || v.Scope == nil || v.Scope.Topic != harness.DailyTradingTopic || v.Notice != "本轮仅交付可核验的历史研究。" {
 		t.Fatalf("mixed request did not restrict the response to research: %+v", v)
 	}
+	if _, v := send(earlierCalculation, &first.ConversationID); v.State != "reference" || v.Reference == nil || *v.Reference != first.TurnID || v.TaskStatus != "" {
+		t.Fatalf("the named earlier result was not referenced: %+v", v)
+	}
+	if _, v := send(unavailableReference, &first.ConversationID); v.State != "clarify" || v.Reference != nil || v.TaskStatus != "" {
+		t.Fatalf("a turn outside the delivered scopes reached a report: %+v", v)
+	}
 	if _, v := send(calendar, &first.ConversationID); v.State != "clarify" || v.NeedsSubject || v.Scope == nil ||
 		v.Scope.Topic != harness.DailyTradingTopic || v.Scope.Window != 20 || v.Scope.SubjectID != result.Scope.SubjectID {
 		t.Fatalf("unsupported calendar range failed to preserve the verified scope: %+v", v)
@@ -513,7 +523,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	err := e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
 		count(*) FILTER (WHERE response IS NOT NULL OR error IS NOT NULL OR observed_model IS NOT NULL), (SELECT count(*) FROM research_tasks)
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
-	if err != nil || calls != 55 || billed != 55 || bodies != 0 || tasks != 7 {
+	if err != nil || calls != 57 || billed != 57 || bodies != 0 || tasks != 7 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 	var title string
@@ -1138,7 +1148,7 @@ func useResearchRouter(engine *harness.Engine) {
 		"演示制造近 20 个交易日融资余额":     window("inspect_financing_balance", "message", 20, "演示制造"),
 		"演示制造近 5 个交易日融资余额":      window("inspect_financing_balance", "message", 5, "演示制造"),
 		"演示制造的融资余额":             window("inspect_financing_balance", "message", 0, "演示制造"),
-		"这个数怎么算的":               {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
+		"这个数怎么算的":               {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":0,"advice":"none"}`},
 		"改成 60 个交易日":            window("inspect_financing_balance", "context", 60),
 		"这只股票的日成交呢":             window("inspect_daily_trading", "context", 0),
 		"演示制造和演示设备甲的成交额":        window("inspect_daily_trading", "message", 0, "演示制造", "演示设备甲"),

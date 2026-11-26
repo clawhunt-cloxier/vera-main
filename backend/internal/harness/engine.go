@@ -48,6 +48,7 @@ type Engine struct {
 	WithCloseResearchUse     func(context.Context, func() error) error
 	CloseResearchCutoff      func(context.Context) (time.Time, error)
 	PrepareTuShareSubject    func(context.Context, string) error
+	PrepareTuShareIndicator  func(context.Context, dataservice.IndicatorPreparation) error
 	PrepareTuShareComparison func(context.Context, dataservice.ComparisonPreparation) (dataservice.ComparisonSample, error)
 	ResearchSupplements      []dataservice.ResearchSupplementSource
 }
@@ -774,12 +775,13 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
 	case emquant.ObservationBriefVersion, emquant.ConversationObservationVersion, MixedObservationVersion:
 		err = e.observationPipeline(runCtx, parent, t, sk)
-	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion, CloseUnifiedVersion, ConversationCloseVersion, ComparisonCloseVersion, legacyComparisonCloseVersion:
-		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
+	default:
+		if IsCloseResearchVersion(t.Version) {
+			err = e.withCloseRights(runCtx, func() error { return nil })
+		}
+		if err == nil {
 			err = e.pipeline(runCtx, parent, t, sk)
 		}
-	default:
-		err = e.pipeline(runCtx, parent, t, sk)
 	}
 	var ab *abstainError
 	switch {

@@ -1,6 +1,6 @@
 {
   "fixture_mode": "synthetic",
-  "agent_contract_version": 13,
+  "agent_contract_version": 15,
   "cases": [
     {
       "input": "同行呢？",
@@ -95,7 +95,7 @@
       "context": "selected financing balance result",
       "model_attempts": {
         "tool": "reference_research",
-        "arguments": {"kind": "calculation", "subject_mention": "融资余额", "advice": "none"}
+        "arguments": {"kind": "calculation", "subject_mention": "融资余额", "result_turn": 0, "advice": "none"}
       },
       "expect": {
         "tool": "reference_research",
@@ -109,7 +109,7 @@
       "context": "selected financing balance result for a different company",
       "model_attempts": {
         "tool": "reference_research",
-        "arguments": {"kind": "calculation", "subject_mention": "无登记的模拟丙公司", "advice": "none"}
+        "arguments": {"kind": "calculation", "subject_mention": "无登记的模拟丙公司", "result_turn": 0, "advice": "none"}
       },
       "expect": {"state": "clarify", "new_task": false}
     },
@@ -118,7 +118,7 @@
       "context": "selected financing balance result for a different company",
       "model_attempts": {
         "tool": "reference_research",
-        "arguments": {"kind": "calculation", "subject_mention": "999999", "advice": "none"}
+        "arguments": {"kind": "calculation", "subject_mention": "999999", "result_turn": 0, "advice": "none"}
       },
       "expect": {"state": "clarify", "new_task": false}
     },
@@ -158,6 +158,20 @@
         "deliver": ["table", "series", "F18.balance_change"],
         "auto_start": true
       }
+    },
+    {
+      "input": "演示制造",
+      "context": "the immediately preceding clarification already established a five-session financing balance study but needs a stock",
+      "model_attempts": {
+        "tool": "inspect_financing_balance",
+        "arguments": {"subject_mentions": ["演示制造"], "subject_source": "message", "trading_days": 5, "advice": "none"}
+      },
+      "expect": {"state": "research", "window": 5, "auto_start": true}
+    },
+    {
+      "input": "回到最开始的融资余额，演示制造的变化怎么算？",
+      "context": "turn 1 delivered financing balance; the newer result for the same stock is daily trading",
+      "expect": {"tool": "reference_research", "result_turn": 1, "state": "reference", "reference_kind": "calculation", "new_task": false}
     },
     {
       "input": "演示制造和演示设备甲的成交额",

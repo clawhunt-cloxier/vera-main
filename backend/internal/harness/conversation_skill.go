@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	ConversationCloseVersion   = "1.2.0-chat-close.1"
-	ConversationFixtureVersion = "1.2.0-chat-fixture.1"
-	DailyTradingTopic          = "daily_trading"
-	FinancingBalanceTopic      = "financing_balance"
+	ConversationCloseVersion       = "1.2.0-chat-close.2"
+	legacyConversationCloseVersion = "1.2.0-chat-close.1"
+	ConversationFixtureVersion     = "1.2.0-chat-fixture.1"
+	DailyTradingTopic              = "daily_trading"
+	FinancingBalanceTopic          = "financing_balance"
 )
 
 func isConversationSkill(version string) bool {
@@ -45,10 +46,7 @@ func ConversationWindows(topic string) []int {
 	if topic == ComparisonTopic {
 		return dataservice.ComparisonWindows()
 	}
-	if topic == FinancingBalanceTopic {
-		return []int{5, 20, 60, 120}
-	}
-	return []int{1, 5, 10, 20, 60}
+	return dataservice.IndicatorWindows(indicatorDataset(topic))
 }
 
 func conversationSkill(id, version string) *Skill {
@@ -330,9 +328,15 @@ func (e *Engine) StartConversationResearch(ctx context.Context, ws uuid.UUID, su
 	version := ConversationFixtureVersion
 	if e.hasCloseSkills() {
 		version = ConversationCloseVersion
-		registered, err := e.Store.ResearchSubjectRegistered(ctx, subject.Code)
-		if err != nil {
-			return nil, err
+		var registered bool
+		if e.UsesIndicatorPreparation(topic) {
+			registered = e.Store.AllowsIndicatorSubject(subject.Code)
+		} else {
+			var err error
+			registered, err = e.Store.ResearchSubjectRegistered(ctx, subject.Code)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if !registered {
 			return nil, errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "该证券的收盘数据暂不可用")

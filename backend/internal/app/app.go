@@ -174,6 +174,9 @@ func (a *App) build(ctx context.Context) error {
 		a.Engine.WithCloseResearchUse = a.Store.WithResearchUse
 		a.Engine.CloseResearchCutoff = a.Store.PublicationCutoff
 		a.Engine.PrepareTuShareComparison = a.prepareTuShareComparison
+		a.Engine.PrepareTuShareIndicator = func(ctx context.Context, request dataservice.IndicatorPreparation) error {
+			return a.TuShare.PrepareIndicator(ctx, a.Store, request)
+		}
 		if a.Brief != nil {
 			a.Engine.ResearchSupplements = []dataservice.ResearchSupplementSource{a.Brief}
 			a.Engine.PrepareTuShareSubject = a.PrepareTuShareSubject

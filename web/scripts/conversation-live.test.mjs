@@ -55,9 +55,12 @@ async function research(page, question, title, { first = false } = {}) {
   const outcome = async () => {
     const result = answer.locator('.chat-result');
     const heading = result.getByRole('heading');
-    const stopped = answer.getByText(
-      /^(已取消本轮研究|.*达到频率限制|.*超过时限|.*数据准备失败|.*重新发起)/
-    );
+    const stopped = answer
+      .locator('.chat-answer-content > p:not(.chat-reply)')
+      .filter({
+        hasText: /.+/,
+      })
+      .or(answer.locator('.chat-answer-content > p.chat-reply:last-child'));
     await expect(heading.or(stopped).first()).toBeVisible(researchTimeout);
     return { result, stopped };
   };
@@ -279,6 +282,86 @@ const cases = {
     assert.match(group[2], /中证500/);
     const shorter = await research(page, '看短一点', title);
     assert.deepEqual(await comparison(shorter, 10, 3, /美的集团/), group);
+  },
+  async change_subject(page) {
+    const first = await research(
+      page,
+      '长江电力近 5 个交易日每天成交多少钱？',
+      '长江电力 · 日成交',
+      {
+        first: true,
+      }
+    );
+    await expect(first.locator('tbody tr')).toHaveCount(5);
+    const second = await research(page, '同样的口径，换成中国神华', '中国神华 · 日成交');
+    await expect(second.locator('tbody tr')).toHaveCount(5);
+    const balance = await research(page, '那它还有多少融资款没还？', '中国神华 · 融资余额');
+    await expect(balance.locator('tbody tr')).toHaveCount(5);
+    const original = await send(page, '这几天的余额差怎么算的？');
+    await evidence(page, original, '查看原计算', 'F18.balance_change');
+  },
+  async clarify_subject(page) {
+    const clarification = await reply(page, '帮我看看近五个交易日每天成交了多少钱', {
+      first: true,
+      matches: [/名称|股票|证券|标的|对象|代码/],
+    });
+    await expect(clarification.getByLabel('搜索证券')).toBeVisible();
+    const result = await research(page, '000063.SZ', '中兴通讯 · 日成交');
+    await expect(result.locator('tbody tr')).toHaveCount(5);
+    await evidence(page, result, '数据依据', /TuShare|Choice/);
+  },
+  async history_switch(page) {
+    const first = await research(page, '海螺水泥近 5 个交易日的融资余额', '海螺水泥 · 融资余额', {
+      first: true,
+    });
+    await expect(first.locator('tbody tr')).toHaveCount(5);
+    const second = await research(page, '中国石化也看同样的', '中国石化 · 融资余额');
+    await expect(second.locator('tbody tr')).toHaveCount(5);
+    await reply(page, '谢谢，先这样。', { matches: [/不客气|随时|再聊|好的|有需要/] });
+    const original = await send(page, '回到海螺水泥那轮，余额变化的原公式呢？');
+    await expect(original.locator('.chat-result').getByRole('heading')).toContainText(
+      '海螺水泥 · 融资余额',
+      modelTimeout
+    );
+    await evidence(page, original, '查看原计算', 'F18.balance_change');
+  },
+  async mobile_indexes(page) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const title = '万华化学 · 股价横向对比';
+    const first = await research(
+      page,
+      '万华化学和华鲁恒升这 10 个交易日的走势，连同沪深300、中证500放一块看看',
+      title,
+      { first: true }
+    );
+    const all = await comparison(first, 10, 4, /万华化学/);
+    assert.match(all[1], /华鲁恒升.*600426.SH/);
+    assert.ok(all.some((name) => /沪深300.*000300.SH/.test(name)));
+    assert.ok(all.some((name) => /中证500.*000905.SH/.test(name)));
+    const next = await research(page, '沪深300先拿掉，留中证500就行', title);
+    assert.deepEqual(
+      await comparison(next, 10, 3, /万华化学/),
+      all.filter((name) => !name.includes('沪深300'))
+    );
+    const sizes = await page
+      .locator('html')
+      .evaluate((html) => [html.clientWidth, html.scrollWidth]);
+    assert.equal(sizes[0], sizes[1], 'The conversation fits on a mobile screen');
+    await page.reload();
+    await comparison(next, 10, 3, /万华化学/);
+  },
+  async cache_increment(page) {
+    const title = '恒瑞医药 · 股价横向对比';
+    const first = await research(page, '恒瑞医药对比云南白药，近 5 个交易日', title, {
+      first: true,
+    });
+    const pair = await comparison(first, 5, 2, /恒瑞医药/);
+    const next = await research(page, '恒瑞医药、云南白药、片仔癀放一起，就看近 5 个交易日', title);
+    const group = await comparison(next, 5, 3, /恒瑞医药/);
+    assert.deepEqual(group.slice(0, 2), pair);
+    assert.match(group[2], /片仔癀.*600436.SH/);
+    const repeated = await research(page, '同一组、同一段再给我跑一次', title);
+    assert.deepEqual(await comparison(repeated, 5, 3, /恒瑞医药/), group);
   },
   async stocks(page) {
     const result = await research(

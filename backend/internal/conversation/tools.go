@@ -45,7 +45,7 @@ var researchTools = []researchTool{
 func (s Service) agentTools() []model.ToolSpec {
 	tools := []model.ToolSpec{
 		{Name: replyTool, Schema: "conversation-answer-output", Description: "把你为本轮用户写的纯文本回复放在 message。问候 greeting，致谢 thanks，身份或功能 capabilities，通用金融知识 education，婉拒代做投资决策 decline_advice，非金融或不宜继续的话题 out_of_scope，需用户补充 clarify，缺能力或数据 unavailable。不创建研究。"},
-		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "解释所选或最近报告中已经展示的结果、出处或原公式，例如追问该结果如何算出。查看本轮新提出的指标时调用该指标的研究工具。"},
+		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "引用本会话已交付的结果、证据或原公式。点选的结果优先。用户明确回到一轮时，从 delivered_scopes 选择对应的 result_turn。新指标使用各自的研究工具。"},
 	}
 	if s.Engine.Gateway.Profiles["router"].SupportsEducationSearch() {
 		tools = append(tools, model.ToolSpec{
@@ -90,6 +90,7 @@ type researchRequest struct {
 type referenceRequest struct {
 	Kind           string `json:"kind"`
 	SubjectMention string `json:"subject_mention"`
+	ResultTurn     int64  `json:"result_turn"`
 	Advice         string `json:"advice"`
 }
 
@@ -106,7 +107,7 @@ func (s Service) runTool(ctx context.Context, args resolveArgs, turn Turn, state
 		if err := json.Unmarshal([]byte(call.Function.Arguments), &request); err != nil {
 			return s.fail(ctx, args, "本轮引用参数无效，请重新描述问题。")
 		}
-		return s.referenceResearch(ctx, args, turn, state.Anchor, request)
+		return s.referenceResearch(ctx, args, turn, state.References, request)
 	}
 	var request researchRequest
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &request); err != nil {
@@ -167,16 +168,23 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 		}
 	}
 
+	sameStockBrief := request.SubjectSource == "context" && scope.Topic != "" && previous.Topic != ""
+	canInheritWindow := (sameTopic || sameStockBrief) && slices.Contains(spec.Windows, previous.Window)
 	if scope.Window == 0 {
 		scope.Window = spec.DefaultWindow
-		sameStockBrief := request.SubjectSource == "context" && scope.Topic != "" && previous.Topic != ""
-		if slices.Contains(spec.Windows, previous.Window) && (sameTopic || sameStockBrief) {
+		if canInheritWindow {
 			scope.Window = previous.Window
 		}
 	}
 	in.Scope.Window = scope.Window
+	requestedDays := request.TradingDays
+	if canInheritWindow && requestedDays == previous.Window {
+		// A model may echo a verified window when the user only supplies the stock.
+		// Explicit dates still have to match the text of this turn.
+		requestedDays = 0
+	}
 	if (scope.Window != 0 && !slices.Contains(spec.Windows, scope.Window)) ||
-		!matchesTradingDays(turn.Text, request.TradingDays, scope.Window) {
+		!matchesTradingDays(turn.Text, requestedDays, scope.Window) {
 		// Keep the already verified window and subject for the clarification.
 		in.Scope.Window = spec.DefaultWindow
 		if slices.Contains(spec.Windows, previous.Window) && previous.Skill == scope.Skill && previous.Topic == scope.Topic {
@@ -216,20 +224,25 @@ func researchScope(tool researchTool, request researchRequest, previous Scope) S
 	return scope
 }
 
-func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn Turn, anchor *Turn, request referenceRequest) error {
+func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn Turn, references []Turn, request referenceRequest) error {
 	const missing = "请在已交付的一轮研究中选择追问，再查看原始结果、证据或计算。"
 	in := intent{AdviceDeclined: request.Advice == "declined"}
-	if anchor == nil || anchor.ReportID == nil || anchor.ReportVersion == nil {
+	if len(references) == 0 {
 		return s.update(ctx, args, "clarify", missing, in)
+	}
+	anchor := references[0]
+	if request.ResultTurn != 0 && turn.ReplyTo == nil {
+		selected := slices.IndexFunc(references, func(ref Turn) bool { return ref.Ordinal == request.ResultTurn })
+		if selected < 0 {
+			return s.update(ctx, args, "clarify", missing, in)
+		}
+		anchor = references[selected]
 	}
 	if !matchesTradingDays(turn.Text, 0, anchor.Scope().Window) {
 		return s.update(ctx, args, "clarify", "消息中的时间范围与原报告不同。请说明要按新范围研究，还是查看原报告。", in)
 	}
 	scope := anchor.Scope()
-	selected := []uuid.UUID{scope.SubjectID}
-	if scope.Comparison != nil {
-		selected = append(selected, scope.Comparison.OtherIDs...)
-	}
+	selected := scopeSubjects(scope)
 	conflicts, err := s.scopeConflicts(ctx, turn.Text, nil, selected)
 	if err != nil {
 		return err
@@ -254,6 +267,14 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 	}
 	in.Reference, in.ReferenceKind = &anchor.ID, request.Kind
 	return s.update(ctx, args, "reference", "已找到该轮研究的原始结果。", in)
+}
+
+func scopeSubjects(scope Scope) []uuid.UUID {
+	selected := []uuid.UUID{scope.SubjectID}
+	if scope.Comparison != nil {
+		selected = append(selected, scope.Comparison.OtherIDs...)
+	}
+	return selected
 }
 
 // A model can select a tool, but must not silently ignore another explicit

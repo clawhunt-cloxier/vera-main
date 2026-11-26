@@ -14,6 +14,10 @@
       "type": "string",
       "description": "只填当前消息里的证券、行业或市场的名称或代码，未指名时填空字符串。"
     },
+    "result_turn": {
+      "type": "integer",
+      "description": "填已交付范围 delivered_scopes 中对应的 turn。手动点选或默认最近一轮时填 0。"
+    },
     "advice": {
       "type": "string",
       "enum": [
@@ -26,6 +30,7 @@
   "required": [
     "kind",
     "subject_mention",
+    "result_turn",
     "advice"
   ]
 }

@@ -79,26 +79,36 @@ func (s Service) contextScope(ctx context.Context, ws, conv uuid.UUID, t Turn) (
 	return scope, notFound(err)
 }
 
-func (s Service) anchor(ctx context.Context, ws, conv uuid.UUID, t Turn) (*Turn, error) {
+func (s Service) researchReferences(ctx context.Context, ws, conv uuid.UUID, t Turn) ([]Turn, error) {
 	if t.ReplyTo != nil {
 		ref, err := s.Turn(ctx, ws, conv, *t.ReplyTo)
 		if err != nil {
 			return nil, err
 		}
 		ref, err = s.ReferenceTurn(ctx, ws, conv, ref)
-		return &ref, err
+		if err != nil || ref.ReportID == nil || ref.ReportVersion == nil {
+			return nil, err
+		}
+		return []Turn{ref}, nil
 	}
-	var ref Turn
+	var references []Turn
 	err := db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
-		var err error
-		ref, err = scanTurn(tx.QueryRow(ctx, `SELECT `+turnColumns+turnJoins+` WHERE t.conversation_id=$1 AND t.ordinal<$2
-			AND r.status='COMPLETED' AND v.version IS NOT NULL AND `+visible+` ORDER BY t.ordinal DESC LIMIT 1`, conv, t.Ordinal))
-		return err
+		rows, err := tx.Query(ctx, `SELECT `+turnColumns+turnJoins+` WHERE t.conversation_id=$1 AND t.ordinal<$2
+			AND r.status='COMPLETED' AND v.version IS NOT NULL AND `+visible+` ORDER BY t.ordinal DESC LIMIT 6`, conv, t.Ordinal)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			ref, err := scanTurn(rows)
+			if err != nil {
+				return err
+			}
+			references = append(references, ref)
+		}
+		return rows.Err()
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return &ref, err
+	return references, err
 }
 
 func (s Service) plan(ctx context.Context, args resolveArgs, in intent, turn Turn) error {
@@ -124,7 +134,13 @@ func (s Service) plan(ctx context.Context, args resolveArgs, in intent, turn Tur
 	if scope.Topic == harness.ComparisonTopic {
 		return s.planComparison(ctx, args, in, turn)
 	}
-	if subject.Kind == "stock" && s.Engine.PrepareTuShareSubject != nil {
+	var prep harness.SubjectPreparation
+	if s.Engine.UsesIndicatorPreparation(scope.Topic) {
+		if time.Since(turn.CreatedAt) > 30*time.Minute {
+			return s.fail(ctx, args, "准备数据超过时限，请重新发起。")
+		}
+		prep, err = s.Engine.PrepareIndicator(ctx, args.Workspace, args.Turn, args.Revision, subject, scope.Topic, scope.Window)
+	} else if subject.Kind == "stock" && s.Engine.PrepareTuShareSubject != nil {
 		registered, err := s.Engine.Store.ResearchSubjectPrepared(ctx, subject.Code)
 		if err != nil {
 			return err
@@ -133,22 +149,22 @@ func (s Service) plan(ctx context.Context, args resolveArgs, in intent, turn Tur
 			if time.Since(turn.CreatedAt) > 30*time.Minute {
 				return s.fail(ctx, args, "准备数据超过时限，请重新发起。")
 			}
-			prep, err := s.Engine.RequestConversationSubjectPreparation(ctx, args.Workspace, subject.Code, args.Turn, args.Revision)
-			switch {
-			case err != nil:
-				return s.fail(ctx, args, errs.As(err).Message)
-			case prep.Status == "failed":
-				return s.fail(ctx, args, prep.Message)
-			case prep.Status != "ready":
-				if err := s.setPreparing(ctx, args, in); err != nil {
-					if errors.Is(err, errTurnMoved) {
-						return nil
-					}
-					return err
-				}
-				return errPreparing
-			}
+			prep, err = s.Engine.RequestConversationSubjectPreparation(ctx, args.Workspace, subject.Code, args.Turn, args.Revision)
 		}
+	}
+	switch {
+	case err != nil:
+		return s.fail(ctx, args, errs.As(err).Message)
+	case prep.Status == "failed":
+		return s.fail(ctx, args, prep.Message)
+	case prep.Status == "pending":
+		if err := s.setPreparing(ctx, args, in); err != nil {
+			if errors.Is(err, errTurnMoved) {
+				return nil
+			}
+			return err
+		}
+		return errPreparing
 	}
 	return s.launchResearch(ctx, args, in, turn, func(launch harness.ConversationLaunch) (*harness.Plan, error) {
 		return s.Engine.StartConversationResearch(ctx, args.Workspace, subject, scope.Skill, scope.Topic, scope.Window, scope.Mode, launch)

@@ -31,7 +31,7 @@ func (e *Engine) SkillVersion(id, version string) *Skill {
 		isFixtureComparisonVersion(version) && e.Synthetic && e.Brief == nil && !e.hasCloseSkills()) {
 		return stockComparisonSkill(version)
 	}
-	if version == ConversationCloseVersion && e.hasCloseSkills() || version == ConversationFixtureVersion && e.Synthetic && e.Brief == nil && !e.hasCloseSkills() {
+	if isCloseIndicatorVersion(version) && e.hasCloseSkills() || version == ConversationFixtureVersion && e.Synthetic && e.Brief == nil && !e.hasCloseSkills() {
 		return conversationSkill(id, version)
 	}
 	if id == "stock_analysis" && version == emquant.ConversationObservationVersion && e.Brief != nil {

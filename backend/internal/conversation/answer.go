@@ -18,6 +18,7 @@ const answerPrompt = `你是 Vera，金融投研助手。根据最后一条用�
 
 - 问候、致谢和身份说明使用 respond_to_user。通用金融知识和相关追问优先使用已登记的知识查证工具。未登记该工具时，用 respond_to_user 的 education 解释产品结构、术语、机制和研究方法。纯问候简短回应。需要补充问题时用 clarify。
 - 对涉及具体数据、计算或历史研究交付的问题调用登记工具。缺少能力时如实说明。只描述当前登记能力。
+- 已经能确定要查的指标但还缺股票时，调用该指标工具让服务保存范围并询问股票。比如“近五个交易日每天成交了多少钱” → inspect_daily_trading({"subject_mentions":[],"subject_source":"message","trading_days":5,"advice":"none"})。这类情况不要用 respond_to_user 写澄清，否则下一轮只补股票时无法继续。
 - 理解简短口语和省略。先判断用户想看什么，再用上下文补全标的、窗口和比较对象。只有在无法合理确定标的或范围时才问一个具体问题。已有个股上下文时，“它最近咋样”按近况研究，“成交呢”按日成交，“同行呢”按同行比较。用户只说“帮我看看”且没有上下文时，简短请用户说出股票或金融主题。
 
 ` + replyWritingPrompt + `
@@ -35,7 +36,7 @@ const answerPrompt = `你是 Vera，金融投研助手。根据最后一条用�
 - 一组横向对比中追问“加上行业指数和沪深 300”时调用 compare_stock_performance({"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":0,"industry_index":"include","broad_index_add":["沪深 300"],"broad_index_remove":[],"clear_broad_indexes":"keep","default_broad_index":"keep","window_change":"keep","advice":"none"})。“行业指数保留，去掉沪深300，换成中证500”用 kind=previous、industry_index=keep、broad_index_remove=["沪深300"] 和 broad_index_add=["中证500"]。
 - 先按最后一条消息选择具体指标或报告工具，再从上下文补全省略的标的。用户换了指标时，始终调用新指标对应的工具，即使只说了一个指标名。例：上一轮查了中国移动近 20 个交易日的日成交，“融资余额呢？” → inspect_financing_balance({"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"})。上一轮查了融资余额，“这只股票每天成交多少” → inspect_daily_trading，标的仍来自 context。
 - 仅改窗口、换标的或补充上轮澄清需要的标的时，继续调用原指标对应的工具。参照用户选中的范围，其次是紧邻的澄清，最后是前次研究。例如上一轮查了融资余额，“同一标的，改成六十个交易日” → inspect_financing_balance({"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"})。无法确定指标或标的时请澄清。
-- 会话环境有 has_delivered_research=true 时，用户要求查看已交付的结果、出处或原公式才用 reference_research，分别传 kind=result、evidence、calculation。例如“这个数怎么算出来的？” → reference_research({"kind":"calculation","subject_mention":"","advice":"none"})。subject_mention 只接受最后一条消息中原样出现的证券、行业或市场名称或代码，未指名时传空字符串。
+- 用户追问已交付结果、出处或原公式时用 reference_research，分别传 kind=result、evidence、calculation。delivered_scopes 按从新到旧列出本会话已交付范围。如果用户点选结果（user_selected_result=true）或仅说“这个数怎么算”，result_turn 填 0。如果用户说“回到某只股票那轮”“最开始的日成交是怎么算的”，依据标的、指标、顺序和窗口选择已交付范围，result_turn 填该范围的 turn。找不到或无法区分时请用户点选一轮追问。subject_mention 只填最后一条消息原样出现的名称或代码，未点名填空字符串。
 
 3. 理解新请求
 - “每天成交了多少钱”用 inspect_daily_trading。“还有多少融资款没还”用 inspect_financing_balance。“完整个股分析、财务与估值及风险”用 analyze_stock。“综合资金面报告、披露持仓”用 analyze_capital_flow。“公司或行业深度研报”用 run_deep_research。缺少对应工具时用 respond_to_user 的 kind=unavailable。
@@ -43,14 +44,14 @@ const answerPrompt = `你是 Vera，金融投研助手。根据最后一条用�
 
 4. 补全研究参数
 - subject_mentions 只抄写最后一条消息里的完整证券、行业或市场名称、代码，涉及多个对象时一并抄写。例：“演示制造近五个交易日的成交金额” → subject_source=message、subject_mentions=["演示制造"]、trading_days=5。禁止填历史消息里的名称。沿用会话标的时用 subject_source=context、subject_mentions=[]。需要标的但缺失时用 subject_source=message、subject_mentions=[]。
-- trading_days 用本轮消息明确写出的交易日数量。未写交易日数或要求沿用原窗口时传 0，由服务按会话范围选择。日历日期或其它未支持期间传 -1，禁止自行换算。深度研究按已披露期间处理，明确指定不支持的期间时用 kind=unavailable。用户要求公司与所属行业联合报告或明确沿用这个范围时，用 coverage=company_industry，否则用 coverage=subject。
+- trading_days 用本轮消息明确写出的交易日数量。未写交易日数或要求沿用原窗口时传 0，由服务按会话范围选择。比如上一轮已问清研究指标和窗口，只欠标的，本轮收到单独的股票名或完整代码时，继续该指标，填 trading_days=0。证券代码是标的。日历日期或其它未支持期间传 -1，禁止自行换算。深度研究按已披露期间处理，明确指定不支持的期间时用 kind=unavailable。用户要求公司与所属行业联合报告或明确沿用这个范围时，用 coverage=company_industry，否则用 coverage=subject。
 - 例：“给演示制造做完整个股报告” → analyze_stock({"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"})。“做演示制造的综合资金报告”使用 analyze_capital_flow，窗口未指定同样传 0。
 - 参考函数的参数定义，传齐字段，只发送一个调用。`
 
 type agentContext struct {
-	Previous Scope
-	Draft    intent
-	Anchor   *Turn
+	Previous   Scope
+	Draft      intent
+	References []Turn
 }
 
 type contextScope struct {
@@ -62,6 +63,12 @@ type contextScope struct {
 	ComparisonKind string   `json:"comparison_kind,omitempty"`
 	IndustryIndex  bool     `json:"industry_index,omitempty"`
 	BroadIndexes   []string `json:"broad_indexes,omitempty"`
+}
+
+type referenceScope struct {
+	Ordinal  int64    `json:"turn"`
+	Subjects []string `json:"subjects"`
+	contextScope
 }
 
 func scopeForModel(scope Scope) *contextScope {
@@ -100,8 +107,38 @@ func (s Service) agentState(ctx context.Context, args resolveArgs, turn Turn) (a
 			return state, err
 		}
 	}
-	state.Anchor, err = s.anchor(ctx, args.Workspace, args.Conversation, turn)
+	state.References, err = s.researchReferences(ctx, args.Workspace, args.Conversation, turn)
 	return state, err
+}
+
+func (s Service) referenceScopes(ctx context.Context, references []Turn) ([]referenceScope, error) {
+	if len(references) == 0 {
+		return nil, nil
+	}
+	var ids []uuid.UUID
+	for _, turn := range references {
+		ids = append(ids, scopeSubjects(turn.Intent.Scope)...)
+	}
+	entities, err := s.Entities(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	var result []referenceScope
+	for _, turn := range references {
+		scope := turn.Intent.Scope
+		modelScope := scopeForModel(scope)
+		if modelScope == nil {
+			continue
+		}
+		ref := referenceScope{Ordinal: turn.Ordinal, contextScope: *modelScope}
+		for _, id := range scopeSubjects(scope) {
+			if entity, ok := entities[id]; ok {
+				ref.Subjects = append(ref.Subjects, entity.Name+" ("+entity.Code+")")
+			}
+		}
+		result = append(result, ref)
+	}
+	return result, nil
 }
 
 func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) error {
@@ -121,16 +158,21 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 	if err != nil {
 		return err
 	}
-	// Supply scope metadata and recent educational replies. Research records and
-	// identifiers stay in the workspace and are resolved by application code.
+	references, err := s.referenceScopes(ctx, state.References)
+	if err != nil {
+		return err
+	}
+	// Supply scope metadata and recent educational replies. Records and private
+	// identifiers stay in the workspace. The service binds turn numbers itself.
 	data, err := json.Marshal(struct {
-		Previous      *contextScope   `json:"previous_scope,omitempty"`
-		Draft         *contextScope   `json:"clarification_scope,omitempty"`
-		CanReference  bool            `json:"has_delivered_research"`
-		SelectedEntry bool            `json:"user_selected_result"`
-		History       []model.Message `json:"recent_dialogue,omitempty"`
+		Previous      *contextScope    `json:"previous_scope,omitempty"`
+		Draft         *contextScope    `json:"clarification_scope,omitempty"`
+		CanReference  bool             `json:"has_delivered_research"`
+		SelectedEntry bool             `json:"user_selected_result"`
+		References    []referenceScope `json:"delivered_scopes,omitempty"`
+		History       []model.Message  `json:"recent_dialogue,omitempty"`
 	}{scopeForModel(state.Previous), scopeForModel(state.Draft.Scope),
-		state.Anchor != nil && state.Anchor.ReportVersion != nil, turn.ReplyTo != nil, history})
+		len(state.References) != 0, turn.ReplyTo != nil, references, history})
 	if err != nil {
 		return err
 	}

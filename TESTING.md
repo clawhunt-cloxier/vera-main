@@ -69,11 +69,17 @@ VERA_CHAT_URL=http://127.0.0.1:18096 VERA_CHAT_USER=administrator \
 VERA_CHAT_PASSWORD_FILE=/path/to/private-password npm run test:conversation-live
 ```
 
-脚本从工作台输入框发送多轮问题，并从对话历史重开会话。场景覆盖金融概念与网页来源、个股指标切换和指定上一轮追问、同行对比、点名对比与窗口澄清、行业和宽基指数及其口语追问，以及金融输出边界。每组会话保留在测试工作区，命令输出其页面路径。可以用逗号分隔的 `VERA_CHAT_CASES` 选择 `knowledge`、`indicators`、`peers`、`stocks`、`benchmarks`、`market`、`banks`、`liquor`、`appliances`、`boundaries`。
+脚本从工作台输入框发送多轮问题，并从对话历史重开会话。场景覆盖金融概念与网页来源、个股指标切换和指定上一轮追问、同行对比、点名对比与窗口澄清、行业和宽基指数及其口语追问，以及金融输出边界。每组会话保留在测试工作区，命令输出其页面路径。可以用逗号分隔的 `VERA_CHAT_CASES` 选择 `knowledge`、`indicators`、`peers`、`stocks`、`benchmarks`、`market`、`banks`、`liquor`、`appliances`、`boundaries`，也可选择下面的场景。
 
 `benchmarks` 从「同行呢」接续至「行业指数也画上，大盘也看看」和「拉长一点」，核对曲线、共同交易日覆盖、百分点差、证据、指数替换与历史重开。`market` 验证一只股票与默认宽基比较。`banks`、`liquor` 和 `appliances` 验证不同行业的股票和指数。
 
-在 `backend/` 运行 `go test ./internal/dataservice/tushare -run TestComparisonPreparationUsesCanonicalCoverage`。此用例用 PostgreSQL 和厂商替身核对请求明细。全量命中读取数据库，追加指数只请求该指数，扩大窗口只补缺失日期。验收同时覆盖数据源撤权和记录质量隔离。
+- `change_subject` 验证长江电力换成中国神华时继承日成交与窗口，再追问融资余额并打开原计算。
+- `clarify_subject` 验证先问成交额、再补证券代码时自动完成中兴通讯研究。
+- `history_switch` 验证研究海螺水泥和中国石化后，通过「回到海螺水泥那轮」打开较早的余额变化公式。
+- `mobile_indexes` 验证从手机视口发起两只化工股与宽基对比，口语移除其中一个指数后刷新并核对图表。
+- `cache_increment` 验证医药股比较加入第三只后结果包含原股票，再次执行时组合和时间窗相同。
+
+在 `backend/` 运行 `go test ./internal/dataservice/tushare -run TestComparisonPreparationUsesCanonicalCoverage`。此用例用 PostgreSQL 和厂商替身核对请求明细。全量命中读取数据库，追加股票或指数只请求新增对象，扩大窗口只补缺失日期，切换到融资余额只请求缺失日期的 `margin_detail`。验收同时覆盖数据源撤权和记录质量隔离。
 
 使用启用搜索的 DeepSeek router 验收网页来源时，额外设置 `VERA_CHAT_EXPECT_WEB_SOURCES=1`。向对话提出金融概念问题及其追问，打开回复下的参考来源，并刷新页面确认来源随历史保留。`TestConversationPublicKnowledgeMessages` 检查公开搜索请求只来自登记标识。`TestConversationLegacyTitleClaimSurvivesInterruption` 核对中断后保存的标题与会话版本。运行 `cd backend && go test ./internal/harness/model -run '^TestOpenAIEducationSearch$'` 可核对返回来源与重定向处理。
 

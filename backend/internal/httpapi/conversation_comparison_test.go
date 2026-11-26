@@ -37,7 +37,7 @@ func TestConversationStockComparison(t *testing.T) {
 			named:   {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示制造","演示银行"],"subject_source":"message","trading_days":20,"advice":"none"` + comparisonKeep + `}`},
 			change:  {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"` + comparisonKeep + `}`},
 			keep:    {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
-			formula: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","advice":"none"}`},
+			formula: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","result_turn":0,"advice":"none"}`},
 			ignored: {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
 			ticker:  {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
 			bad:     {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":-1,"advice":"none"` + comparisonKeep + `}`},
