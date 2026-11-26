@@ -126,6 +126,9 @@ func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) error
 		items = items[:n]
 		next = encodeCursor(items[n-1].UpdatedAt, items[n-1].ID)
 	}
+	if slices.ContainsFunc(items, func(item conversation.Summary) bool { return item.TitlePending }) {
+		w.Header().Set("Retry-After", "2")
+	}
 	httpx.JSON(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": next})
 	return nil
 }
@@ -157,6 +160,9 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) error {
 		older = &turns[n-1].Ordinal
 	}
 	items := make([]conversationTurn, 0, len(turns))
+	if header.TitlePending {
+		w.Header().Set("Retry-After", "2")
+	}
 	for _, t := range turns {
 		out := turnView(t)
 		items = append(items, out)
@@ -218,7 +224,7 @@ func turnView(t conversation.Turn) conversationTurn {
 	out := conversationTurn{Turn: t, ReferenceID: t.Reference(), ReferenceKind: t.ReferenceKind(), IsBrief: t.Brief, ResultReady: t.ReportID != nil && t.ReportVersion != nil || t.Reference() != nil}
 	out.NeedsSubject = t.NeedsSubject()
 	if t.AdviceDeclined() {
-		out.Notice = conversation.AdviceBoundary
+		out.Notice = "本轮仅交付可核验的历史研究。"
 	}
 	if scope := t.Scope(); scope.Skill != "" {
 		out.Scope = &scope

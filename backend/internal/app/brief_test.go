@@ -23,10 +23,12 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation/conversationtest"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/httpapi"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/config"
@@ -360,6 +362,10 @@ func checkChoiceConversation(t *testing.T, a *App, formalTask, formalReport uuid
 	request func(method, path, body, accept, key string) *httptest.ResponseRecorder, checkResponse func(string, []byte)) {
 	t.Helper()
 	ctx := context.Background()
+	conversationtest.UseRouter(a.Engine.Gateway, map[string]model.ToolArguments{
+		"600000.SH 的日成交": {Name: "inspect_daily_trading",
+			Arguments: `{"subject_mentions":["600000.SH"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+	})
 	worker, err := a.Engine.NewRiver(a.Pool, true, 1, conversation.Register(a.Engine))
 	if err != nil {
 		t.Fatal(err)

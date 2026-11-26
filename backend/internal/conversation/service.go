@@ -36,10 +36,11 @@ type Message struct {
 }
 
 type Summary struct {
-	ID        uuid.UUID `json:"id"`
-	Title     string    `json:"title"`
-	Revision  int64     `json:"revision"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           uuid.UUID `json:"id"`
+	Title        string    `json:"title"`
+	Revision     int64     `json:"revision"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	TitlePending bool      `json:"-"`
 }
 
 type Turn struct {
@@ -136,11 +137,7 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 			return err
 		}
 		if conversationID == nil {
-			title := []rune(message.Text)
-			if len(title) > 48 {
-				title = title[:48]
-			}
-			if err := tx.QueryRow(ctx, `INSERT INTO conversations(workspace_id,title) VALUES($1,$2) RETURNING id`, sender.Workspace, string(title)).Scan(&out.ConversationID); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO conversations(workspace_id,title) VALUES($1,'') RETURNING id`, sender.Workspace).Scan(&out.ConversationID); err != nil {
 				return err
 			}
 		} else {
@@ -169,13 +166,6 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 				return notFound(err)
 			}
 		}
-		var recent int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM conversation_turns WHERE workspace_id=$1 AND created_at>now()-interval '1 minute'`, sender.Workspace).Scan(&recent); err != nil {
-			return err
-		}
-		if recent >= s.Engine.Policy.Quota.PlanParsePerUserPerMinute {
-			return errs.TooMany("CONVERSATION_RATE_LIMITED", "消息发送过快，请稍后再试")
-		}
 		if err := tx.QueryRow(ctx, `INSERT INTO conversation_turns(workspace_id,conversation_id,client_message_id,request_hash,ordinal,channel,body,reply_to_turn_id,state,automatic)
 			VALUES($1,$2,$3,$4,(SELECT coalesce(max(ordinal),0)+1 FROM conversation_turns WHERE conversation_id=$2),$5,$6,$7,'pending',$8) RETURNING id`,
 			sender.Workspace, out.ConversationID, message.ClientMessageID, hash, sender.Channel, message.Text, message.ReplyTo, message.Automatic).Scan(&out.TurnID); err != nil {
@@ -184,7 +174,13 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 		if err := touch(ctx, tx, out.ConversationID); err != nil {
 			return err
 		}
-		return s.enqueue(ctx, tx, sender.Workspace, out.ConversationID, out.TurnID, 1)
+		if err := s.enqueue(ctx, tx, sender.Workspace, out.ConversationID, out.TurnID, 1); err != nil {
+			return err
+		}
+		if conversationID == nil {
+			return s.enqueueTitle(ctx, tx, sender.Workspace, out.ConversationID, out.TurnID)
+		}
+		return nil
 	})
 	return out, err
 }
@@ -203,23 +199,27 @@ func touch(ctx context.Context, tx pgx.Tx, conv uuid.UUID) error {
 	return err
 }
 
+const titleDeadline = `c.created_at+interval '1 minute'>clock_timestamp()`
+
+const summaryColumns = `c.id,coalesce(nullif(c.title,''),'新会话'),c.revision,c.updated_at,c.title='' AND ` + titleDeadline
+
 func (s Service) List(ctx context.Context, ws uuid.UUID, n int, at *time.Time, id *uuid.UUID) ([]Summary, error) {
 	items := []Summary{}
 	err := db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT c.id,c.title,c.revision,c.updated_at FROM conversations c WHERE `+visible+`
+		rows, err := tx.Query(ctx, `SELECT `+summaryColumns+` FROM conversations c WHERE `+visible+`
 		AND ($1::timestamptz IS NULL OR (c.updated_at,c.id)<($1,$2)) ORDER BY c.updated_at DESC,c.id DESC LIMIT $3`, at, id, n)
 		if err != nil {
 			return err
 		}
-		items, err = pgx.CollectRows(rows, scanSummary)
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Summary, error) { return scanSummary(row) })
 		return err
 	})
 	return items, err
 }
 
-func scanSummary(row pgx.CollectableRow) (Summary, error) {
+func scanSummary(row pgx.Row) (Summary, error) {
 	var c Summary
-	err := row.Scan(&c.ID, &c.Title, &c.Revision, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.Title, &c.Revision, &c.UpdatedAt, &c.TitlePending)
 	return c, err
 }
 
@@ -243,7 +243,9 @@ func (s Service) History(ctx context.Context, ws, conv uuid.UUID, n int, before 
 	var turns []Turn
 	err := db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
 		// Keep the revision and turns consistent if a resolver commits during a read.
-		if err := tx.QueryRow(ctx, `SELECT id,title,revision,updated_at FROM conversations c WHERE id=$1 AND `+visible+` FOR SHARE`, conv).Scan(&c.ID, &c.Title, &c.Revision, &c.UpdatedAt); err != nil {
+		var err error
+		c, err = scanSummary(tx.QueryRow(ctx, `SELECT `+summaryColumns+` FROM conversations c WHERE c.id=$1 AND `+visible+` FOR SHARE`, conv))
+		if err != nil {
 			return notFound(err)
 		}
 		rows, err := tx.Query(ctx, `SELECT `+turnColumns+turnJoins+` WHERE t.conversation_id=$1 AND ($2::bigint=0 OR t.ordinal<$2) AND `+visible+`
@@ -314,8 +316,10 @@ func (w *worker) Work(ctx context.Context, job *river.Job[resolveArgs]) error {
 func Register(engine *harness.Engine) func(*river.Workers, *river.Config) {
 	return func(workers *river.Workers, cfg *river.Config) {
 		river.AddWorker(workers, &worker{service: Service{Engine: engine}})
+		river.AddWorker(workers, &titleWorker{service: Service{Engine: engine}})
 		if cfg.Queues != nil {
 			cfg.Queues["conversation"] = river.QueueConfig{MaxWorkers: 2}
+			cfg.Queues[titleQueue] = river.QueueConfig{MaxWorkers: 1}
 			registerRetention(workers, cfg, engine)
 		}
 	}

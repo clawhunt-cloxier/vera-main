@@ -36,22 +36,21 @@ psql -X -h 127.0.0.1 -p 55432 -U vera -d vera -v ON_ERROR_STOP=1 -f scripts/crea
 psql -X -h 127.0.0.1 -p 55432 -U vera -d vera -v ON_ERROR_STOP=1 -v demo_username=vera-t044-demo -f scripts/create-demo-account.sql
 ```
 
-`administrator` 和 `vera-t044-demo` 均用演示密码 `administrator` 登录。模拟模型只演示预设样例。接入支持原生 Tool Call 的 `router` 模型后，由该模型理解自然语言提问。
+`administrator` 和 `vera-t044-demo` 均用演示密码 `administrator` 登录。模拟模型可运行独立研报。工作台对话需要支持原生 Tool Call 和 JSON 输出的 `router` 模型。
 
 ### 3.2 接 DeepSeek（真实模型）
 
-密钥只通过环境变量传入，不要写进任何文件。必须关闭思考，否则思考内容会耗尽输出上限，JSON 被截断，必需章节失败，任务弃权。
+本地验收从本机密钥存储注入 DeepSeek Key。DeepSeek V4.1 Flash 使用 OpenAI 兼容 Chat Completions 和模型标识 `deepseek-flash`。关闭思考后使用本项目短输出预算生成 Tool Call、标题与核验 JSON。服务器部署继续从 `/opt/vera/.env` 使用已有 Harness 模型配置及凭证。
 
 ```bash
 export DEEPSEEK_API_KEY=你的密钥
 cd backend
-EB='{"thinking":{"type":"disabled"}}'
 VERA_API_ADDR=127.0.0.1:18094 VERA_WEB_DIR=../web/dist VERA_DEMO_DIR=$HOME/.cache/vera-demo-ds VERA_DEMO_PG_PORT=55433 \
 VERA_DEMO_INVITES=0 VERA_REGISTRATION_ENABLED=false \
 VERA_DAILY_MODEL_COST_LIMIT_USD=20.00 MODEL_PRICE_TABLE_VERSION=deepseek-2026-11-06 \
-MODEL_WRITER_ADAPTER=openai MODEL_WRITER_BASE_URL=https://api.deepseek.com MODEL_WRITER_ID=deepseek-flash MODEL_WRITER_API_KEY=$DEEPSEEK_API_KEY MODEL_WRITER_EXTRA_BODY=$EB \
-MODEL_VERIFIER_ADAPTER=openai MODEL_VERIFIER_BASE_URL=https://api.deepseek.com MODEL_VERIFIER_ID=deepseek-flash MODEL_VERIFIER_API_KEY=$DEEPSEEK_API_KEY MODEL_VERIFIER_EXTRA_BODY=$EB \
-MODEL_ROUTER_ADAPTER=openai MODEL_ROUTER_BASE_URL=https://api.deepseek.com MODEL_ROUTER_ID=deepseek-flash MODEL_ROUTER_API_KEY=$DEEPSEEK_API_KEY MODEL_ROUTER_EXTRA_BODY=$EB \
+MODEL_WRITER_ADAPTER=openai MODEL_WRITER_BASE_URL=https://api.deepseek.com MODEL_WRITER_ID=deepseek-flash MODEL_WRITER_API_KEY=$DEEPSEEK_API_KEY MODEL_WRITER_THINKING=disabled \
+MODEL_VERIFIER_ADAPTER=openai MODEL_VERIFIER_BASE_URL=https://api.deepseek.com MODEL_VERIFIER_ID=deepseek-flash MODEL_VERIFIER_API_KEY=$DEEPSEEK_API_KEY MODEL_VERIFIER_THINKING=disabled \
+MODEL_ROUTER_ADAPTER=openai MODEL_ROUTER_BASE_URL=https://api.deepseek.com MODEL_ROUTER_ID=deepseek-flash MODEL_ROUTER_API_KEY=$DEEPSEEK_API_KEY MODEL_ROUTER_THINKING=disabled \
 ../vera demo
 ```
 
@@ -88,7 +87,7 @@ MODEL_ROUTER_ADAPTER=openai MODEL_ROUTER_BASE_URL=https://api.deepseek.com MODEL
 - 受限与弃权是预期行为：核验层会删除不合格结论（确定性规则 R-02、R-05、R-08 和语义核验判定夸大）。可选章节被删光，报告标为受限；必需章节被删光，任务弃权。真实模型会稳定地产生这类被删结论。
 - 语义核验不可用时，章节只保留经确定性检查的事实与计算结论，不再标记为已核验，并在报告的数据与限制中说明。
 - contracts/examples/policy.json 的单任务预算为演示放宽，试点前必须收紧。
-- 配置项 `MODEL_<PROFILE>_THINKING` 被读取但没有写入请求，只有 `MODEL_<PROFILE>_EXTRA_BODY` 生效。模型输出上限目前写死在代码里（写作 8000、核验 4000、摘要 4000）。
+- 各模型请求受步骤的输出上限和可配置的 `MODEL_<PROFILE>_MAX_OUTPUT_TOKENS` 约束。DeepSeek 用 `MODEL_<PROFILE>_THINKING` 设置思考模式，厂商专用的其余参数通过 `MODEL_<PROFILE>_EXTRA_BODY` 配置。
 - `vera harness eval` 不能在有存活 worker 的库上运行，worker 会先领走任务。
 - 自选股页的提醒只展示快照里已触发的规则，没有单独的提醒页。
 

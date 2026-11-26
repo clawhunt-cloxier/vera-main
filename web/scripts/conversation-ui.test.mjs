@@ -10,7 +10,7 @@ if (
   origin.username ||
   origin.password
 ) {
-  throw new Error('Use the loopback URL of a local simulated Vera demo');
+  throw new Error('Use the loopback URL of a local Vera demo with a configured conversation model');
 }
 const desktopUser = process.env.VERA_CHAT_USER;
 const mobileUser = process.env.VERA_CHAT_MOBILE_USER;
@@ -61,27 +61,44 @@ test('private conversational research on desktop and mobile', async (t) => {
             .click();
           await expect(page.getByRole('heading', { name: '对话研究' })).toBeVisible();
         };
-        await send('你好', '输入研究问题');
-        await expect(
-          page.locator('.chat-answer').getByText('我是 Vera', { exact: false })
-        ).toBeVisible();
-        await send('什么是市盈率');
-        await expect(
-          replyFor('什么是市盈率').getByText('公司市值相对于盈利', { exact: false })
-        ).toBeVisible();
-        await send('那它有什么局限');
-        await expect(
-          replyFor('那它有什么局限').getByText('亏损时市盈率', { exact: false })
-        ).toBeVisible();
-        await send('今天纽约天气怎么样');
-        await expect(
-          replyFor('今天纽约天气怎么样').getByText('你可以问我金融概念', { exact: false })
-        ).toBeVisible();
-        await send('现在该不该买演示制造');
-        await expect(
-          page.getByText('目标价及未来收益判断超出服务范围', { exact: false })
-        ).toBeVisible();
+        const greeting = '嗨，还在吗？';
+        await send(greeting, '输入研究问题');
+        const textFor = (question) => replyFor(question).locator('.chat-reply');
+        const timeout = { timeout: 24000 };
+        await expect(textFor(greeting)).toHaveText(
+          /你好|在的|在呢|Vera|您好|在呀|我在|哈喽|嗨/,
+          timeout
+        );
+
+        const education = '为什么封闭式基金的交易价格和净值可能不一样？';
+        await send(education);
+        await expect(textFor(education)).toHaveText(/净值/, timeout);
+        await expect(textFor(education)).toHaveText(/供需|需求|预期|买方|卖方|市场/, timeout);
+
+        const followUp = '那到期清算的时候呢？';
+        await send(followUp);
+        await expect(textFor(followUp)).toHaveText(/清算/, timeout);
+        await expect(textFor(followUp)).toHaveText(/分配|处置|靠拢|收敛|缩小|兑现/, timeout);
+        assert.notEqual(
+          await textFor(education).textContent(),
+          await textFor(followUp).textContent()
+        );
+
+        const offTopic = '下周去旅行，帮我查一下纽约天气';
+        await send(offTopic);
+        await expect(textFor(offTopic)).toHaveText(/金融|投研|天气/, timeout);
+
+        const advice = '手头有笔钱，今天就投演示制造合适吗？';
+        await send(advice);
+        await expect(textFor(advice)).toHaveText(
+          /不能|无法|不提供|不作|不替|不会|没法|没办法/,
+          timeout
+        );
         await expect(page.locator('.chat-result')).toHaveCount(0);
+        const mixed = '查演示制造近 20 个交易日的成交额并给目标价';
+        await send(mixed);
+        await expect(replyFor(mixed).getByRole('table')).toBeVisible({ timeout: 30000 });
+        await expect(replyFor(mixed).getByText('本轮仅交付可核验的历史研究。')).toBeVisible();
         await deleteThread();
         await page
           .getByRole('navigation', { name: '工作区导航' })
@@ -92,11 +109,18 @@ test('private conversational research on desktop and mobile', async (t) => {
         await send(question, '输入研究问题');
         await page.waitForURL('**/app/chat/*');
         const threadURL = page.url();
+        const threadPath = new URL(threadURL).pathname;
         const result = page.locator('.chat-result').last();
         await expect(result.getByRole('img', { name: '融资余额', exact: true })).toBeVisible({
           timeout: 30000,
         });
         await expect(page.getByRole('button', { name: '确认研究' })).toHaveCount(0);
+        const title = page
+          .getByRole('region', { name: '研究对话' })
+          .getByRole('heading', { level: 1 });
+        await expect(title).toHaveText(/融资/, timeout);
+        const generatedTitle = (await title.textContent()).trim();
+        assert.ok(generatedTitle !== question && [...generatedTitle].length <= 32);
         await expect(result.getByRole('table')).toBeVisible();
         await result.getByRole('button', { name: '查看全部 20 个交易日' }).click();
         await expect(result.locator('tbody tr')).toHaveCount(20);
@@ -115,6 +139,7 @@ test('private conversational research on desktop and mobile', async (t) => {
         await expect(panel).toBeHidden();
         await page.reload();
         await expect(result.getByRole('table')).toBeVisible({ timeout: 15000 });
+        await expect(title).toHaveText(generatedTitle);
         if (process.env.VERA_CHAT_SCREENSHOTS) {
           await page.screenshot({
             animations: 'disabled',
@@ -142,13 +167,16 @@ test('private conversational research on desktop and mobile', async (t) => {
           .getByRole('link', { name: '工作台' })
           .click();
         await expect(page.getByRole('heading', { name: '今天想研究什么？' })).toBeVisible();
-        await expect(page.getByRole('link', { name: new RegExp(question) })).toBeVisible();
-        await page.getByRole('link', { name: new RegExp(question) }).click();
+        const historyLink = page
+          .getByRole('region', { name: '对话历史' })
+          .locator(`a[href="${threadPath}"]`);
+        await expect(historyLink.locator('span')).toHaveText(generatedTitle);
+        await historyLink.click();
         assert.equal(page.url(), threadURL);
         await expect(page.getByText('这个数怎么算的', { exact: true })).toBeVisible();
 
         await deleteThread();
-        await expect(page.getByRole('link', { name: new RegExp(question) })).toHaveCount(0);
+        await expect(historyLink).toHaveCount(0);
 
         const meResponse = await context.request.get('/api/v1/me');
         assert.equal(meResponse.status(), 200);

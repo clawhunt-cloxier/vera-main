@@ -69,8 +69,8 @@ func (s Service) clean(ctx context.Context, item expired) error {
 		if err != nil {
 			return err
 		}
-		// Keep empty rows for the admission interval so deletion cannot
-		// reset the workspace's recent message count.
+		// Keep scrubbed idempotency records for a minute after acceptance,
+		// so immediate delivery retries cannot recreate a deleted thread.
 		var recent bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM conversation_turns
 			WHERE conversation_id=$1 AND workspace_id=$2 AND created_at>now()-interval '1 minute')`, id, item.workspace).Scan(&recent); err != nil {

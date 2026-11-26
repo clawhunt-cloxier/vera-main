@@ -181,6 +181,8 @@ export function ConversationHistory({
     queryFn: ({ pageParam, signal }) => conversationHistory(pageParam, signal),
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     staleTime: 5000,
+    refetchInterval: (query) =>
+      query.state.data?.pages.find((page) => page.pollMs)?.pollMs ?? false,
   });
   const rows = history.data?.pages.flatMap((page) => page.items) ?? [];
   return (

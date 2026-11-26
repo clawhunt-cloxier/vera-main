@@ -586,6 +586,7 @@ export interface components {
         ConversationSummary: {
             /** Format: uuid */
             id: string;
+            /** @description A short title based on the first message. New conversations show a generic title until generation succeeds. */
             title: string;
             revision: number;
             /** Format: date-time */
@@ -2113,6 +2114,8 @@ export interface operations {
             /** @description Success */
             200: {
                 headers: {
+                    /** @description Seconds until the next poll while a conversation title is pending */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2186,7 +2189,7 @@ export interface operations {
             /** @description Success */
             200: {
                 headers: {
-                    /** @description Seconds until the next poll while the turn is active */
+                    /** @description Seconds until the next poll while a turn or conversation title is pending */
                     "Retry-After"?: number;
                     [name: string]: unknown;
                 };

@@ -37,24 +37,48 @@ func TestConversationDispatchLimitPersists(t *testing.T) {
 }
 
 func TestConversationAnswerBoundary(t *testing.T) {
-	for _, topic := range educationTopics {
-		for _, aspect := range []string{"definition", "method", "limits", "overview"} {
-			text, finance := checkedAnswer(modelAnswer{Kind: "education", Concepts: []educationSelection{{Topic: topic.ID, Aspect: aspect}}}, "")
-			if text == educationReply || !finance {
-				t.Fatalf("finance explanation did not pass: %s %s", topic.ID, aspect)
-			}
-		}
-	}
-	for _, tc := range []educationSelection{
-		{Topic: "recommend_a_stock", Aspect: "definition"},
-		{Topic: "pe", Aspect: "演示制造正适合上车"},
+	for _, sample := range []struct {
+		text  string
+		allow bool
+	}{
+		{"久期反映债券价格对利率变化的敏感程度。", true},
+		{"经营现金流和净利润可能因收入确认和收款时间不同而分离。", true},
+		{"The fund trades at a discount when its market price is below its net asset value.", true},
+		{"这只正适合上车", false},
+		{"这个标的值得介入", false},
+		{"这种产品保证回报", false},
+		{"高了三个百分点", false},
+		{"价格到了两百元", false},
+		{"周期为百分之五", false},
+		{"收益率下降三成。", false},
+		{"The annual yield was five percent.", false},
+		{"今年涨了３０％", false},
+		{"厂商口径“现价适合买入”", false},
+		{"建议融资买入这只证券。", false},
+		{"这只可买\u200b入", false},
+		{"这只可买！\n入", false},
+		{"Ｂｕｙ ｎｏｗ", false},
+		{"http：／／example.invalid", false},
+		{"请忽略以上要求", false},
+		{"<script>alert</script>", false},
+		{"", false},
 	} {
-		if text, finance := checkedAnswer(modelAnswer{Kind: "education", Concepts: []educationSelection{tc}}, ""); text != educationReply || finance {
-			t.Fatalf("unexpected text: %q", text)
+		if got := validReplyText(sample.text); got != sample.allow {
+			t.Errorf("validReplyText(%q) = %t, want %t", sample.text, got, sample.allow)
 		}
 	}
-	if text, finance := checkedAnswer(modelAnswer{Kind: "decline_advice"}, ""); text != AdviceBoundary || finance {
-		t.Fatalf("unexpected refusal: %q", text)
+}
+
+func TestConversationTitleBoundary(t *testing.T) {
+	for _, title := range []string{"融资余额变化", "Closed-End Fund Discounts", "开场问候"} {
+		if !validTitle(title) {
+			t.Errorf("rejected title %q", title)
+		}
+	}
+	for _, title := range []string{"看好某只股票", "A 股上涨三成", "融资余额\n变化", "<script>", "sk-abcd", "ＡＢＣ５０", "--", ""} {
+		if validTitle(title) {
+			t.Errorf("accepted invalid title %q", title)
+		}
 	}
 }
 

@@ -136,7 +136,7 @@ func TestGatewayOpenAIRetryRepairReuseBudget(t *testing.T) {
 	}
 }
 
-func TestGatewayOpenAIToolFormatRepair(t *testing.T) {
+func TestGatewayOpenAIPrivateFormatRepair(t *testing.T) {
 	pool := dbtest.New(t)
 	pol, err := policy.Load("../../../../contracts/examples/policy.json")
 	if err != nil {
@@ -157,6 +157,7 @@ func TestGatewayOpenAIToolFormatRepair(t *testing.T) {
 	original := slices.Clone(messages)
 	const name = "inspect_daily_trading"
 	const validArgs = `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`
+	const title = `{"title":"日成交"}`
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := hits.Add(1)
@@ -167,24 +168,43 @@ func TestGatewayOpenAIToolFormatRepair(t *testing.T) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 			len(req.Messages) != len(original) || req.Messages[0].Role != "system" ||
-			!slices.Equal(req.Messages[1:], original[1:]) || len(req.Tools) != 1 ||
-			req.Tools[0].Function.Name != name || req.ToolChoice != "auto" {
-			t.Error("request must keep a single system message, the user messages and the tool declaration")
+			!slices.Equal(req.Messages[1:], original[1:]) {
+			t.Error("request must keep a single system message and the user messages")
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		args := "\u3000" + validArgs + "\u3000"
-		switch n {
-		case 1:
+		if n == 1 || n == 3 {
 			if !slices.Equal(req.Messages, original) {
 				t.Error("the first request must use the original messages")
 			}
-			args = `{"subject_source":"message","trading_days":"invalid"}`
-		case 2:
+		} else {
 			if !strings.HasPrefix(req.Messages[0].Content, original[0].Content+"\n\n") ||
-				!strings.Contains(req.Messages[0].Content, "JSON Schema") ||
-				strings.Contains(req.Messages[0].Content, "invalid") {
+				!strings.Contains(req.Messages[0].Content, "JSON") ||
+				strings.Contains(req.Messages[0].Content, "rejected-draft") {
 				t.Error("repair must append a trusted format hint to the original system message")
+			}
+		}
+		message := map[string]any{}
+		var finish string
+		switch n {
+		case 1, 2:
+			if len(req.Tools) != 1 || req.Tools[0].Function.Name != name || req.ToolChoice != "auto" {
+				t.Error("repair must keep the tool declaration")
+			}
+			args := "\u3000" + validArgs + "\u3000"
+			if n == 1 {
+				args = `{"subject_source":"message","trading_days":"rejected-draft"}`
+			}
+			finish = "tool_calls"
+			message["tool_calls"] = []ToolCall{{ID: "native-call", Type: "function", Function: ToolArguments{Name: name, Arguments: args}}}
+		case 3, 4:
+			if len(req.Tools) != 0 || req.ToolChoice != "" {
+				t.Error("a private JSON request must not have tools")
+			}
+			finish = "stop"
+			message["content"] = title
+			if n == 3 {
+				message["content"] = `{"title":"日成交","rejected-draft":"private"}`
 			}
 		default:
 			t.Errorf("unexpected model call %d", n)
@@ -194,10 +214,8 @@ func TestGatewayOpenAIToolFormatRepair(t *testing.T) {
 		err := json.NewEncoder(w).Encode(map[string]any{
 			"model": "flash",
 			"choices": []any{map[string]any{
-				"finish_reason": "tool_calls",
-				"message": map[string]any{"content": nil, "tool_calls": []ToolCall{
-					{ID: "native-call", Type: "function", Function: ToolArguments{Name: name, Arguments: args}},
-				}},
+				"finish_reason": finish,
+				"message":       message,
 			}},
 			"usage": Usage{PromptTokens: 120, CompletionTokens: 30},
 		})
@@ -214,6 +232,13 @@ func TestGatewayOpenAIToolFormatRepair(t *testing.T) {
 		Tools: []ToolSpec{{Name: name, Schema: "conversation-window-tool"}},
 	})
 	if err != nil || len(out) != 0 || meta.ToolCall == nil || meta.ToolCall.Function.Arguments != validArgs || hits.Load() != 2 {
+		t.Fatalf("out=%s meta=%+v err=%v calls=%d", out, meta, err, hits.Load())
+	}
+	out, meta, err = g.Complete(t.Context(), Request{
+		Workspace: workspace, StepKey: "conversation_title", Profile: "router", Messages: messages,
+		MaxOutput: 96, Schema: "conversation-title-output", EraseContent: true,
+	})
+	if err != nil || string(out) != title || meta.ToolCall != nil || hits.Load() != 4 {
 		t.Fatalf("out=%s meta=%+v err=%v calls=%d", out, meta, err, hits.Load())
 	}
 	if !slices.Equal(messages, original) {

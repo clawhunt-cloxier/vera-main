@@ -62,9 +62,9 @@ flowchart LR
 
 ### 3.4 工作台对话
 
-对话消息交给 `router`。模型根据语义调用 [已登记的工具](skills/conversation-research.md)。问候和一般金融知识使用 `respond_to_user` 选择类别和概念，由服务用已审定的内容渲染。工具参数经 Schema 校验。服务匹配模型从本轮消息摘出的标的名称或代码，或沿用可信的会话范围。标的有歧义时返回候选，范围超出能力时提示补充。引用使用用户点选的已交付轮次，或同一会话最近一次交付。工作台标记自动执行，服务在一个事务中保存计划、绑定轮次和任务，并交给 River。旧 API 客户端按原有确认协议处理。对话不设每日研究次数，后台检查数据用途、队列容量和任务预算。
+对话消息交给 `router`。模型根据语义调用 [已登记的工具](skills/conversation-research.md)。问候和一般金融知识使用 `respond_to_user` 生成回复正文。Go 检查草稿的形式、数值和禁用表达，再由同一网关的独立请求检查语义。语义检查仅能删除回复。工具参数经 Schema 校验。服务匹配模型从本轮消息摘出的标的名称或代码，或沿用可信的会话范围。标的有歧义时返回候选，范围超出能力时提示补充。引用使用用户点选的已交付轮次，或同一会话最近一次交付。工作台标记自动执行，服务在一个事务中保存计划、绑定轮次和任务，并交给 River。旧 API 客户端按原有确认协议处理。对话不设每日研究次数，后台检查数据用途、队列容量和任务预算。
 
-日成交和融资余额短技能只冻结题目所需的日历与记录。编写章节与结论核验沿用现有 Harness，核心要点从已核验结论中选取。单 Choice 日成交使用独立技能版本，复用观察简报的冻结记录并从成交明细投影图表。对话模型收到范围元数据及同会话最近三轮连续的金融概念问答，研究数据和证据留在 Harness。概念回复使用通过确定性检查的固定内容。短技能任务到期后停止交付。能力登记及扩展见 [对话研究规格](skills/conversation-research.md)。
+日成交和融资余额短技能只冻结题目所需的日历与记录。编写章节与结论核验沿用现有 Harness，核心要点从已核验结论中选取。单 Choice 日成交使用独立技能版本，复用观察简报的冻结记录并从成交明细投影图表。对话模型收到范围元数据及同会话最近三轮内已交付的金融问答和澄清。研究数据和证据留在 Harness。首条消息另送标题生成作业，经检查后更新工作区历史。回复模型未配置时，返回服务状态。短技能任务到期后停止交付。能力登记及扩展见 [对话研究规格](skills/conversation-research.md)。
 
 ## 4. 技能定义
 
@@ -158,7 +158,7 @@ type SectionSpec struct {
 
 ### 6.2 输出结构
 
-模型输出必须是 JSON，用 JSON Output 模式请求；Harness 再用 Go 侧的 JSON Schema 严格校验，不依赖厂商的 strict 能力。Schema 见 [contracts/model/](../contracts/model/)：section-output、verify-output、summary-output、plan-parse-output、conversation-answer-output。这些 Schema 限定在厂商 strict 模式支持的子集内（对象封闭、所有字段必填、不用长度和 null 类型，不需要的字段填空字符串或空数组），以便将来切换 strict 模式；长度、条数上限由 Harness 规则检查。结论编号 `S3.1` 由 Harness 按顺序分配，模型不输出编号。
+模型输出必须是 JSON，用 JSON Output 模式请求；Harness 再用 Go 侧的 JSON Schema 严格校验，不依赖厂商的 strict 能力。Schema 见 [contracts/model/](../contracts/model/)：section-output、verify-output、summary-output、plan-parse-output、conversation-answer-output、conversation-review-output、conversation-title-output。这些 Schema 限定在厂商 strict 模式支持的子集内（对象封闭、所有字段必填、不用长度和 null 类型，不需要的字段填空字符串或空数组），以便将来切换 strict 模式；长度、条数上限由 Harness 规则检查。结论编号 `S3.1` 由 Harness 按顺序分配，模型不输出编号。
 
 ```json
 {

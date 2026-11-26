@@ -18,11 +18,30 @@ const turnPath = (id: string, turn: string) => threadPath(id) + '/turns/' + turn
 export const historyKey = (workspace: string) => ['conversation-history', workspace];
 export const threadKey = (workspace: string, id: string) => ['conversation', workspace, id];
 
-export const conversationHistory = (cursor: string | null, signal: AbortSignal) =>
-  get<ConversationHistory>(base + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''), {
-    ...json,
-    signal,
-  });
+function pollingDelay(headers: Headers): number | false {
+  const seconds = Number(headers.get('Retry-After'));
+  return seconds > 0 && Number.isFinite(seconds)
+    ? Math.max(1000, Math.min(seconds * 1000, 15_000))
+    : false;
+}
+
+export async function conversationHistory(
+  cursor: string | null,
+  signal: AbortSignal
+): Promise<ConversationHistory & { pollMs: number | false }> {
+  let pollMs: number | false = false;
+  const history = await get<ConversationHistory>(
+    base + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''),
+    {
+      ...json,
+      signal,
+      responseHeaders: (headers) => {
+        pollMs = pollingDelay(headers);
+      },
+    }
+  );
+  return { ...history, pollMs };
+}
 
 export async function conversationThread(
   id: string,
@@ -36,10 +55,7 @@ export async function conversationThread(
       ...json,
       signal,
       responseHeaders: (headers) => {
-        const seconds = Number(headers.get('Retry-After'));
-        if (seconds > 0 && Number.isFinite(seconds)) {
-          pollMs = Math.max(1000, Math.min(seconds * 1000, 15_000));
-        }
+        pollMs = pollingDelay(headers);
       },
     }
   );

@@ -49,16 +49,16 @@ go test -race ./internal/conversation ./internal/httpapi ./internal/harness ./in
   -run 'TestConversation|TestCloseConversationSourceWithRiver|TestGatewayOpenAI|TestObservationBriefDelivery|TestAdminUsageReportAndReconcile'
 ```
 
-测试使用独立 PostgreSQL、实际 River 工作者和模拟模型。`TestConversationNativeToolCalls` 使用本地模型 HTTP 替身，检查七种研究工具与结构化答复工具、口语问法、澄清后自动执行、手选历史轮次优先、日期范围不适用、原始计算引用及计费留痕。工具与直接 JSON 回复均拒绝未经许可的自由文本。`TestGatewayOpenAIToolFormatRepair` 检查工具参数无效时的重试只发送一条系统消息。未声明工具、虚构标的和非法参数均不创建任务。验收还覆盖纯荐股请求、混合历史研究和目标价请求，以及旧客户端确认计划。对话的数据准备保留队列容量限制，同标的复用作业，独立入口的每日次数单独计数。其余回归覆盖两类短研究、冻结序列、幂等发送、账户隔离、权限撤回、删除和过期、迟到记账、时限及完整研报 PDF。合成 Choice 动态库与本地 S3 替身检查图表、明细和证据一致性以及快照留存。
+测试使用独立 PostgreSQL、实际 River 工作者和仅在测试时安装的模型替身。`TestConversationNativeToolCalls` 使用本地模型 HTTP 替身，检查七种研究工具与结构化答复工具、口语问法、澄清后自动执行、手选历史轮次优先、日期范围不适用、原始计算引用及计费留痕。工具与直接 JSON 回复均验证通用解释正文由模型生成。回归覆盖目录之外的概念、上下文、禁用表达、未获证据支持的公司断言及核验结果。`TestGatewayOpenAIPrivateFormatRepair` 检查私有调用的格式纠错只修改首条系统消息，无论是否附带工具。未声明工具、虚构标的和非法参数均不创建任务。验收还覆盖首条消息生成标题、纯荐股请求、混合历史研究和目标价请求，以及旧客户端确认计划。对话的数据准备保留队列容量限制，同标的复用作业，独立入口的每日次数单独计数。其余回归覆盖两类短研究、冻结序列、幂等发送、账户隔离、权限撤回、删除和过期、迟到记账、时限及完整研报 PDF。合成 Choice 动态库与本地 S3 替身检查图表、明细和证据一致性以及快照留存。
 
-按 [演示启动指南](README-MVP.md) 启动模拟 Vera 并建立两个工作区。把本地演示密码保存在私有文本文件。安装 Chromium 后在 `web/` 运行：
+按 [演示启动指南](README-MVP.md) 启动本机 Vera，配置支持原生 Tool Call 的真实对话模型并建立两个工作区。该验收调用配置的模型。把本地演示密码保存在私有文本文件。安装 Chromium 后在 `web/` 运行：
 
 ```bash
-VERA_CHAT_URL=http://127.0.0.1:18093 VERA_CHAT_USER=vera-t044-demo VERA_CHAT_MOBILE_USER=administrator \
+VERA_CHAT_URL=http://127.0.0.1:18096 VERA_CHAT_USER=vera-t044-demo VERA_CHAT_MOBILE_USER=administrator \
 VERA_CHAT_PASSWORD_FILE=/path/to/private-password npm run test:conversation-ui
 ```
 
-浏览器检查 1440×960 和 390×844 的密码登录、问候、金融追问、非金融问题、拒绝荐股、自动研究、证据、公式、刷新、历史删除和旧计划确认。两个视口使用不同的工作区。
+浏览器检查 1440×960 和 390×844 的密码登录、问候、金融追问、非金融问题、拒绝荐股、混合请求、自动研究、证据、公式、摘要标题、刷新、历史删除和旧计划确认。两个视口使用不同的工作区。
 
 ## 2. 按任务补齐的测试
 

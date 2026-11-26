@@ -1592,6 +1592,15 @@
                   "$ref": "#/components/schemas/ConversationHistory"
                 }
               }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the next poll while a conversation title is pending",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
             }
           },
           "default": {
@@ -1707,7 +1716,7 @@
             },
             "headers": {
               "Retry-After": {
-                "description": "Seconds until the next poll while the turn is active",
+                "description": "Seconds until the next poll while a turn or conversation title is pending",
                 "schema": {
                   "type": "integer",
                   "minimum": 1
@@ -2702,7 +2711,8 @@
             "format": "uuid"
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "A short title based on the first message. New conversations show a generic title until generation succeeds."
           },
           "revision": {
             "type": "integer",

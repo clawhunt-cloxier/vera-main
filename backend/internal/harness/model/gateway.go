@@ -34,7 +34,7 @@ type Schemas map[string]registeredSchema
 func LoadSchemas(dir string) (Schemas, error) {
 	c := jsonschema.NewCompiler()
 	out := Schemas{}
-	for _, name := range []string{"section-output", "verify-output", "summary-output", "plan-parse-output", "conversation-answer-output", "conversation-window-tool", "conversation-depth-tool", "conversation-reference-tool"} {
+	for _, name := range []string{"section-output", "verify-output", "summary-output", "plan-parse-output", "conversation-answer-output", "conversation-review-output", "conversation-title-output", "conversation-window-tool", "conversation-depth-tool", "conversation-reference-tool"} {
 		p, _ := filepath.Abs(filepath.Join(dir, name+".schema.json"))
 		raw, err := os.ReadFile(p)
 		if err != nil {
@@ -179,6 +179,9 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 	if !ok {
 		return nil, Meta{}, fmt.Errorf("adapter %q not configured", prof.Adapter)
 	}
+	if r.EraseContent && prof.Adapter == "record" {
+		return nil, Meta{}, errors.New("private requests cannot use the record adapter")
+	}
 	tools, toolSchemas, err := g.registerTools(r, prof)
 	if err != nil {
 		return nil, Meta{}, err
@@ -284,11 +287,14 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			g.finish(ctx, callID, r.EraseContent, "FAILED", &raw, raw.Usage, cost, raw.ObservedModel, verr.Error())
 			if repairs > 0 {
 				repairs--
-				if len(tools) == 0 {
+				if !r.EraseContent {
 					msgs = append(append([]Message{}, msgs...), Message{Role: "assistant", Content: truncate(raw.Content, 4000)},
 						Message{Role: "user", Content: "上一次输出不符合要求：" + truncate(verr.Error(), 300) + "。请只输出符合 JSON Schema 的 JSON 对象，不要输出其他内容。"})
 				} else {
-					const hint = "上一次回复格式无效。只调用一个已声明的函数，参数须符合该函数的 JSON Schema，或只返回符合回复格式的 JSON 对象。"
+					hint := "上一次回复格式无效。请只返回符合回复格式的 JSON 对象，不要输出其他内容。"
+					if len(tools) != 0 {
+						hint = "上一次回复格式无效。只调用一个已声明的函数，参数须符合该函数的 JSON Schema，或只返回符合回复格式的 JSON 对象。"
+					}
 					if len(msgs) > 0 && msgs[0].Role == "system" {
 						// Some model templates allow only one system message.
 						msgs = append([]Message(nil), msgs...)

@@ -15,37 +15,13 @@
         "out_of_scope"
       ]
     },
-    "concepts": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "topic": {
-            "type": "string",
-            "pattern": "^[a-z_]+$",
-            "description": "A concept ID from the registered catalogue in the prompt."
-          },
-          "aspect": {
-            "type": "string",
-            "description": "定义用 definition，统计口径或研究方法用 method，适用条件、风险和局限用 limits，概览用 overview。",
-            "enum": [
-              "definition",
-              "method",
-              "limits",
-              "overview"
-            ]
-          }
-        },
-        "required": [
-          "topic",
-          "aspect"
-        ]
-      }
+    "message": {
+      "type": "string",
+      "description": "用户可见的纯文本。结合本轮消息和上下文写出具体答复，不含个股判断、无来源事实、数字、链接或投资建议。"
     }
   },
   "required": [
     "kind",
-    "concepts"
+    "message"
   ]
 }

@@ -153,6 +153,9 @@ func (s Service) expire(ctx context.Context, ws, conv uuid.UUID) error {
 
 func (s Service) hide(ctx context.Context, ws, conv uuid.UUID, expiredOnly bool) error {
 	return db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
+		if err := lockTitleDispatch(ctx, tx, conv, false); err != nil {
+			return err
+		}
 		var id uuid.UUID
 		err := tx.QueryRow(ctx, `UPDATE conversations SET deleted_at=coalesce(deleted_at,now()),title='',scope=NULL
 			WHERE id=$1 AND (NOT $2 OR deleted_at IS NOT NULL OR expires_at<=clock_timestamp()) RETURNING id`, conv, expiredOnly).Scan(&id)

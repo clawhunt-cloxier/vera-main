@@ -136,7 +136,7 @@ def strict_subset(node, where):
                     strict_subset(sub, f'{where}|{i}')
 
 
-for name in ('section-output', 'verify-output', 'summary-output', 'plan-parse-output', 'conversation-answer-output',
+for name in ('section-output', 'verify-output', 'summary-output', 'plan-parse-output', 'conversation-answer-output', 'conversation-review-output', 'conversation-title-output',
              'conversation-window-tool', 'conversation-depth-tool', 'conversation-reference-tool'):
     schema = json.loads((root/f'contracts/model/{name}.schema.json').read_text())
     Draft202012Validator.check_schema(schema)
