@@ -12,7 +12,7 @@
     },
     "subject_mention": {
       "type": "string",
-      "description": "Exact name or code from the current message, or empty if unnamed."
+      "description": "只填当前消息里的证券、行业或市场的名称或代码，未指名时填空字符串。"
     },
     "advice": {
       "type": "string",

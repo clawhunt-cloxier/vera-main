@@ -1,6 +1,6 @@
 {
   "fixture_mode": "synthetic",
-  "agent_contract_version": 4,
+  "agent_contract_version": 5,
   "cases": [
     {
       "input": "演示制造近 20 个交易日的融资余额怎么变",
@@ -33,6 +33,29 @@
       "context": "previous financing balance result",
       "expect": {
         "tool": "refine_research",
+        "state": "research",
+        "topic": "financing_balance",
+        "window": 60,
+        "auto_start": true
+      }
+    },
+    {
+      "input": "能给我看一下上一轮变化值用的原公式么？",
+      "context": "selected financing balance result",
+      "expect": {
+        "tool": "reference_research",
+        "state": "reference",
+        "reference_kind": "calculation",
+        "new_task": false
+      }
+    },
+    {
+      "input": "同一标的，把这个窗口拓宽到六十个交易日。",
+      "context": "selected financing balance result",
+      "expect": {
+        "tool": "refine_research",
+        "subject_source": "context",
+        "subject_mentions": [],
         "state": "research",
         "topic": "financing_balance",
         "window": 60,

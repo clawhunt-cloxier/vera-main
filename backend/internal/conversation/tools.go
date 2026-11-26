@@ -42,8 +42,8 @@ var researchTools = []researchTool{
 func (s Service) agentTools() []model.ToolSpec {
 	tools := []model.ToolSpec{
 		{Name: replyTool, Schema: "conversation-answer-output", Description: "选择服务展示的回复。问候 greeting，致谢 thanks，身份或功能 capabilities，金融知识 education，禁止的投资建议 decline_advice，非金融问题 out_of_scope，缺少必要信息 clarify，无相关数据或能力 unavailable。不生成正文，不创建研究。"},
-		{Name: refineTool, Schema: "conversation-window-tool", Description: "Keep the topic of the selected result, latest clarification or prior research. Use to change only the trading-day window or to provide or replace the subject for that topic."},
-		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "Show the original result, sources or calculation from the selected or latest delivered report in this conversation. Does not perform new research."},
+		{Name: refineTool, Schema: "conversation-window-tool", Description: "调整所选结果或上一轮研究的窗口，或补充、更换同主题的标的。沿用标的时用 subject_source=context 和 subject_mentions=[]。"},
+		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "解释所选或最近报告里的结果、出处或原公式。问某个已交付的数怎么计算时用 kind=calculation。仅查看已交付内容。"},
 	}
 	for _, tool := range researchTools {
 		spec, ok := s.Engine.ConversationResearchSpec(tool.Skill, tool.Topic)

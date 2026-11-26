@@ -28,6 +28,7 @@
           },
           "aspect": {
             "type": "string",
+            "description": "定义用 definition，统计口径或研究方法用 method，适用条件、风险和局限用 limits，概览用 overview。",
             "enum": [
               "definition",
               "method",
