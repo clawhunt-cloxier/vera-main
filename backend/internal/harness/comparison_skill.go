@@ -138,7 +138,7 @@ func stockComparisonSkill(version string) *Skill {
 					return Params{}, errs.Unprocessable("INVALID_PARAMS", "同行样本范围无效")
 				}
 			}
-			if !comparison.ComparisonBenchmarks.Valid() ||
+			if !comparison.Valid() ||
 				comparison.HasIndexes() && version != ComparisonCloseVersion && version != ComparisonFixtureVersion {
 				return Params{}, errs.Unprocessable("INVALID_PARAMS", "比较指数范围无效")
 			}

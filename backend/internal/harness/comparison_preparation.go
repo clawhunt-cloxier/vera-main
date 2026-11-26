@@ -55,7 +55,7 @@ func (e *Engine) PrepareComparison(ctx context.Context, ws, turn uuid.UUID, revi
 	if e.PrepareTuShareComparison == nil || e.River == nil || !e.comparisonAvailable() || KillSwitch(ctx, e.Pool) {
 		return result, sample, errs.Unavailable("PREPARATION_UNAVAILABLE", "股价对比数据准备当前不可用")
 	}
-	if len(others) >= dataservice.ComparisonSubjectLimit || !mainlandStockCode.MatchString(anchor.Code) || !p.ComparisonBenchmarks.Valid() {
+	if len(others) >= dataservice.ComparisonSubjectLimit || !mainlandStockCode.MatchString(anchor.Code) || !p.Valid() {
 		return result, sample, errs.Unprocessable("INVALID_PARAMS", "请选择支持的 A 股比较对象")
 	}
 	codes := append([]string{}, others...)
