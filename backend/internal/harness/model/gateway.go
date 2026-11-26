@@ -343,9 +343,11 @@ func validateCompletion(raw Raw, reply *jsonschema.Schema, tools map[string]*jso
 	if call.Type != "function" || call.ID == "" || schema == nil || len(call.Function.Arguments) > 4096 {
 		return nil, nil, errors.New("invalid tool call")
 	}
-	if _, err := validate(Raw{Content: call.Function.Arguments}, schema); err != nil {
+	args, err := validate(Raw{Content: call.Function.Arguments}, schema)
+	if err != nil {
 		return nil, nil, errors.New("invalid tool arguments")
 	}
+	call.Function.Arguments = string(args)
 	return nil, &call, nil
 }
 

@@ -173,7 +173,7 @@ func TestGatewayOpenAIToolFormatRepair(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		args := validArgs
+		args := "\u3000" + validArgs + "\u3000"
 		switch n {
 		case 1:
 			if !slices.Equal(req.Messages, original) {
