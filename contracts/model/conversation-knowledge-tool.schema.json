@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query", "message"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Self-contained, anonymous public finance question. Do not include URLs, names of people or securities, or portfolio details."
+    },
+    "message": {
+      "type": "string",
+      "description": "A concise education reply for use if no sources are returned. State uncertainty where the facts need checking."
+    }
+  }
+}

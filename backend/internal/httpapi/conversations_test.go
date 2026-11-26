@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/shopspring/decimal"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/identity"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 )
 
 const chatPath = "/api/v1/conversations"
@@ -78,6 +80,8 @@ func TestConversationRequiresConfiguredModel(t *testing.T) {
 
 func TestConversationNativeToolCalls(t *testing.T) {
 	const ask = "演示制造过去 20 个交易日没还清的融资款是变多还是变少了"
+	const firstTrading = "看看演示制造近 5 个交易日的日成交"
+	const nextFinancing = "融资余额呢？"
 	const followup = "展示上一项计算使用的原始公式"
 	const injectedSubject = "能给我看一下上一轮变化值用的原公式么？"
 	const differentSubject = "演示设备甲的这个数怎么算"
@@ -121,16 +125,18 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const wrongReference = "看近 120 个交易日这个数怎么算"
 	responses := map[string]model.ToolArguments{
 		ask:              {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		firstTrading:     {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":5,"advice":"none"}`},
+		nextFinancing:    {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
 		followup:         {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
 		injectedSubject:  {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"融资余额","advice":"none"}`},
 		differentSubject: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
 		unknownSubject:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"无登记的模拟丙公司","advice":"none"}`},
 		unknownTicker:    {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"999999","advice":"none"}`},
 		missing:          {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"message","trading_days":5,"advice":"none"}`},
-		subject:          {Name: "refine_research", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		subject:          {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
 		fabricated:       {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
-		calendar:         {Name: "refine_research", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":-1,"advice":"none"}`},
-		selected:         {Name: "refine_research", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"}`},
+		calendar:         {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":-1,"advice":"none"}`},
+		selected:         {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"}`},
 		mixed:            {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"declined"}`},
 		legacy:           {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
 		omittedSubject:   {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
@@ -269,8 +275,9 @@ func TestConversationNativeToolCalls(t *testing.T) {
 			}
 			return
 		}
-		if len(request.Messages) != 3 || len(request.Tools) != 8 || request.ToolChoice != "auto" || request.Tools[0].Function.Name != "respond_to_user" ||
-			request.Tools[1].Function.Name != "refine_research" || request.Tools[2].Function.Name != "reference_research" ||
+		if len(request.Messages) != 3 || len(request.Tools) != 7 || request.ToolChoice != "auto" || request.Tools[0].Function.Name != "respond_to_user" ||
+			request.Tools[1].Function.Name != "reference_research" || request.Tools[2].Function.Name != "inspect_daily_trading" ||
+			request.Tools[3].Function.Name != "inspect_financing_balance" ||
 			!strings.Contains(request.Messages[0].Content, "你是 Vera") {
 			t.Error("agent did not send a valid function declaration and identity prompt")
 			w.WriteHeader(http.StatusBadRequest)
@@ -282,6 +289,9 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		}
 		if question == followup && !strings.Contains(request.Messages[1].Content, `"has_delivered_research":true`) {
 			t.Error("agent did not send the prior result state")
+		}
+		if question == nextFinancing && !strings.Contains(request.Messages[1].Content, `"previous_scope":{"skill":"stock_analysis","topic":"daily_trading","trading_days":5,"has_subject":true}`) {
+			t.Error("changing indicators did not receive the previous subject and window")
 		}
 		if question == selected && (!strings.Contains(request.Messages[1].Content, `"user_selected_result":true`) || strings.Contains(request.Messages[1].Content, `"clarification_scope"`)) {
 			t.Error("a clarification superseded the selected report")
@@ -354,6 +364,15 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	if _, v := send(followup, &first.ConversationID); v.State != "reference" || v.Reference == nil || *v.Reference != first.TurnID || v.Kind != "calculation" {
 		t.Fatalf("native call did not reuse the previous calculation: %+v", v)
 	}
+	trading, daily := send(firstTrading, nil)
+	if !daily.Result || daily.Scope == nil || daily.Scope.Topic != harness.DailyTradingTopic || daily.Scope.Window != 5 {
+		t.Fatalf("did not deliver the first indicator: %+v", daily)
+	}
+	if _, v := send(nextFinancing, &trading.ConversationID); !v.Result || v.Scope == nil ||
+		v.Scope.Skill != "capital_flow" || v.Scope.Topic != harness.FinancingBalanceTopic ||
+		v.Scope.SubjectID != daily.Scope.SubjectID || v.Scope.Window != daily.Scope.Window {
+		t.Fatalf("did not switch indicators while keeping the stock and window: %+v", v)
+	}
 	firstPath := chatPath + "/" + first.ConversationID.String()
 	var firstThread chatThread
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
@@ -365,6 +384,42 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	}
 	if firstThread.Conversation.Title != "演示制造融资研究" {
 		t.Fatalf("history title did not summarize the first message: %+v", firstThread.Conversation)
+	}
+	var me Me
+	a.json("GET", "/api/v1/me", nil, 200, &me)
+	if me.WorkspaceID == nil {
+		t.Fatal("test user has no workspace")
+	}
+	legacyID := uuid.New()
+	if err := db.InWorkspace(t.Context(), e.pool, *me.WorkspaceID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO conversations(id,workspace_id,title,revision,created_at,updated_at)
+			VALUES($1,$2,left($3,48),7,now()-interval '2 days',now()-interval '1 day')`, legacyID, me.WorkspaceID, ask); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO conversation_turns(workspace_id,conversation_id,client_message_id,request_hash,ordinal,channel,body,state)
+			VALUES($1,$2,$3,'legacy',1,'web',$4,'unavailable'),($1,$2,$5,'legacy',2,'web','别的指标呢','unavailable')`,
+			me.WorkspaceID, legacyID, uuid.New(), ask, uuid.New())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var legacyBefore, legacyAfter chatThread
+	legacyPath := chatPath + "/" + legacyID.String()
+	a.json("GET", legacyPath, nil, 200, &legacyBefore)
+	if _, err := e.engine.River.Insert(t.Context(), titleBackfillProbe{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		a.json("GET", legacyPath, nil, 200, &legacyAfter)
+		if legacyAfter.Conversation.Title != legacyBefore.Conversation.Title {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if legacyAfter.Conversation.Title != "演示制造融资研究" || legacyAfter.Conversation.Revision != legacyBefore.Conversation.Revision ||
+		!legacyAfter.Conversation.UpdatedAt.Equal(legacyBefore.Conversation.UpdatedAt) || !slices.EqualFunc(legacyBefore.Turns, legacyAfter.Turns,
+		func(a, b chatReadTurn) bool { return a.ID == b.ID && a.Revision == b.Revision }) {
+		t.Fatalf("legacy first message did not generate a title or changed history: %+v", legacyAfter.Conversation)
 	}
 	if _, v := send(injectedSubject, &first.ConversationID, first.TurnID); v.State != "reference" || v.Reference == nil || *v.Reference != first.TurnID || v.Kind != "calculation" {
 		t.Fatalf("a model-only mention changed the selected report reference: %+v", v)
@@ -458,13 +513,21 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	err := e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
 		count(*) FILTER (WHERE response IS NOT NULL OR error IS NOT NULL OR observed_model IS NOT NULL), (SELECT count(*) FROM research_tasks)
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
-	if err != nil || calls != 53 || billed != 53 || bodies != 0 || tasks != 5 {
+	if err != nil || calls != 55 || billed != 55 || bodies != 0 || tasks != 7 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 	var title string
-	err = e.pool.QueryRow(t.Context(), `SELECT title FROM conversations WHERE id=$1`, bondThread.ConversationID).Scan(&title)
-	if err != nil || title != "新会话" {
-		t.Fatalf("rejected title should leave the default title, got %q: %v", title, err)
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		if err := e.pool.QueryRow(t.Context(), `SELECT title FROM conversations WHERE id=$1`, bondThread.ConversationID).Scan(&title); err != nil {
+			t.Fatal(err)
+		}
+		if title != "" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if title != "新会话" {
+		t.Fatalf("rejected title should leave the default title, got %q", title)
 	}
 	a.json("GET", firstPath, nil, 200, &firstThread)
 	if firstThread.Conversation.Title != "演示制造融资研究" {
@@ -1073,7 +1136,7 @@ func useResearchRouter(engine *harness.Engine) {
 		"演示制造近 5 个交易日融资余额":      window("inspect_financing_balance", "message", 5, "演示制造"),
 		"演示制造的融资余额":             window("inspect_financing_balance", "message", 0, "演示制造"),
 		"这个数怎么算的":               {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
-		"改成 60 个交易日":            window("refine_research", "context", 60),
+		"改成 60 个交易日":            window("inspect_financing_balance", "context", 60),
 		"这只股票的日成交呢":             window("inspect_daily_trading", "context", 0),
 		"演示制造和演示设备甲的成交额":        window("inspect_daily_trading", "message", 0, "演示制造", "演示设备甲"),
 		"为演示制造生成完整个股研报":         window("analyze_stock", "message", 0, "演示制造"),
@@ -1102,6 +1165,10 @@ func startConversationWorker(t *testing.T, e *env) {
 type retentionProbe struct{}
 
 func (retentionProbe) Kind() string { return "conversation.retention" }
+
+type titleBackfillProbe struct{}
+
+func (titleBackfillProbe) Kind() string { return "conversation.title_backfill" }
 
 func awaitConversationPurge(t *testing.T, e *env, conversationID uuid.UUID) {
 	t.Helper()

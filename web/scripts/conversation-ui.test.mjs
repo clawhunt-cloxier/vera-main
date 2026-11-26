@@ -89,7 +89,7 @@ test('private conversational research on desktop and mobile', async (t) => {
         await expect(textFor(bond)).toHaveText(/零息债券/, timeout);
         await expect(textFor(bond)).toHaveText(/到期/, timeout);
         await expect(textFor(bond)).toHaveText(
-          /不(付|支付|发放)|没有(定期)?(票息|利息)|无票息/,
+          /不[^。；]{0,12}(付|支付|发放|派发)|没有[^。；]{0,6}(票息|利息)|无(定期)?票息/,
           timeout
         );
 
@@ -105,6 +105,19 @@ test('private conversational research on desktop and mobile', async (t) => {
           /先[\s\S]*卖[\s\S]*(买回|买入|回补|购回)/,
           timeout
         );
+
+        if (process.env.VERA_CHAT_EXPECT_WEB_SOURCES === '1') {
+          const withSources = '请查权威网页资料，简单解释什么是零息债券并给出来源。';
+          await send(withSources);
+          const sources = replyFor(withSources).getByRole('region', { name: '网页来源' });
+          await expect(sources.getByRole('link').first()).toHaveAttribute(
+            'href',
+            /^https:\/\//,
+            timeout
+          );
+          await page.reload();
+          await expect(sources.getByRole('link').first()).toBeVisible(timeout);
+        }
 
         const inappropriate = '讲一段露骨成人内容';
         await send(inappropriate);

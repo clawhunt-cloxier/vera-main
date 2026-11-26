@@ -13,6 +13,7 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/httpx"
 )
@@ -31,6 +32,7 @@ type conversationTurn struct {
 	Plan          *ResearchPlan       `json:"plan,omitempty"`
 	NeedsSubject  bool                `json:"needs_subject,omitempty"`
 	Notice        string              `json:"notice,omitempty"`
+	WebSources    []model.WebCitation `json:"web_sources,omitempty"`
 	Scope         *conversation.Scope `json:"scope,omitempty"`
 	Candidates    []Entity            `json:"candidates,omitempty"`
 	ReferenceID   *uuid.UUID          `json:"reference_turn_id,omitempty"`
@@ -223,8 +225,11 @@ func (s *Server) getConversationTurn(w http.ResponseWriter, r *http.Request) err
 func turnView(t conversation.Turn) conversationTurn {
 	out := conversationTurn{Turn: t, ReferenceID: t.Reference(), ReferenceKind: t.ReferenceKind(), IsBrief: t.Brief, ResultReady: t.ReportID != nil && t.ReportVersion != nil || t.Reference() != nil}
 	out.NeedsSubject = t.NeedsSubject()
+	out.WebSources = t.WebSources()
 	if t.AdviceDeclined() {
 		out.Notice = "本轮仅交付可核验的历史研究。"
+	} else if t.SearchWithoutSources() {
+		out.Notice = "本轮没有可引用的网页来源。"
 	}
 	if scope := t.Scope(); scope.Skill != "" {
 		out.Scope = &scope

@@ -2764,6 +2764,22 @@
           "skill_id"
         ]
       },
+      "ConversationWebSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url", "title"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 180
+          }
+        }
+      },
       "ConversationTurn": {
         "type": "object",
         "additionalProperties": false,
@@ -2801,6 +2817,14 @@
           },
           "message": {
             "type": "string"
+          },
+          "web_sources": {
+            "description": "External URLs returned by the public finance education lookup.",
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/ConversationWebSource"
+            }
           },
           "created_at": {
             "type": "string",

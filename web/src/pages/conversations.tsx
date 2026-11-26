@@ -518,6 +518,20 @@ function TurnBody({
         </section>
       )}
       {turn.state === 'answer' && <p className="chat-reply">{turn.message}</p>}
+      {turn.web_sources && turn.web_sources.length > 0 && (
+        <section className="chat-web-sources" aria-label="网页来源">
+          <h3>参考来源</h3>
+          <ul>
+            {turn.web_sources.map((source) => (
+              <li key={source.url}>
+                <a href={source.url} target="_blank" rel="noopener noreferrer">
+                  {source.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {turn.state === 'clarify' && (
         <>
           <p>{turn.message}</p>
@@ -582,10 +596,13 @@ function SubjectPicker({
   choosing: boolean;
   onChoose: (id: string) => void;
 }) {
+  const me = useMe();
   const [text, setText] = useState('');
   const query = useMutation({
     mutationFn: (value: string) =>
-      get<{ items: Entity[] }>('/api/v1/entities?kind=stock&q=' + encodeURIComponent(value)),
+      get<{ items: Entity[] }>('/api/v1/entities?kind=stock&q=' + encodeURIComponent(value), {
+        protocol: me.data?.research_protocol,
+      }),
   });
   const rows = candidates?.length ? candidates : (query.data?.items ?? []);
   return (

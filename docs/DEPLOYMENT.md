@@ -20,6 +20,8 @@
 
 `.env` 中的模型密钥、价格表版本等使用真实变量名（`MODEL_{WRITER|VERIFIER|ROUTER}_*`、`VERA_PUBLIC_URL` 等），完整列表见 `backend/internal/platform/config/config.go`。
 
+通用金融知识查证复用 `MODEL_ROUTER_*`。当 router 使用 DeepSeek 官方 API 的 `deepseek-flash` 时默认启用搜索。可用 `VERA_CONVERSATION_WEB_SEARCH=false` 关闭。证券行情和研报证据从已登记的数据源取得。
+
 ## GitHub Secrets
 
 在仓库 Settings → Secrets and variables → Actions 配置：

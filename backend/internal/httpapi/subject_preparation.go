@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/httpx"
 )
@@ -31,7 +32,7 @@ func (s *Server) prepareSubject(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	entity, ok := entities[id]
-	if !ok || entity.Synthetic || entity.Kind != "stock" || !emquantBriefCodeLike(entity.Code) {
+	if !ok || entity.Synthetic || entity.Kind != "stock" || !emquant.IsListedStockCode(entity.Code) {
 		return errs.NotFound()
 	}
 	_, ws := principal(r)

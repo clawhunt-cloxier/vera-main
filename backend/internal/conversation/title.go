@@ -29,15 +29,65 @@ type titleArgs struct {
 	Workspace    uuid.UUID `json:"workspace"`
 	Conversation uuid.UUID `json:"conversation" river:"unique"`
 	FirstTurn    uuid.UUID `json:"first_turn"`
+	Legacy       bool      `json:"legacy,omitempty"`
 }
 
 func (titleArgs) Kind() string { return "conversation.title" }
 
-func (s Service) enqueueTitle(ctx context.Context, tx pgx.Tx, ws, conversation, firstTurn uuid.UUID) error {
-	_, err := s.Engine.River.InsertTx(ctx, tx, titleArgs{ws, conversation, firstTurn}, &river.InsertOpts{
-		Queue: titleQueue, MaxAttempts: 2, ScheduledAt: time.Now().Add(2 * time.Second), UniqueOpts: river.UniqueOpts{ByArgs: true},
-	})
+func (s Service) enqueueTitle(ctx context.Context, tx pgx.Tx, args titleArgs) error {
+	opts := &river.InsertOpts{Queue: titleQueue, MaxAttempts: 2, UniqueOpts: river.UniqueOpts{ByArgs: true}}
+	if !args.Legacy {
+		opts.ScheduledAt = time.Now().Add(2 * time.Second)
+	}
+	_, err := s.Engine.River.InsertTx(ctx, tx, args, opts)
 	return err
+}
+
+type titleBackfillArgs struct{}
+
+func (titleBackfillArgs) Kind() string { return "conversation.title_backfill" }
+
+type titleBackfillWorker struct {
+	river.WorkerDefaults[titleBackfillArgs]
+	service Service
+}
+
+func registerTitleBackfill(workers *river.Workers, cfg *river.Config, engine *harness.Engine) {
+	river.AddWorker(workers, &titleBackfillWorker{service: Service{Engine: engine}})
+	cfg.PeriodicJobs = append(cfg.PeriodicJobs, river.NewPeriodicJob(river.PeriodicInterval(time.Minute),
+		func() (river.JobArgs, *river.InsertOpts) { return titleBackfillArgs{}, nil }, &river.PeriodicJobOpts{RunOnStart: true}))
+}
+
+// The old application used the first 48 characters of the first message as
+// the title. Queue a small batch per minute using only workspace and turn IDs.
+func (w *titleBackfillWorker) Work(ctx context.Context, _ *river.Job[titleBackfillArgs]) error {
+	s := w.service
+	if !s.hasTitleModel(ctx) {
+		return nil
+	}
+	return db.InSystem(ctx, s.Engine.Pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.workspace_id,c.id,t.id FROM conversations c
+			JOIN conversation_turns t ON t.workspace_id=c.workspace_id AND t.conversation_id=c.id AND t.ordinal=1
+			WHERE NOT c.title_started AND c.title<>'' AND c.title=left(t.body,48) AND `+visible+`
+			ORDER BY c.updated_at DESC,c.id DESC LIMIT 6`)
+		if err != nil {
+			return err
+		}
+		jobs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (titleArgs, error) {
+			job := titleArgs{Legacy: true}
+			err := row.Scan(&job.Workspace, &job.Conversation, &job.FirstTurn)
+			return job, err
+		})
+		if err != nil {
+			return err
+		}
+		for _, job := range jobs {
+			if err := s.enqueueTitle(ctx, tx, job); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 type titleWorker struct {
@@ -52,7 +102,10 @@ func (w *titleWorker) Work(ctx context.Context, job *river.Job[titleArgs]) error
 }
 
 func (s Service) nameConversation(ctx context.Context, args titleArgs) error {
-	first, err := s.claimTitle(ctx, args)
+	if !s.hasTitleModel(ctx) {
+		return nil
+	}
+	first, original, err := s.claimTitle(ctx, args)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -61,47 +114,52 @@ func (s Service) nameConversation(ctx context.Context, args titleArgs) error {
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	title := s.generateTitle(callCtx, args, first)
+	title := s.generateTitle(callCtx, args, first, original)
 	if title == "" {
 		title = "新会话"
 	}
 	return db.InWorkspace(ctx, s.Engine.Pool, args.Workspace, func(tx pgx.Tx) error {
 		// Metadata changes leave the revision and history ordering untouched.
 		_, err := tx.Exec(ctx, `UPDATE conversations c SET title=$2
-			WHERE c.id=$1 AND c.title='' AND c.title_started AND `+visible, args.Conversation, title)
+			WHERE c.id=$1 AND c.title=$3 AND c.title_started AND `+visible, args.Conversation, title, original)
 		return err
 	})
 }
 
 // Reserve the title before calling the vendor so a restarted worker cannot
-// dispatch a second generation. A lost attempt leaves the generic title.
-func (s Service) claimTitle(ctx context.Context, args titleArgs) (string, error) {
-	var first string
+// dispatch a second generation.
+func (s Service) claimTitle(ctx context.Context, args titleArgs) (string, string, error) {
+	var first, original string
 	err := db.InWorkspace(ctx, s.Engine.Pool, args.Workspace, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `UPDATE conversations c SET title_started=true
 			FROM conversation_turns t WHERE c.id=$1 AND t.id=$2 AND t.ordinal=1
 			AND t.conversation_id=c.id AND t.workspace_id=c.workspace_id
-			AND NOT c.title_started AND c.title='' AND `+visible+` AND `+titleDeadline+`
-			RETURNING t.body`, args.Conversation, args.FirstTurn).Scan(&first)
+			AND NOT c.title_started AND `+visible+`
+			AND CASE WHEN $3 THEN c.title<>'' AND c.title=left(t.body,48) ELSE c.title='' AND `+titleDeadline+` END
+			RETURNING t.body,c.title`, args.Conversation, args.FirstTurn, args.Legacy).Scan(&first, &original)
 	})
-	return first, err
+	return first, original, err
 }
 
-func (s Service) generateTitle(ctx context.Context, args titleArgs, first string) string {
+func (s Service) hasTitleModel(ctx context.Context) bool {
 	gateway := s.Engine.Gateway
 	if gateway == nil || harness.KillSwitch(ctx, s.Engine.Pool) {
-		return ""
+		return false
 	}
-	if profile := gateway.Profiles["router"]; profile.Adapter == "sim" || profile.Adapter == "record" {
-		return ""
-	}
+	profile, ok := gateway.Profiles["router"]
+	return ok && profile.Adapter != "sim" && profile.Adapter != "record"
+}
+
+func (s Service) generateTitle(ctx context.Context, args titleArgs, first, original string) string {
+	gateway := s.Engine.Gateway
 	send := func(ctx context.Context, dispatch func() (model.Raw, error)) (raw model.Raw, err error) {
 		err = db.InWorkspace(ctx, s.Engine.Pool, args.Workspace, func(tx pgx.Tx) error {
 			if err := lockTitleDispatch(ctx, tx, args.Conversation, true); err != nil {
 				return err
 			}
 			var id uuid.UUID
-			if err := tx.QueryRow(ctx, `SELECT c.id FROM conversations c WHERE c.id=$1 AND c.title='' AND `+visible+` AND `+titleDeadline, args.Conversation).Scan(&id); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT c.id FROM conversations c WHERE c.id=$1 AND c.title=$2 AND c.title_started AND `+visible+
+				` AND ($3 OR `+titleDeadline+`)`, args.Conversation, original, args.Legacy).Scan(&id); err != nil {
 				return err
 			}
 			raw, err = dispatch()

@@ -15,6 +15,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
@@ -75,14 +76,16 @@ type Scope struct {
 }
 
 type intent struct {
-	Scope          Scope       `json:"scope"`
-	Candidates     []uuid.UUID `json:"candidates,omitempty"`
-	Reference      *uuid.UUID  `json:"reference,omitempty"`
-	ReferenceKind  string      `json:"reference_kind,omitempty"`
-	Preparing      bool        `json:"preparing,omitempty"`
-	FinanceAnswer  bool        `json:"finance_answer,omitempty"`
-	NeedsSubject   bool        `json:"needs_subject,omitempty"`
-	AdviceDeclined bool        `json:"advice_declined,omitempty"`
+	Scope                Scope               `json:"scope"`
+	Candidates           []uuid.UUID         `json:"candidates,omitempty"`
+	Reference            *uuid.UUID          `json:"reference,omitempty"`
+	ReferenceKind        string              `json:"reference_kind,omitempty"`
+	Preparing            bool                `json:"preparing,omitempty"`
+	FinanceAnswer        bool                `json:"finance_answer,omitempty"`
+	NeedsSubject         bool                `json:"needs_subject,omitempty"`
+	AdviceDeclined       bool                `json:"advice_declined,omitempty"`
+	WebSources           []model.WebCitation `json:"web_sources,omitempty"`
+	SearchWithoutSources bool                `json:"search_without_sources,omitempty"`
 }
 
 type Accepted struct {
@@ -178,7 +181,7 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 			return err
 		}
 		if conversationID == nil {
-			return s.enqueueTitle(ctx, tx, sender.Workspace, out.ConversationID, out.TurnID)
+			return s.enqueueTitle(ctx, tx, titleArgs{Workspace: sender.Workspace, Conversation: out.ConversationID, FirstTurn: out.TurnID})
 		}
 		return nil
 	})
@@ -320,7 +323,12 @@ func Register(engine *harness.Engine) func(*river.Workers, *river.Config) {
 		if cfg.Queues != nil {
 			cfg.Queues["conversation"] = river.QueueConfig{MaxWorkers: 2}
 			cfg.Queues[titleQueue] = river.QueueConfig{MaxWorkers: 1}
+			registerTitleBackfill(workers, cfg, engine)
 			registerRetention(workers, cfg, engine)
 		}
 	}
 }
+
+func (t Turn) WebSources() []model.WebCitation { return t.Intent.WebSources }
+
+func (t Turn) SearchWithoutSources() bool { return t.Intent.SearchWithoutSources }

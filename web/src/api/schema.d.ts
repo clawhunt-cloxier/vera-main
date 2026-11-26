@@ -602,6 +602,11 @@ export interface components {
             /** @enum {string} */
             mode?: "company_industry";
         };
+        ConversationWebSource: {
+            /** Format: uri */
+            url: string;
+            title: string;
+        };
         /** @description A research request with automatic=true can start directly after validation. Clients that omit automatic receive a plan for confirmation. The answer state contains a non-research reply. */
         ConversationTurn: {
             /** Format: uuid */
@@ -614,6 +619,8 @@ export interface components {
             /** Format: uuid */
             reply_to_turn_id?: string;
             message?: string;
+            /** @description External URLs returned by the public finance education lookup. */
+            web_sources?: components["schemas"]["ConversationWebSource"][];
             /** Format: date-time */
             created_at: string;
             candidates?: components["schemas"]["Entity"][];

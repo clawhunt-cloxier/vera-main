@@ -134,7 +134,7 @@ func (a *App) build(ctx context.Context) error {
 		}
 		mp := model.Profile{Name: name, Adapter: p.Adapter, BaseURL: p.BaseURL, ModelID: p.ModelID, APIKey: p.APIKey, PriceTable: p.PriceTable,
 			Temperature: p.Temperature, Thinking: p.Thinking, ExtraBody: p.ExtraBody, Timeout: timeout, MaxOutput: p.MaxOutput,
-			Concurrency: p.Concurrency}
+			Concurrency: p.Concurrency, AllowEducationSearch: name == "router" && c.ConversationWebSearch}
 		if mp.ModelID == "" {
 			mp.ModelID = "vera-" + p.Adapter
 		}

@@ -34,7 +34,9 @@ type Schemas map[string]registeredSchema
 func LoadSchemas(dir string) (Schemas, error) {
 	c := jsonschema.NewCompiler()
 	out := Schemas{}
-	for _, name := range []string{"section-output", "verify-output", "summary-output", "plan-parse-output", "conversation-answer-output", "conversation-review-output", "conversation-title-output", "conversation-window-tool", "conversation-depth-tool", "conversation-reference-tool"} {
+	for _, name := range []string{"section-output", "verify-output", "summary-output", "plan-parse-output",
+		"conversation-answer-output", "conversation-review-output", "conversation-title-output",
+		"conversation-window-tool", "conversation-depth-tool", "conversation-reference-tool", "conversation-knowledge-tool"} {
 		p, _ := filepath.Abs(filepath.Join(dir, name+".schema.json"))
 		raw, err := os.ReadFile(p)
 		if err != nil {
@@ -66,19 +68,20 @@ type ToolSpec struct {
 type Request struct {
 	WithSend func(context.Context, func() (Raw, error)) (Raw, error) // holds source rights only during the actual adapter call
 	// WithReuse reads the cached result in the transaction holding the current source permissions.
-	WithReuse    func(context.Context, func(pgx.Tx) error) error
-	Workspace    uuid.UUID
-	Task         *uuid.UUID // nil for planning calls that have no research task
-	TaskEpoch    int64      // required for task-bound calls
-	StepKey      string
-	Profile      string
-	Messages     []Message
-	MaxOutput    int
-	Schema       string // key in Schemas
-	Tools        []ToolSpec
-	Simulate     func() (any, error)
-	Budget       policy.Budget
-	EraseContent bool // keep accounting, omit model response and error text from the ledger
+	WithReuse       func(context.Context, func(pgx.Tx) error) error
+	Workspace       uuid.UUID
+	Task            *uuid.UUID // nil for planning calls that have no research task
+	TaskEpoch       int64      // required for task-bound calls
+	StepKey         string
+	Profile         string
+	Messages        []Message
+	MaxOutput       int
+	Schema          string // key in Schemas
+	Tools           []ToolSpec
+	EducationSearch bool
+	Simulate        func() (any, error)
+	Budget          policy.Budget
+	EraseContent    bool // keep accounting, omit model response and error text from the ledger
 }
 
 type Meta struct {
@@ -89,6 +92,7 @@ type Meta struct {
 	Cost          decimal.Decimal
 	Reused        bool
 	ToolCall      *ToolCall
+	WebCitations  []WebCitation
 }
 
 // Gateway owns all model traffic. It is the only code allowed to talk to model vendors.
@@ -182,6 +186,10 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 	if r.EraseContent && prof.Adapter == "record" {
 		return nil, Meta{}, errors.New("private requests cannot use the record adapter")
 	}
+	if r.EducationSearch && (!prof.SupportsEducationSearch() || r.Profile != "router" || r.Task != nil ||
+		!r.EraseContent || r.StepKey != "conversation_education_search" || r.Schema != "conversation-answer-output" || len(r.Tools) != 0) {
+		return nil, Meta{}, errors.New("education search requires a private conversation lookup")
+	}
 	tools, toolSchemas, err := g.registerTools(r, prof)
 	if err != nil {
 		return nil, Meta{}, err
@@ -200,7 +208,11 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 	}
 	msgs := r.Messages
 	r.MaxOutput = prof.EffectiveMaxOutput(r.MaxOutput)
-	hash := RequestHash(prof, msgs, r.MaxOutput, r.Schema, tools...)
+	schemaID := r.Schema
+	if r.EducationSearch {
+		schemaID += ":deepseek_web_search"
+	}
+	hash := RequestHash(prof, msgs, r.MaxOutput, schemaID, tools...)
 	var out json.RawMessage
 	var meta Meta
 	var reused bool
@@ -219,10 +231,19 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 		return out, meta, nil
 	}
 	transient, repairs := g.Policy.ModelCall.TransientRetries, g.Policy.ModelCall.FormatRepairs
+	if r.EducationSearch {
+		// Search responses are plain text and may contain vendor search tokens.
+		// The caller has a separate ordinary draft if this single attempt fails.
+		transient, repairs = 0, 0
+	}
 	var lastErr error
 	for attempt := 1; ; attempt++ {
-		hash := RequestHash(prof, msgs, r.MaxOutput, r.Schema, tools...)
-		callID, err := g.reserve(ctx, r, prof, ad.Name(), hash, attempt, EstimateTokens(msgs)+toolTokens)
+		hash := RequestHash(prof, msgs, r.MaxOutput, schemaID, tools...)
+		inputTokens := EstimateTokens(msgs) + toolTokens
+		if r.EducationSearch {
+			inputTokens = max(inputTokens, 32768)
+		}
+		callID, err := g.reserve(ctx, r, prof, ad.Name(), hash, attempt, inputTokens)
 		if err != nil {
 			return nil, Meta{}, err
 		}
@@ -234,7 +255,7 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 
 		sentSuccessfully := false
 		send := func() (Raw, error) {
-			raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Tools: tools, Simulate: r.Simulate, Hash: hash})
+			raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Tools: tools, EducationSearch: r.EducationSearch, Simulate: r.Simulate, Hash: hash})
 			sentSuccessfully = err == nil
 			return raw, err
 		}
@@ -282,7 +303,17 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			}
 			return nil, Meta{}, lastErr
 		}
+		if r.EducationSearch && raw.FinishReason == "stop" && len(raw.ToolCalls) == 0 {
+			content, _ := json.Marshal(struct {
+				Kind    string `json:"kind"`
+				Message string `json:"message"`
+			}{"education", raw.Content})
+			raw.Content = string(content)
+		}
 		out, tool, verr := validateCompletion(raw, schema, toolSchemas)
+		if r.EducationSearch && raw.FinishReason != "stop" {
+			verr = errors.New("incomplete education search")
+		}
 		if verr != nil {
 			g.finish(ctx, callID, r.EraseContent, "FAILED", &raw, raw.Usage, cost, raw.ObservedModel, verr.Error())
 			if repairs > 0 {
@@ -308,7 +339,7 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			return nil, Meta{}, &FormatError{verr.Error()}
 		}
 		g.finish(ctx, callID, r.EraseContent, "SUCCEEDED", &raw, raw.Usage, cost, raw.ObservedModel, "")
-		return out, Meta{CallID: callID, Adapter: ad.Name(), ObservedModel: raw.ObservedModel, Usage: raw.Usage, Cost: cost, ToolCall: tool}, nil
+		return out, Meta{CallID: callID, Adapter: ad.Name(), ObservedModel: raw.ObservedModel, Usage: raw.Usage, Cost: cost, ToolCall: tool, WebCitations: raw.WebCitations}, nil
 	}
 }
 
@@ -517,7 +548,7 @@ const UnknownReleaseAfter = 24 * time.Hour
 func (g *Gateway) ReleaseUnknown(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error) {
 	rows, err := g.Pool.Query(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=0, auto_released_at=now(), finished_at=coalesce(finished_at, now()),
 		error=CASE WHEN content_erased_at IS NULL THEN left(coalesce(error,'') || ' [auto-released: no reconciliation within 24h]', 1000) END
-		WHERE (status='UNKNOWN' OR (status='SENT' AND step_key='conversation_agent')) AND sent_at < $1 RETURNING id`, cutoff)
+		WHERE (status='UNKNOWN' OR (status='SENT' AND step_key IN ('conversation_agent','conversation_education_search'))) AND sent_at < $1 RETURNING id`, cutoff)
 	if err != nil {
 		return nil, err
 	}

@@ -91,9 +91,7 @@ export function Landing() {
           >
             <div>
               <h3>只用授权数据</h3>
-              <p className="muted">
-                研究不搜索互联网，不接受用户上传。所有数据都来自登记的授权源。
-              </p>
+              <p className="muted">证券行情、财务数据和研究结论可追溯到登记的授权数据源。</p>
             </div>
             <div>
               <h3>可溯源的数字</h3>

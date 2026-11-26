@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 )
@@ -22,7 +24,6 @@ const (
 	stockTool        = "analyze_stock"
 	flowTool         = "analyze_capital_flow"
 	deepTool         = "run_deep_research"
-	refineTool       = "refine_research"
 	referenceTool    = "reference_research"
 	replyTool        = "respond_to_user"
 )
@@ -32,9 +33,9 @@ type researchTool struct {
 }
 
 var researchTools = []researchTool{
-	{dailyTradingTool, "stock_analysis", harness.DailyTradingTopic, "Inspect one stock's published daily turnover amount and volume, with a chart and evidence. Use for 成交量, 成交额, or whether the stock traded more actively. Does not fetch an intraday quote or price."},
-	{financingTool, "capital_flow", harness.FinancingBalanceTopic, "Inspect one stock's disclosed financing balance and first-to-last change. Use for 融资余额 or outstanding margin financing. Does not infer investors' intent."},
-	{stockTool, "stock_analysis", "", "Generate a formal stock analysis report across available financials, valuation metrics, trading, capital flows and risks. Use for a broad stock analysis or an explicit request for a full stock report."},
+	{dailyTradingTool, "stock_analysis", harness.DailyTradingTopic, "日成交：查看个股已公布的每日成交额、成交量或成交活跃度，提供图表与证据。"},
+	{financingTool, "capital_flow", harness.FinancingBalanceTopic, "融资余额：查看个股已披露的未偿还融资余额及区间变化。用户在任何个股研究后改问融资余额时，调用此工具，沿用该标的。"},
+	{stockTool, "stock_analysis", "", "Inspect a stock's recent market performance, including closing prices, and render an analysis from available evidence. Use for recent performance (最近表现、近期走势), broad stock analysis or an explicit request for a full stock report. Use inspect_daily_trading for a query specifically about volume or turnover amount."},
 	{flowTool, "capital_flow", "", "Generate the formal capital flow report. Use for broad questions about 资金面, 资金动向, or disclosed holdings and flows. Only registered data and supported sections are used."},
 	{deepTool, "deep_research", "", "Generate a formal deep research report about a company or industry, as permitted by the listed scope. Use when the user requests deep research or analysis of the business, financials and industry together."},
 }
@@ -42,8 +43,13 @@ var researchTools = []researchTool{
 func (s Service) agentTools() []model.ToolSpec {
 	tools := []model.ToolSpec{
 		{Name: replyTool, Schema: "conversation-answer-output", Description: "把你为本轮用户写的纯文本回复放在 message。问候 greeting，致谢 thanks，身份或功能 capabilities，通用金融知识 education，婉拒代做投资决策 decline_advice，非金融或不宜继续的话题 out_of_scope，需用户补充 clarify，缺能力或数据 unavailable。不创建研究。"},
-		{Name: refineTool, Schema: "conversation-window-tool", Description: "调整所选结果或上一轮研究的窗口，或补充、更换同主题的标的。沿用标的时用 subject_source=context 和 subject_mentions=[]。"},
-		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "解释所选或最近报告里的结果、出处或原公式。问某个已交付的数怎么计算时用 kind=calculation。仅查看已交付内容。"},
+		{Name: referenceTool, Schema: "conversation-reference-tool", Description: "解释所选或最近报告中已经展示的结果、出处或原公式，例如追问该结果如何算出。查看本轮新提出的指标时调用该指标的研究工具。"},
+	}
+	if s.Engine.Gateway.Profiles["router"].SupportsEducationSearch() {
+		tools = append(tools, model.ToolSpec{
+			Name: knowledgeTool, Schema: "conversation-knowledge-tool",
+			Description: "用 DeepSeek 联网查找通用金融术语、产品机制和研究方法的公开资料。不用于证券、市场报价、完整报告、私人信息或打开用户提供的链接。",
+		})
 	}
 	for _, tool := range researchTools {
 		spec, ok := s.Engine.ConversationResearchSpec(tool.Skill, tool.Topic)
@@ -57,7 +63,7 @@ func (s Service) agentTools() []model.ToolSpec {
 		} else {
 			schema = "conversation-depth-tool"
 			if slices.Contains(spec.Modes, "company_industry") {
-				description += " Use coverage=company_industry only for explicit company plus industry research."
+				description += " Use coverage=company_industry for an explicit request for company plus industry research or to explicitly keep that scope."
 			} else {
 				description += " Use coverage=subject."
 			}
@@ -93,9 +99,6 @@ func (s Service) runTool(ctx context.Context, args resolveArgs, turn Turn, state
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &request); err != nil {
 		return s.fail(ctx, args, "本轮研究参数无效，请重新描述问题。")
 	}
-	if call.Function.Name == refineTool {
-		return s.startResearch(ctx, args, turn, state, researchTool{}, request)
-	}
 	for _, tool := range researchTools {
 		if tool.Name == call.Function.Name {
 			return s.startResearch(ctx, args, turn, state, tool, request)
@@ -105,15 +108,12 @@ func (s Service) runTool(ctx context.Context, args resolveArgs, turn Turn, state
 }
 
 func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn, state agentContext, tool researchTool, request researchRequest) error {
-	refine := tool.Name == ""
 	previous := state.priorScope()
 	scope := researchScope(tool, request, previous)
-	in := intent{Scope: scope, AdviceDeclined: request.Advice == "declined" || (refine && state.Draft.AdviceDeclined)}
+	sameTopic := scope.Skill == previous.Skill && scope.Topic == previous.Topic
+	in := intent{Scope: scope, AdviceDeclined: request.Advice == "declined" || (sameTopic && state.Draft.AdviceDeclined)}
 	clarify := func(message string) error {
 		return s.update(ctx, args, "clarify", message, in)
-	}
-	if scope.Skill == "" {
-		return clarify("请补充想看的指标，例如日成交或融资余额。")
 	}
 	spec, ok := s.Engine.ConversationResearchSpec(scope.Skill, scope.Topic)
 	if !ok {
@@ -124,7 +124,10 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 		in.Scope.SubjectID = uuid.Nil
 		return clarify("请明确这次要研究的证券、行业或市场。")
 	}
-	ids, unresolved, err := s.subjects(ctx, turn.Text, spec.Subjects, request.SubjectMentions)
+	ids, unresolved, err := s.subjects(ctx, turn.Text, spec.Subjects, request.SubjectMentions, true)
+	if errors.Is(err, errStockDirectory) {
+		return s.update(ctx, args, "unavailable", "证券目录暂时不可用，请稍后重试。", in)
+	}
 	if err != nil {
 		return err
 	}
@@ -153,6 +156,10 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 
 	if scope.Window == 0 {
 		scope.Window = spec.DefaultWindow
+		sameStockBrief := request.SubjectSource == "context" && scope.Topic != "" && previous.Topic != ""
+		if slices.Contains(spec.Windows, previous.Window) && (sameTopic || sameStockBrief) {
+			scope.Window = previous.Window
+		}
 	}
 	in.Scope.Window = scope.Window
 	if (scope.Window != 0 && !slices.Contains(spec.Windows, scope.Window)) ||
@@ -187,17 +194,11 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 
 func researchScope(tool researchTool, request researchRequest, previous Scope) Scope {
 	scope := Scope{Skill: tool.Skill, Topic: tool.Topic, Window: request.TradingDays}
-	if tool.Name == "" {
-		scope.Skill, scope.Topic, scope.Mode = previous.Skill, previous.Topic, previous.Mode
-	}
 	if request.Coverage == "company_industry" {
 		scope.Mode = request.Coverage
 	}
 	if request.SubjectSource == "context" {
 		scope.SubjectID = previous.SubjectID
-	}
-	if scope.Window == 0 && (tool.Name == "" || (scope.Skill == previous.Skill && scope.Topic == previous.Topic && request.SubjectSource == "context")) {
-		scope.Window = previous.Window
 	}
 	return scope
 }
@@ -223,7 +224,7 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 	// fall back to the old report.
 	mention := strings.TrimSpace(request.SubjectMention)
 	if mention != "" && strings.Contains(strings.ToLower(turn.Text), strings.ToLower(mention)) {
-		ids, unresolved, err := s.subjects(ctx, turn.Text, nil, []string{mention})
+		ids, unresolved, err := s.subjects(ctx, turn.Text, nil, []string{mention}, false)
 		if err != nil {
 			return err
 		}
@@ -254,8 +255,11 @@ func (s Service) subjectConflicts(ctx context.Context, text string, kinds []stri
 	return others, nil
 }
 
-// subjects binds supplied spans to exact catalog identities.
-func (s Service) subjects(ctx context.Context, question string, kinds, mentions []string) ([]uuid.UUID, bool, error) {
+var errStockDirectory = errors.New("stock directory unavailable")
+
+// subjects binds supplied spans to exact catalog identities. Only a new
+// research request may discover an identity through the registered provider.
+func (s Service) subjects(ctx context.Context, question string, kinds, mentions []string, discover bool) ([]uuid.UUID, bool, error) {
 	var ids []uuid.UUID
 	unresolved := false
 	kind := ""
@@ -280,6 +284,27 @@ func (s Service) subjects(ctx context.Context, question string, kinds, mentions 
 			matched = true
 			if !slices.Contains(ids, entity.ID) && len(ids) < 10 {
 				ids = append(ids, entity.ID)
+			}
+		}
+		if !matched && discover && s.Engine.RealResearch && s.Engine.Brief != nil && slices.Contains(kinds, "stock") &&
+			(emquant.IsStockName(mention) || emquant.IsBareStockCode(mention) || emquant.IsListedStockCode(strings.ToUpper(mention))) {
+			err := s.Engine.WithChoiceResearchUse(ctx, func() error {
+				candidates, err := s.Engine.Brief.DiscoverStocks(ctx, s.catalog(), mention)
+				if err != nil {
+					return err
+				}
+				for _, entity := range candidates {
+					if emquant.ExactStockMatch(entity, mention) {
+						matched = true
+						if !slices.Contains(ids, entity.ID) && len(ids) < 10 {
+							ids = append(ids, entity.ID)
+						}
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, false, fmt.Errorf("%w: %w", errStockDirectory, err)
 			}
 		}
 		unresolved = unresolved || !matched
