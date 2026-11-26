@@ -6,4 +6,5 @@
 - 审查者在最终实现提交运行了 `git diff --check 53f7f4e..3e8078a`、定向 Go 回归 `TestSafeReturn` 和 `TestConversationTradingDayScope`、`make check-docs`、`make check-contracts`、`CONTRACT_BASE_REF=53f7f4e make check-contract-compat` 和 `cd web && npm run check:api`，均通过。兼容性只提示 `GET /api/v1/conversations/{conversation}` 的轮次状态新增 `answer`。穷举状态的客户端需要处理新增值。
 - 审查者核对了本地服务的提交信息、`/readyz` 和 `/app`。完整 race 和浏览器检查由实现者运行。见 [T045 交接](../handoffs/2026-11-25-T045-codex.md)。
 - 后续复核覆盖 `3dd7e44e88166a58ee0a73bf8f3728703bd91fcd`。用户写出带市场后缀的未登记代码而模型只摘取数字时，服务要求补充，当前轮次不绑定旧报告或创建研究任务。登记的不同标的仍会触发澄清。模型填入用户原文没有的名称时按已绑定轮次引用。文档与差异检查通过，无新增阻止合入的发现。
+- `t045_contract_review` 复核了 `9d8c6e48fe796e4f5985619b5087e8fc13635b2f`。公开搜索仅接收登记的主题和侧重点，普通写作和最终审核均收到检索摘要与引用。草稿被拒后，改写会清除来源。摘要的输出上限继续受模型配置和费用预留约束。文档、契约、兼容性和差异检查通过。此次未发现阻止合入的问题。
 - 合并前需完成用户浏览器验收与当前 PR 检查。本机模型路由检查结果见交接。正式模型、授权数据及生产运行成本待对应环境验收。
