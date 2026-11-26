@@ -208,10 +208,18 @@ func TestConversationNativeToolCalls(t *testing.T) {
 						content = `{"title":"演示制造涨幅三成"}`
 					}
 				} else {
-					if !strings.Contains(request.Messages[1].Content, "演示制造融资研究") {
-						t.Error("title reviewer saw a draft with unverified numbers")
+					var review struct{ Question, Title string }
+					if err := json.Unmarshal([]byte(request.Messages[1].Content), &review); err != nil {
+						t.Error("invalid title review input")
 					}
-					content = `{"decision":"allow"}`
+					switch {
+					case review.Question == ask && review.Title == "演示制造融资研究":
+						content = `{"decision":"allow"}`
+					case review.Question != ask && review.Title == "演示制造涨幅三成":
+						content = `{"decision":"reject"}`
+					default:
+						t.Error("title reviewer did not receive the generated title")
+					}
 				}
 				if err := json.NewEncoder(w).Encode(map[string]any{
 					"model": "test", "usage": model.Usage{PromptTokens: 30, CompletionTokens: 5},
@@ -452,6 +460,11 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
 	if err != nil || calls != 53 || billed != 53 || bodies != 0 || tasks != 5 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
+	}
+	var title string
+	err = e.pool.QueryRow(t.Context(), `SELECT title FROM conversations WHERE id=$1`, bondThread.ConversationID).Scan(&title)
+	if err != nil || title != "新会话" {
+		t.Fatalf("rejected title should leave the default title, got %q: %v", title, err)
 	}
 	a.json("GET", firstPath, nil, 200, &firstThread)
 	if firstThread.Conversation.Title != "演示制造融资研究" {
