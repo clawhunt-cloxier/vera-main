@@ -218,8 +218,11 @@ func (s Service) referenceResearch(ctx context.Context, args resolveArgs, turn T
 	if len(conflicts) != 0 {
 		return s.update(ctx, args, "clarify", missing, in)
 	}
-	if request.SubjectMention != "" {
-		ids, unresolved, err := s.subjects(ctx, turn.Text, nil, []string{request.SubjectMention})
+	// The workspace anchor fixes the report identity. Only a name supplied by
+	// the user can make that reference ambiguous.
+	mention := strings.TrimSpace(request.SubjectMention)
+	if containsSubject(turn.Text, mention) {
+		ids, unresolved, err := s.subjects(ctx, turn.Text, nil, []string{mention})
 		if err != nil {
 			return err
 		}

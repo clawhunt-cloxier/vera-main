@@ -116,6 +116,9 @@ func TestConversationGeneralReplies(t *testing.T) {
 func TestConversationNativeToolCalls(t *testing.T) {
 	const ask = "演示制造过去 20 个交易日没还清的融资款是变多还是变少了"
 	const followup = "展示上一项计算使用的原始公式"
+	const injectedSubject = "能给我看一下上一轮变化值用的原公式么？"
+	const differentSubject = "演示设备甲的这个数怎么算"
+	const unknownSubject = "无登记的模拟丙公司这个数怎么算"
 	const missing = "我想看近 5 个交易日还没偿还的融资规模"
 	const subject = "演示制造"
 	const fabricated = "帮我查一下那家的成交额"
@@ -136,25 +139,28 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const ignoredCalendar = "看演示制造 2025-01-06 的成交额"
 	const wrongReference = "看近 120 个交易日这个数怎么算"
 	responses := map[string]model.ToolArguments{
-		ask:             {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
-		followup:        {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
-		missing:         {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"message","trading_days":5,"advice":"none"}`},
-		subject:         {Name: "refine_research", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-		fabricated:      {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
-		calendar:        {Name: "refine_research", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":-1,"advice":"none"}`},
-		selected:        {Name: "refine_research", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"}`},
-		mixed:           {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"declined"}`},
-		legacy:          {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-		omittedSubject:  {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
-		omittedPeer:     {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-		wrongWindow:     {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
-		ignoredCalendar: {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-		wrongReference:  {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
-		undeclared:      {Name: "fetch_url", Arguments: `{}`},
-		invalid:         {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"previous","trading_days":20,"advice":"none"}`},
-		ordinary:        {Name: "respond_to_user", Arguments: `{"kind":"education","concepts":[{"topic":"ev_ebitda","aspect":"definition"}]}`},
-		refusedTool:     {Name: "respond_to_user", Arguments: `{"kind":"education","concepts":[],"answer":"这只正适合上车"}`},
-		legacyReply:     {Name: "respond_to_user", Arguments: `{"kind":"thanks","concepts":[]}`},
+		ask:              {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		followup:         {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
+		injectedSubject:  {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"融资余额","advice":"none"}`},
+		differentSubject: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
+		unknownSubject:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"无登记的模拟丙公司","advice":"none"}`},
+		missing:          {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"message","trading_days":5,"advice":"none"}`},
+		subject:          {Name: "refine_research", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		fabricated:       {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		calendar:         {Name: "refine_research", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":-1,"advice":"none"}`},
+		selected:         {Name: "refine_research", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"}`},
+		mixed:            {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"declined"}`},
+		legacy:           {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		omittedSubject:   {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
+		omittedPeer:      {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		wrongWindow:      {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		ignoredCalendar:  {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		wrongReference:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","advice":"none"}`},
+		undeclared:       {Name: "fetch_url", Arguments: `{}`},
+		invalid:          {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"previous","trading_days":20,"advice":"none"}`},
+		ordinary:         {Name: "respond_to_user", Arguments: `{"kind":"education","concepts":[{"topic":"ev_ebitda","aspect":"definition"}]}`},
+		refusedTool:      {Name: "respond_to_user", Arguments: `{"kind":"education","concepts":[],"answer":"这只正适合上车"}`},
+		legacyReply:      {Name: "respond_to_user", Arguments: `{"kind":"thanks","concepts":[]}`},
 	}
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
@@ -240,6 +246,14 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	if _, v := send(followup, &first.ConversationID); v.State != "reference" || v.Reference == nil || *v.Reference != first.TurnID || v.Kind != "calculation" {
 		t.Fatalf("native call did not reuse the previous calculation: %+v", v)
 	}
+	if _, v := send(injectedSubject, &first.ConversationID, first.TurnID); v.State != "reference" || v.Reference == nil || *v.Reference != first.TurnID || v.Kind != "calculation" {
+		t.Fatalf("a model-only mention changed the selected report reference: %+v", v)
+	}
+	for _, question := range []string{differentSubject, unknownSubject} {
+		if _, v := send(question, &first.ConversationID, first.TurnID); v.State != "clarify" || v.Reference != nil || v.TaskStatus != "" {
+			t.Fatalf("a conflicting or unknown explicit subject reached a report: %+v", v)
+		}
+	}
 	draft, clarification := send(missing, nil)
 	if clarification.State != "clarify" || clarification.Scope == nil || clarification.Scope.Window != 5 {
 		t.Fatalf("missing object did not save a clarification: %+v", clarification)
@@ -305,7 +319,7 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	err := e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
 		count(*) FILTER (WHERE response IS NOT NULL OR error IS NOT NULL OR observed_model IS NOT NULL), (SELECT count(*) FROM research_tasks)
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
-	if err != nil || calls != 21 || billed != 21 || bodies != 0 || tasks != 5 {
+	if err != nil || calls != 24 || billed != 24 || bodies != 0 || tasks != 5 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 }

@@ -1,6 +1,6 @@
 {
   "fixture_mode": "synthetic",
-  "agent_contract_version": 5,
+  "agent_contract_version": 6,
   "cases": [
     {
       "input": "演示制造近 20 个交易日的融资余额怎么变",
@@ -42,12 +42,25 @@
     {
       "input": "能给我看一下上一轮变化值用的原公式么？",
       "context": "selected financing balance result",
+      "model_attempts": {
+        "tool": "reference_research",
+        "arguments": {"kind": "calculation", "subject_mention": "融资余额", "advice": "none"}
+      },
       "expect": {
         "tool": "reference_research",
         "state": "reference",
         "reference_kind": "calculation",
         "new_task": false
       }
+    },
+    {
+      "input": "无登记的模拟丙公司这个数怎么算",
+      "context": "selected financing balance result for a different company",
+      "model_attempts": {
+        "tool": "reference_research",
+        "arguments": {"kind": "calculation", "subject_mention": "无登记的模拟丙公司", "advice": "none"}
+      },
+      "expect": {"state": "clarify", "new_task": false}
     },
     {
       "input": "同一标的，把这个窗口拓宽到六十个交易日。",
