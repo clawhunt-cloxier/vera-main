@@ -24,33 +24,32 @@
     "industry_index": {
       "type": "string",
       "enum": ["keep", "include", "exclude"],
-      "description": "Include or exclude the anchor stock's SW level-2 index. Omit or use keep to leave the selection unchanged."
+      "description": "Include or exclude the anchor stock's SW level-2 index. Use keep to leave the selection unchanged."
     },
     "broad_index_add": {
       "type": "array",
-      "maxItems": 3,
       "items": {"type": "string"},
-      "description": "Verbatim names or full symbols in the latest message for benchmarks to add. Supported: 沪深300 (000300.SH), 中证500 (000905.SH), 中证1000 (000852.SH)."
+      "description": "Verbatim names or full symbols in the latest message for benchmarks to add. Supported: 沪深300 (000300.SH), 中证500 (000905.SH), 中证1000 (000852.SH). Use [] if none."
     },
     "broad_index_remove": {
       "type": "array",
-      "maxItems": 3,
       "items": {"type": "string"},
-      "description": "Verbatim names or full symbols in the latest message for the registered benchmarks to remove."
+      "description": "Verbatim names or full symbols in the latest message for the registered benchmarks to remove. Use [] if none."
     },
     "clear_broad_indexes": {
-      "type": "boolean",
-      "description": "Clear the previous broad-index selection before adding any explicit new benchmark. Omit or pass false to keep the other benchmarks."
+      "type": "string",
+      "enum": ["keep", "clear"],
+      "description": "Use clear when the user asks to remove every broad index. Otherwise use keep."
     },
     "default_broad_index": {
       "type": "string",
       "enum": ["keep", "include", "exclude"],
-      "description": "Include CSI 300 if the user generically asks for a broad market benchmark or 大盘, exclude if the user asks to remove the default benchmark. For a specific named index use broad_index_add or broad_index_remove instead."
+      "description": "Include CSI 300 if the user generically asks for a broad market benchmark or 大盘, exclude if the user asks to remove the default benchmark. For a named index use broad_index_add or broad_index_remove with keep here."
     },
     "window_change": {
       "type": "string",
       "enum": ["keep", "longer", "shorter"],
-      "description": "When trading_days is 0 and a user loosely requests a longer or shorter lookback, move to the adjacent supported window. Otherwise omit or keep."
+      "description": "When trading_days is 0 and a user loosely requests a longer or shorter lookback, move to the adjacent supported window. Otherwise use keep."
     },
     "advice": {
       "type": "string",
@@ -58,5 +57,5 @@
       "description": "Use declined only if the user separately asked for investment advice alongside this historical comparison."
     }
   },
-  "required": ["kind", "stock_mentions", "subject_source", "trading_days", "advice"]
+  "required": ["kind", "stock_mentions", "subject_source", "trading_days", "industry_index", "broad_index_add", "broad_index_remove", "clear_broad_indexes", "default_broad_index", "window_change", "advice"]
 }

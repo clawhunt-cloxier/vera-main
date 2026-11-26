@@ -36,7 +36,7 @@ type comparisonRequest struct {
 	BroadIndexRemove  []string `json:"broad_index_remove"`
 	DefaultBroadIndex string   `json:"default_broad_index"`
 	WindowChange      string   `json:"window_change"`
-	ClearBroadIndexes bool     `json:"clear_broad_indexes"`
+	ClearBroadIndexes string   `json:"clear_broad_indexes"`
 }
 
 type comparisonScope struct {
@@ -219,7 +219,7 @@ func comparisonBenchmarks(question string, req comparisonRequest, previous datas
 	if err != nil {
 		return b, nil, err
 	}
-	if req.ClearBroadIndexes {
+	if req.ClearBroadIndexes == "clear" {
 		b.BroadIndexes = nil
 	} else {
 		b.BroadIndexes = slices.DeleteFunc(slices.Clone(b.BroadIndexes), func(code string) bool { return slices.Contains(remove, code) })

@@ -14,6 +14,7 @@ import (
 )
 
 func TestConversationStockComparison(t *testing.T) {
+	const comparisonKeep = `,"industry_index":"keep","broad_index_add":[],"broad_index_remove":[],"clear_broad_indexes":"keep","default_broad_index":"keep","window_change":"keep"`
 	const (
 		initial = "演示制造近 10 个交易日的日成交"
 		peer    = "相对同行呢？"
@@ -29,15 +30,15 @@ func TestConversationStockComparison(t *testing.T) {
 	e := setupEngine(t, func(engine *harness.Engine) {
 		conversationtest.UseRouter(engine.Gateway, map[string]model.ToolArguments{
 			initial: {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":10,"advice":"none"}`},
-			peer:    {Name: "compare_stock_performance", Arguments: `{"kind":"industry_peers","stock_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
-			peerBad: {Name: "compare_stock_performance", Arguments: `{"kind":"industry_peers","stock_mentions":[],"subject_source":"context","trading_days":-1,"advice":"none"}`},
-			fixDays: {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":20,"advice":"none"}`},
-			named:   {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示制造","演示银行"],"subject_source":"message","trading_days":20,"advice":"none"}`},
-			change:  {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"}`},
+			peer:    {Name: "compare_stock_performance", Arguments: `{"kind":"industry_peers","stock_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
+			peerBad: {Name: "compare_stock_performance", Arguments: `{"kind":"industry_peers","stock_mentions":[],"subject_source":"context","trading_days":-1,"advice":"none"` + comparisonKeep + `}`},
+			fixDays: {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":20,"advice":"none"` + comparisonKeep + `}`},
+			named:   {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示制造","演示银行"],"subject_source":"message","trading_days":20,"advice":"none"` + comparisonKeep + `}`},
+			change:  {Name: "compare_stock_performance", Arguments: `{"kind":"previous","stock_mentions":[],"subject_source":"context","trading_days":60,"advice":"none"` + comparisonKeep + `}`},
 			formula: {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","advice":"none"}`},
-			ignored: {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-			ticker:  {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":0,"advice":"none"}`},
-			bad:     {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":-1,"advice":"none"}`},
+			ignored: {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
+			ticker:  {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":0,"advice":"none"` + comparisonKeep + `}`},
+			bad:     {Name: "compare_stock_performance", Arguments: `{"kind":"stocks","stock_mentions":["演示银行","演示制造"],"subject_source":"message","trading_days":-1,"advice":"none"` + comparisonKeep + `}`},
 		})
 	})
 	startConversationWorker(t, e)
