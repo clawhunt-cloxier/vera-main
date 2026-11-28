@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "subject_mentions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Exact names or codes copied verbatim from the current user message. Empty if using context or if no subject is provided."
+    },
+    "subject_source": {
+      "type": "string",
+      "enum": [
+        "message",
+        "context"
+      ],
+      "description": "Use context only when reusing an object the user refers to in the same conversation."
+    },
+    "trading_days": {
+      "type": "integer",
+      "description": "Trailing trading days requested by the user. Zero if unspecified. Use -1 if the explicit range is in calendar dates or unsupported units."
+    },
+    "advice": {
+      "type": "string",
+      "enum": [
+        "none",
+        "declined"
+      ],
+      "description": "Set declined if this tool fulfils just the historical part of a mixed research and investment advice request."
+    }
+  },
+  "required": [
+    "subject_mentions",
+    "subject_source",
+    "trading_days",
+    "advice"
+  ]
+}

@@ -336,7 +336,10 @@ export interface paths {
         /** listConversations */
         get: operations["listConversations"];
         put?: never;
-        /** createConversation */
+        /**
+         * Accept a message for the conversation agent
+         * @description Accept the first message for background resolution. Executable research starts automatically when its scope is clear.
+         */
         post: operations["createConversation"];
         delete?: never;
         options?: never;
@@ -371,7 +374,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** sendConversationMessage */
+        /**
+         * Accept a message for the conversation agent
+         * @description Accept a message for background resolution. Executable research starts automatically when its scope is clear.
+         */
         post: operations["sendConversationMessage"];
         delete?: never;
         options?: never;
@@ -386,7 +392,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** getConversationTurn */
+        /**
+         * getConversationTurn
+         * @description Read the current turn, its action candidates and task progress, or a general model reply.
+         */
         get: operations["getConversationTurn"];
         put?: never;
         post?: never;
@@ -405,7 +414,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** actOnConversationTurn */
+        /**
+         * actOnConversationTurn
+         * @description Choose a research subject when needed or cancel the current turn. Resolving the subject starts the research automatically.
+         */
         post: operations["actOnConversationTurn"];
         delete?: never;
         options?: never;
@@ -538,6 +550,8 @@ export interface components {
             /** Format: uuid */
             client_message_id: string;
             text: string;
+            /** @description Automatically run executable research. Clients that omit this field keep the plan confirmation flow. */
+            automatic?: boolean;
         };
         ConversationFollowUp: {
             /** Format: uuid */
@@ -546,6 +560,8 @@ export interface components {
             /** Format: uuid */
             reply_to_turn_id?: string;
             expected_revision: number;
+            /** @description Automatically run executable research. Clients that omit this field keep the plan confirmation flow. */
+            automatic?: boolean;
         };
         ConversationAction: components["schemas"]["ConversationChoose"] | components["schemas"]["ConversationConfirm"] | components["schemas"]["ConversationCancel"];
         ConversationChoose: {
@@ -554,14 +570,6 @@ export interface components {
             expected_revision: number;
             /** Format: uuid */
             subject_id: string;
-        };
-        ConversationConfirm: {
-            /** @constant */
-            action: "confirm";
-            expected_revision: number;
-            /** Format: uuid */
-            plan_id: string;
-            plan_hash: string;
         };
         ConversationCancel: {
             /** @constant */
@@ -578,6 +586,7 @@ export interface components {
         ConversationSummary: {
             /** Format: uuid */
             id: string;
+            /** @description A short title based on the first message. New conversations show a generic title until generation succeeds. */
             title: string;
             revision: number;
             /** Format: date-time */
@@ -588,9 +597,33 @@ export interface components {
             subject_id: string;
             skill_id: components["schemas"]["SkillId"];
             /** @enum {string} */
-            topic?: "daily_trading" | "financing_balance";
+            topic?: "daily_trading" | "financing_balance" | "stock_comparison";
+            comparison?: components["schemas"]["ConversationComparison"];
             window?: number;
+            /** @enum {string} */
+            mode?: "company_industry";
         };
+        /** @description Resolved comparison scope. The primary subject_id is the reference stock. */
+        ConversationComparison: {
+            /** @enum {string} */
+            kind: "stocks" | "industry_peers" | "stock_indexes";
+            other_ids?: string[];
+            /**
+             * Format: date
+             * @description Date of the industry membership and market-value sample.
+             */
+            sample_date?: string;
+            /** @description The anchor stock's SW level-2 index was requested. */
+            industry_index?: boolean;
+            /** @description Requested registered broad market index symbols, including any with insufficient data. */
+            broad_indexes?: ("000300.SH" | "000905.SH" | "000852.SH")[];
+        };
+        ConversationWebSource: {
+            /** Format: uri */
+            url: string;
+            title: string;
+        };
+        /** @description A research request with automatic=true can start directly after validation. Clients that omit automatic receive a plan for confirmation. The answer state contains a non-research reply. */
         ConversationTurn: {
             /** Format: uuid */
             id: string;
@@ -598,13 +631,14 @@ export interface components {
             text: string;
             revision: number;
             /** @enum {string} */
-            state: "pending" | "clarify" | "confirm" | "research" | "reference" | "unavailable";
+            state: "pending" | "clarify" | "confirm" | "research" | "reference" | "answer" | "unavailable";
             /** Format: uuid */
             reply_to_turn_id?: string;
             message?: string;
+            /** @description External URLs returned by the public finance education lookup. */
+            web_sources?: components["schemas"]["ConversationWebSource"][];
             /** Format: date-time */
             created_at: string;
-            plan?: components["schemas"]["ResearchPlan"];
             candidates?: components["schemas"]["Entity"][];
             /** @enum {unknown} */
             task_status?: "QUEUED" | "COLLECTING" | "ANALYZING" | "ASSEMBLING" | "DELIVERING" | "CANCEL_REQUESTED" | "COMPLETED" | "ABSTAINED" | "BUDGET_EXHAUSTED" | "CANCELLED" | "BLOCKED" | "FAILED";
@@ -617,6 +651,11 @@ export interface components {
             reference_kind?: "result" | "evidence" | "calculation";
             result_ready: boolean;
             is_brief: boolean;
+            plan?: components["schemas"]["ResearchPlan"];
+            /** @description This clarification accepts a subject selection. */
+            needs_subject?: boolean;
+            /** @description Service generated response about a part of the request that is outside the research scope. */
+            notice?: string;
         };
         ConversationHistory: {
             items: components["schemas"]["ConversationSummary"][];
@@ -748,7 +787,7 @@ export interface components {
              * @enum {string}
              */
             research_protocol?: "observation.v1" | "v0.4";
-            conversation_topics?: ("daily_trading" | "financing_balance")[];
+            conversation_topics?: ("daily_trading" | "financing_balance" | "stock_comparison")[];
             /** @description 可用 application/json 请求基于已发布收盘数据的投研计划，可与 Choice 简报协议同时使用。各标的及章节按实际数据预检。 */
             closing_research_available?: boolean;
             /** @description 旧版 v0.4 客户端可用的严格实时能力标记；实际证券的行情仍须在采集时核验。 */
@@ -1242,6 +1281,14 @@ export interface components {
             event_at?: string | null;
             /** @enum {unknown} */
             latency_mode?: "real_time" | "delayed" | "unknown" | null;
+        };
+        ConversationConfirm: {
+            /** @constant */
+            action: "confirm";
+            expected_revision: number;
+            /** Format: uuid */
+            plan_id: string;
+            plan_hash: string;
         };
     };
     responses: never;
@@ -2090,6 +2137,8 @@ export interface operations {
             /** @description Success */
             200: {
                 headers: {
+                    /** @description Seconds until the next poll while a conversation title is pending */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2163,7 +2212,7 @@ export interface operations {
             /** @description Success */
             200: {
                 headers: {
-                    /** @description Seconds until the next poll while the turn is active */
+                    /** @description Seconds until the next poll while a turn or conversation title is pending */
                     "Retry-After"?: number;
                     [name: string]: unknown;
                 };

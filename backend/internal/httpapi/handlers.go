@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -117,7 +116,7 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 	}
 	if s.choiceRequest(r) && (kind == "" || kind == "stock") {
 		ents, err = choiceSearchResults(q, ents, func() ([]dataservice.EntityRow, error) {
-			return s.searchVendorStocks(r, q, kind)
+			return s.Engine.Brief.DiscoverStocks(r.Context(), s.catalogFor(r), q)
 		})
 		if err != nil {
 			return errs.Unavailable("STOCK_SEARCH_UNAVAILABLE", "证券搜索暂时不可用，请稍后重试")
@@ -135,8 +134,8 @@ func (s *Server) searchEntities(w http.ResponseWriter, r *http.Request) error {
 const maxSearchEntities = 20
 
 func choiceSearchResults(q string, cached []dataservice.EntityRow, lookup func() ([]dataservice.EntityRow, error)) ([]dataservice.EntityRow, error) {
-	qualified := emquantBriefCodeLike(strings.ToUpper(q))
-	bareCode := isStockCode(q)
+	qualified := emquant.IsListedStockCode(strings.ToUpper(q))
+	bareCode := emquant.IsBareStockCode(q)
 	exact := func(e dataservice.EntityRow) bool {
 		return e.Kind == "stock" && (strings.EqualFold(e.Code, q) || strings.EqualFold(e.Name, q))
 	}
@@ -148,7 +147,7 @@ func choiceSearchResults(q string, cached []dataservice.EntityRow, lookup func()
 		})
 	}
 	all := cached
-	if !slices.ContainsFunc(cached, exact) && (bareCode || qualified || isStockName(q)) {
+	if !slices.ContainsFunc(cached, exact) && (bareCode || qualified || emquant.IsStockName(q)) {
 		discovered, err := lookup()
 		if err != nil {
 			return nil, err
@@ -169,147 +168,6 @@ func choiceSearchResults(q string, cached []dataservice.EntityRow, lookup func()
 		}
 	}
 	return result, nil
-}
-
-// isStockCode returns true for 6-digit numeric strings (A-share code without exchange suffix).
-func isStockCode(q string) bool {
-	if len(q) != 6 {
-		return false
-	}
-	for _, ch := range q {
-		if ch < '0' || ch > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// isStockName returns true for strings that contain letter/CJK characters and only valid name chars.
-func isStockName(q string) bool {
-	if len([]rune(q)) > 32 {
-		return false
-	}
-	hasLetter := false
-	for _, ch := range q {
-		hasLetter = hasLetter || unicode.IsLetter(ch)
-		if !unicode.IsLetter(ch) && !unicode.IsNumber(ch) && !strings.ContainsRune(" *.-·()（）", ch) {
-			return false
-		}
-	}
-	return hasLetter
-}
-
-// searchVendorStocks calls the Choice API for the query, upserts discovered entities, and
-// returns the matched EntityRows. Only searches stocks; industry/market have no equivalent.
-func (s *Server) searchVendorStocks(r *http.Request, q, kind string) ([]dataservice.EntityRow, error) {
-	if kind != "" && kind != "stock" {
-		return nil, nil
-	}
-	runtime := s.Engine.Brief.Runtime
-	if runtime == nil {
-		return nil, errors.New("stock search runtime unavailable")
-	}
-
-	var table emquant.Table
-	colName, colCode := -1, -1
-	queryCode := strings.ToUpper(q)
-	qualified := emquantBriefCodeLike(queryCode)
-	codeLookup := qualified || isStockCode(q)
-
-	switch {
-	case codeLookup:
-		t, _, err := runtime.CollectStockCodeCandidates(r.Context(), queryCode[:6])
-		if err != nil {
-			return nil, err
-		}
-		table = t
-		for i, col := range table.Columns {
-			if strings.EqualFold(col, "FULLCODES") {
-				colCode = i
-			}
-		}
-	case isStockName(q):
-		t, _, err := runtime.CollectStockNameCandidates(r.Context(), q)
-		if err != nil {
-			return nil, err
-		}
-		table = t
-		for i, col := range table.Columns {
-			switch strings.ToUpper(col) {
-			case "SECURITYSHORTNAME":
-				colName = i
-			case "SECUCODE":
-				colCode = i
-			}
-		}
-	default:
-		return nil, nil
-	}
-
-	if table.Rows == 0 {
-		return nil, nil
-	}
-	if len(table.Columns) == 0 || colCode < 0 || (!codeLookup && colName < 0) || table.Rows != len(table.Values)/len(table.Columns) || len(table.Values)%len(table.Columns) != 0 {
-		return nil, emquant.ErrShape
-	}
-
-	numCols := len(table.Columns)
-	var out []dataservice.EntityRow
-	seen := map[string]bool{}
-
-	for row := 0; row < table.Rows; row++ {
-		base := row * numCols
-		var name string
-		if colName >= 0 && base+colName < len(table.Values) {
-			name, _ = table.Values[base+colName].Value.(string)
-		}
-		rawCode, _ := table.Values[base+colCode].Value.(string)
-		for _, code := range matchedSearchCodes(rawCode, queryCode, codeLookup) {
-			if seen[code] {
-				continue
-			}
-			seen[code] = true
-			label := name
-			if label == "" {
-				label = code
-			}
-			e, err := s.catalogFor(r).UpsertSearchEntity(r.Context(), "stock", code, label, nil)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, e)
-		}
-	}
-	return out, nil
-}
-
-func matchedSearchCodes(raw, query string, codeLookup bool) []string {
-	var codes []string
-	for _, part := range strings.Split(raw, ",") {
-		code := strings.ToUpper(strings.TrimSpace(part))
-		if emquantBriefCodeLike(code) && (!codeLookup || query == code || query == code[:6]) {
-			codes = append(codes, code)
-		}
-	}
-	return codes
-}
-
-// emquantBriefCodeLike checks that a code looks like a qualified A-share code (NNNNNN.XX).
-func emquantBriefCodeLike(code string) bool {
-	parts := strings.SplitN(code, ".", 2)
-	if len(parts) != 2 || len(parts[0]) != 6 {
-		return false
-	}
-	for _, ch := range parts[0] {
-		if ch < '0' || ch > '9' {
-			return false
-		}
-	}
-	switch parts[1] {
-	case "SH", "SZ", "BJ":
-		return true
-	}
-	return false
 }
 
 func (s *Server) skills(w http.ResponseWriter, r *http.Request) error {
@@ -978,14 +836,14 @@ func (s *Server) recordEvidence(w http.ResponseWriter, r *http.Request, ws, id u
 		Version string
 	}
 	var citations []citation
+	completed := append([]string{harness.CloseUnifiedVersion, harness.ConversationFixtureVersion, harness.ComparisonFixtureVersion}, harness.CloseConversationVersions()...)
+	versions := append(slices.Clone(completed), "1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion)
 	err := db.InWorkspace(ctx, s.Pool, ws, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT t.id,t.skill_version FROM research_tasks t JOIN snapshots sn ON sn.hash = t.snapshot_hash
 			JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id
 			WHERE $1 = ANY(sn.record_ids) AND t.skill_version=ANY($2::text[]) AND t.skill_version=ANY($3::text[])
 			AND (t.skill_version<>ALL($4::text[]) OR t.status='COMPLETED') AND `+visibleShortResearch+`
-			ORDER BY (t.skill_version=ANY($4::text[])),t.id`, id, s.historyVersions(),
-			[]string{"1.0.0", harness.CloseResearchVersion, harness.CloseCompanyVersion, harness.CloseDisclosureVersion, harness.CloseUnifiedVersion, harness.ConversationCloseVersion, harness.ConversationFixtureVersion},
-			[]string{harness.CloseUnifiedVersion, harness.ConversationCloseVersion, harness.ConversationFixtureVersion})
+			ORDER BY (t.skill_version=ANY($4::text[])),t.id`, id, s.historyVersions(), versions, completed)
 		if err != nil {
 			return err
 		}
@@ -1110,6 +968,8 @@ func (s *Server) evidence(r *http.Request, rec dataservice.StoredRecord) Evidenc
 		if rec.ProviderID == "tushare" {
 			var location string
 			switch rec.DatasetID {
+			case dataservice.ComparisonSampleDataset:
+				location = "申万行业名录及当日总市值 · " + str("trade_date")
 			case "flow.dragon_tiger_day":
 				location = "龙虎榜日查询 · " + str("trade_date")
 			case "flow.dragon_tiger":

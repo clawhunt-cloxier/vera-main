@@ -60,7 +60,7 @@ func ObservationBriefSkill() *Skill {
 // model use, including cached step retries and summary/verifier calls.
 func (e *Engine) complete(ctx context.Context, t *taskRow, req model.Request) (json.RawMessage, model.Meta, error) {
 	req.Workspace, req.Task, req.TaskEpoch = t.Workspace, &t.ID, t.Epoch
-	if t.Version == ConversationCloseVersion {
+	if IsCloseConversationVersion(t.Version) {
 		req.WithReuse = func(callCtx context.Context, cached func(pgx.Tx) error) error {
 			return e.WithConversationSnapshot(callCtx, t.Workspace, t.ID, cached)
 		}
@@ -283,7 +283,7 @@ func (e *Engine) observationPipeline(ctx, parent context.Context, t *taskRow, sk
 }
 
 func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Plan, fn func(pgx.Tx) error) error {
-	if plan.SkillVersion == CloseUnifiedVersion || plan.SkillVersion == ConversationCloseVersion {
+	if plan.SkillVersion == CloseUnifiedVersion || IsCloseConversationVersion(plan.SkillVersion) {
 		return pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
 			if err := e.Store.RequireResearchUseTx(ctx, tx); err != nil {
 				return errs.Unavailable("DATA_SOURCE_UNAVAILABLE", "收盘研究数据源当前不可用").Wrap(err)
@@ -322,7 +322,7 @@ func (e *Engine) confirmTransaction(ctx context.Context, ws uuid.UUID, plan *Pla
 }
 
 func (e *Engine) deliverTransaction(ctx context.Context, t *taskRow, fn func(pgx.Tx) error) error {
-	if t.Version == ConversationCloseVersion {
+	if IsCloseConversationVersion(t.Version) {
 		err := e.WithConversationSnapshot(ctx, t.Workspace, t.ID, func(tx pgx.Tx) error {
 			if err := setResearchWorkspace(ctx, tx, t.Workspace); err != nil {
 				return err

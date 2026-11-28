@@ -195,6 +195,58 @@ func TestRequestedIdentityRejectsWrongCurrencyAndExchange(t *testing.T) {
 	}
 }
 
+func TestComparisonArchivesRankedSample(t *testing.T) {
+	const anchor = "600000.SH"
+	end := time.Date(2026, 11, 20, 11, 0, 0, 0, time.UTC)
+	src := marketTestData()
+	for _, v := range src.data["stock_basic"] {
+		v["symbol"] = v["ts_code"][:6]
+		v["curr_type"] = "CNY"
+	}
+	src.data["daily_basic"][1]["total_mv"] = "99" // Tie with 600002.SH below.
+	src.data["daily_basic"][2]["total_mv"] = "101"
+	p := Provider{source: src, codes: []string{anchor}}
+	obs, sample, err := p.collectComparison(t.Context(), dataservice.ComparisonPreparation{AnchorCode: anchor}, dataservice.MarketWindowCache{}, end, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"600001.SH", "600002.SH", "600003.SH"}
+	if sample.Date != "2026-11-20" || !slices.Equal(sample.Codes, want) || sample.IndustryCode != "801011.SI" {
+		t.Fatalf("unexpected peer sample: %+v", sample)
+	}
+	records, err := obs.Records(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(records, func(r dataservice.Record) bool { return r.DatasetID == dataservice.ComparisonSampleDataset })
+	if i < 0 {
+		t.Fatal("peer evidence was not published")
+	}
+	record := records[i]
+	if record.EntityCode != anchor || record.RawSHA256 != sample.ProofSHA256 || record.RawLocator != "$.sample" {
+		t.Fatalf("incorrect sample evidence: %+v", record)
+	}
+	var proof struct {
+		Inputs          map[string]map[string]marketInput `json:"input_pages"`
+		AnchorValuation marketInput                       `json:"anchor_valuation"`
+	}
+	if err := json.Unmarshal(src.objects[record.RawRef], &proof); err != nil {
+		t.Fatal(err)
+	}
+	for _, api := range []string{"anchor_membership", "industry_membership", "market_valuations"} {
+		if len(proof.Inputs[api]) != 1 {
+			t.Fatalf("missing archive pages for %s: %+v", api, proof.Inputs)
+		}
+	}
+	if proof.AnchorValuation.Ref == "" {
+		t.Fatal("missing the exact anchor valuation input")
+	}
+	src.data["suspend_d"][0]["trade_date"] = "20261120"
+	if batch, _, err := p.collectComparison(t.Context(), dataservice.ComparisonPreparation{AnchorCode: anchor, OtherCodes: want}, dataservice.MarketWindowCache{}, end, false); batch != nil || err == nil {
+		t.Fatal("comparison accepted a daily bar during a full-session suspension")
+	}
+}
+
 func TestLaggingShareCapitalUsesMatchingRosterAndMembership(t *testing.T) {
 	const code = "600000.SH"
 	src := marketTestData()

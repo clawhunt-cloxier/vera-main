@@ -114,21 +114,6 @@
               }
             }
           },
-          "default": {
-            "description": "Structured error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              },
-              "application/vnd.vera.observation.v1+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
           "503": {
             "description": "Not ready",
             "content": {
@@ -166,6 +151,21 @@
                     "status",
                     "reason"
                   ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -396,14 +396,66 @@
         "operationId": "prepareResearchSubject",
         "summary": "为已选 A 股准备 TuShare 收盘研究数据，重复请求返回当前状态",
         "parameters": [
-          {"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},
-          {"name":"X-CSRF-Token","in":"header","required":true,"schema":{"type":"string"}}
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false}}}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
-          "200":{"description":"准备完成或失败","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ResearchSubjectPreparation"}}}},
-          "202":{"description":"正在排队或采集，可再次请求状态","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ResearchSubjectPreparation"}}}},
-          "default":{"description":"Structured error","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}
+          "200": {
+            "description": "准备完成或失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchSubjectPreparation"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "正在排队或采集，可再次请求状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchSubjectPreparation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -711,7 +763,7 @@
         "operationId": "cancelTask",
         "summary": "cancelTask",
         "responses": {
-          "202": {
+          "200": {
             "description": "Success",
             "content": {
               "application/json": {
@@ -731,27 +783,7 @@
               }
             }
           },
-          "default": {
-            "description": "Structured error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              },
-              "application/vnd.vera.observation.v1+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              },
-              "application/vnd.vera.v0.4+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "200": {
+          "202": {
             "description": "Success",
             "content": {
               "application/json": {
@@ -773,6 +805,26 @@
           },
           "204": {
             "description": "真实简报模式的取消命令已处理；无厂商数据响应，展示授权失效时仍可取消。"
+          },
+          "default": {
+            "description": "Structured error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.observation.v1+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "application/vnd.vera.v0.4+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -1540,6 +1592,15 @@
                   "$ref": "#/components/schemas/ConversationHistory"
                 }
               }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the next poll while a conversation title is pending",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
             }
           },
           "default": {
@@ -1577,7 +1638,7 @@
       },
       "post": {
         "operationId": "createConversation",
-        "summary": "createConversation",
+        "summary": "Accept a message for the conversation agent",
         "responses": {
           "202": {
             "description": "Accepted",
@@ -1635,7 +1696,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Accept the first message for background resolution. Executable research starts automatically when its scope is clear."
       }
     },
     "/api/v1/conversations/{conversation}": {
@@ -1654,7 +1716,7 @@
             },
             "headers": {
               "Retry-After": {
-                "description": "Seconds until the next poll while the turn is active",
+                "description": "Seconds until the next poll while a turn or conversation title is pending",
                 "schema": {
                   "type": "integer",
                   "minimum": 1
@@ -1747,7 +1809,7 @@
     "/api/v1/conversations/{conversation}/turns": {
       "post": {
         "operationId": "sendConversationMessage",
-        "summary": "sendConversationMessage",
+        "summary": "Accept a message for the conversation agent",
         "responses": {
           "202": {
             "description": "Accepted",
@@ -1814,7 +1876,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Accept a message for background resolution. Executable research starts automatically when its scope is clear."
       }
     },
     "/api/v1/conversations/{conversation}/turns/{turn}": {
@@ -1871,7 +1934,8 @@
               "format": "uuid"
             }
           }
-        ]
+        ],
+        "description": "Read the current turn, its action candidates and task progress, or a general model reply."
       }
     },
     "/api/v1/conversations/{conversation}/turns/{turn}/actions": {
@@ -1930,7 +1994,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Choose a research subject when needed or cancel the current turn. Resolving the subject starts the research automatically."
       }
     },
     "/api/v1/conversations/{conversation}/turns/{turn}/result": {
@@ -2516,8 +2581,12 @@
           },
           "text": {
             "type": "string",
-            "minLength": 2,
+            "minLength": 1,
             "maxLength": 500
+          },
+          "automatic": {
+            "type": "boolean",
+            "description": "Automatically run executable research. Clients that omit this field keep the plan confirmation flow."
           }
         },
         "required": [
@@ -2535,7 +2604,7 @@
           },
           "text": {
             "type": "string",
-            "minLength": 2,
+            "minLength": 1,
             "maxLength": 500
           },
           "reply_to_turn_id": {
@@ -2545,6 +2614,10 @@
           "expected_revision": {
             "type": "integer",
             "minimum": 1
+          },
+          "automatic": {
+            "type": "boolean",
+            "description": "Automatically run executable research. Clients that omit this field keep the plan confirmation flow."
           }
         },
         "required": [
@@ -2587,34 +2660,6 @@
           "action",
           "expected_revision",
           "subject_id"
-        ]
-      },
-      "ConversationConfirm": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "type": "string",
-            "const": "confirm"
-          },
-          "expected_revision": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "plan_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "plan_hash": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{64}$"
-          }
-        },
-        "required": [
-          "action",
-          "expected_revision",
-          "plan_id",
-          "plan_hash"
         ]
       },
       "ConversationCancel": {
@@ -2666,7 +2711,8 @@
             "format": "uuid"
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "A short title based on the first message. New conversations show a generic title until generation succeeds."
           },
           "revision": {
             "type": "integer",
@@ -2699,18 +2745,77 @@
             "type": "string",
             "enum": [
               "daily_trading",
-              "financing_balance"
+              "financing_balance",
+              "stock_comparison"
             ]
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/ConversationComparison"
           },
           "window": {
             "type": "integer",
             "minimum": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "company_industry"
+            ]
           }
         },
         "required": [
           "subject_id",
           "skill_id"
         ]
+      },
+      "ConversationComparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Resolved comparison scope. The primary subject_id is the reference stock.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["stocks", "industry_peers", "stock_indexes"]
+          },
+          "other_ids": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {"type": "string", "format": "uuid"}
+          },
+          "sample_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Date of the industry membership and market-value sample."
+          },
+          "industry_index": {
+            "type": "boolean",
+            "description": "The anchor stock's SW level-2 index was requested."
+          },
+          "broad_indexes": {
+            "type": "array",
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {"type": "string", "enum": ["000300.SH", "000905.SH", "000852.SH"]},
+            "description": "Requested registered broad market index symbols, including any with insufficient data."
+          }
+        },
+        "required": ["kind"]
+      },
+      "ConversationWebSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url", "title"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 180
+          }
+        }
       },
       "ConversationTurn": {
         "type": "object",
@@ -2739,6 +2844,7 @@
               "confirm",
               "research",
               "reference",
+              "answer",
               "unavailable"
             ]
           },
@@ -2749,12 +2855,17 @@
           "message": {
             "type": "string"
           },
+          "web_sources": {
+            "description": "External URLs returned by the public finance education lookup.",
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/ConversationWebSource"
+            }
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "plan": {
-            "$ref": "#/components/schemas/ResearchPlan"
           },
           "candidates": {
             "type": "array",
@@ -2805,6 +2916,17 @@
           },
           "is_brief": {
             "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/ResearchPlan"
+          },
+          "needs_subject": {
+            "type": "boolean",
+            "description": "This clarification accepts a subject selection."
+          },
+          "notice": {
+            "type": "string",
+            "description": "Service generated response about a part of the request that is outside the research scope."
           }
         },
         "required": [
@@ -2816,7 +2938,8 @@
           "created_at",
           "result_ready",
           "is_brief"
-        ]
+        ],
+        "description": "A research request with automatic=true can start directly after validation. Clients that omit automatic receive a plan for confirmation. The answer state contains a non-research reply."
       },
       "ConversationHistory": {
         "type": "object",
@@ -3352,7 +3475,8 @@
               "type": "string",
               "enum": [
                 "daily_trading",
-                "financing_balance"
+                "financing_balance",
+                "stock_comparison"
               ]
             }
           },
@@ -3859,12 +3983,23 @@
         ]
       },
       "ResearchSubjectPreparation": {
-        "type":"object",
-        "additionalProperties":false,
-        "required":["status"],
-        "properties":{
-          "status":{"type":"string","enum":["pending","ready","failed"]},
-          "message":{"type":"string"}
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "failed"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
         }
       },
       "SkillId": {
@@ -5512,6 +5647,34 @@
           "locator",
           "excerpt",
           "content_hash"
+        ]
+      },
+      "ConversationConfirm": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "confirm"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "plan_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "action",
+          "expected_revision",
+          "plan_id",
+          "plan_hash"
         ]
       }
     }

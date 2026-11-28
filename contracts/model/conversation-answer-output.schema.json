@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "greeting",
+        "thanks",
+        "capabilities",
+        "education",
+        "decline_advice",
+        "clarify",
+        "unavailable",
+        "out_of_scope"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "description": "用户可见的纯文本。结合本轮消息和上下文写出具体答复，不含个股判断、无来源事实、数字、链接或投资建议。"
+    }
+  },
+  "required": [
+    "kind",
+    "message"
+  ]
+}

@@ -16,6 +16,8 @@
 | --- | --- | --- |
 | 个股、基准和行业表现 | `stock_basic`、`trade_cal`、`daily`、`adj_factor`、`daily_basic`、`suspend_d`、`index_daily`、`index_member_all`、`sw_daily` | 约五年历史，日成交量由手转股、成交额由千元转元。以沪深 300 和有效申万二级行业为基准，收益使用可比日期。 |
 | 估值与同行 | `daily_basic`、`index_member_all` 及同行财报 | 仅选择同期有市值的同行，最多八家。缺少五家有效同行时披露比较限制。 |
+| 对话股价横向对比 | 缺口按需查询 `stock_basic`、`trade_cal`、`daily`、`adj_factor`、`suspend_d`、`sw_daily`、`index_daily`。新同行样本使用 `index_member_all` 和 `daily_basic`。 | 按本轮 5、10、20 或 60 个交易日检查每只股票和所选指数的规范记录。已发布且可用的日期直接复用。同行样本保留同一日的申万二级成分和市值查询的归档关联。 |
+| 对话日成交、融资余额 | 日成交的缺口使用 `daily`、`suspend_d`、`adj_factor`。融资余额的缺口使用 `margin_detail`。缺交易日历或证券身份时统一补齐。 | 按本轮指标和交易日核对已发布记录。未披露的融资余额显示为缺失。 |
 | 财务、业务和风险 | `income`、`balancesheet`、`cashflow`、`fina_mainbz`、`anns_d` 及登记来源的年报 PDF | 连续两个可比年度的合并财报与对应公告。不同分部维度分别计算。正文按 PDF 页码和段落定位。无法定位对应披露版本时省略有关事实。 |
 | 资金与股东 | `margin_secs`、`margin_detail`、`moneyflow`、`block_trade`、`stk_holdernumber` | 两融资格、融资余额和同日流通市值分别核对。资金分档为厂商加工口径。缺少必需的杠杆资金数据可导致资金报告无法执行。 |
 | 近期事件 | `anns_d`、`major_news` | 新闻仅关联标题包含该证券名称的报道，注明媒体。当期没有授权新闻时，以近期公告支持剩余内容。 |

@@ -159,6 +159,9 @@ func (e *Engine) runSection(ctx context.Context, t *taskRow, sk *Skill, subject 
 	cx := e.checkCtx(t, sheet, s)
 	budget := t.Budget
 	w, err := step(ctx, e, t, "write:"+s.ID, func() (writeOut, error) {
+		if sk.ClaimsFromFacts != nil {
+			return applyRules(sk.ClaimsFromFacts(sheet, s), cx, s), nil
+		}
 		msgs := e.writerMessages(sk, subject, t, sheet, sk.Sections(t.Params), s)
 		raw, _, err := e.complete(ctx, t, model.Request{StepKey: "write:" + s.ID, Profile: "writer",
 			Messages: msgs, MaxOutput: 8000, Schema: "section-output", Budget: budget,
@@ -188,6 +191,9 @@ func (e *Engine) runSection(ctx context.Context, t *taskRow, sk *Skill, subject 
 		return SectionResult{ID: s.ID, Status: "omitted", Removed: w.Removed, Note: note}, nil
 	}
 	v, err := step(ctx, e, t, "verify:"+s.ID, func() (writeOut, error) {
+		if sk.ClaimsFromFacts != nil {
+			return w, nil
+		}
 		msgs := verifierMessages(sheet, s, w.Claims)
 		raw, _, err := e.complete(ctx, t, model.Request{StepKey: "verify:" + s.ID, Profile: "verifier",
 			Messages: msgs, MaxOutput: 4000, Schema: "verify-output", Budget: budget,

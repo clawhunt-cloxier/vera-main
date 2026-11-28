@@ -15,6 +15,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/db"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 )
@@ -31,14 +32,16 @@ type Message struct {
 	ClientMessageID  uuid.UUID  `json:"client_message_id"`
 	Text             string     `json:"text"`
 	ReplyTo          *uuid.UUID `json:"reply_to_turn_id,omitempty"`
+	Automatic        bool       `json:"automatic,omitempty"`
 	ExpectedRevision int64      `json:"expected_revision,omitempty"`
 }
 
 type Summary struct {
-	ID        uuid.UUID `json:"id"`
-	Title     string    `json:"title"`
-	Revision  int64     `json:"revision"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           uuid.UUID `json:"id"`
+	Title        string    `json:"title"`
+	Revision     int64     `json:"revision"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	TitlePending bool      `json:"-"`
 }
 
 type Turn struct {
@@ -51,6 +54,7 @@ type Turn struct {
 	Message   *string    `json:"message,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 
+	Automatic       bool       `json:"-"`
 	PlanID          *uuid.UUID `json:"-"`
 	TaskID          *uuid.UUID `json:"-"`
 	TaskStatus      *string    `json:"task_status,omitempty"`
@@ -64,18 +68,26 @@ type Turn struct {
 }
 
 type Scope struct {
-	SubjectID uuid.UUID `json:"subject_id"`
-	Topic     string    `json:"topic,omitempty"`
-	Skill     string    `json:"skill_id"`
-	Window    int       `json:"window,omitempty"`
+	SubjectID  uuid.UUID        `json:"subject_id"`
+	Topic      string           `json:"topic,omitempty"`
+	Skill      string           `json:"skill_id"`
+	Window     int              `json:"window,omitempty"`
+	Mode       string           `json:"mode,omitempty"`
+	Comparison *comparisonScope `json:"comparison,omitempty"`
 }
 
 type intent struct {
-	Scope         Scope       `json:"scope"`
-	Candidates    []uuid.UUID `json:"candidates,omitempty"`
-	Reference     *uuid.UUID  `json:"reference,omitempty"`
-	ReferenceKind string      `json:"reference_kind,omitempty"`
-	Preparing     bool        `json:"preparing,omitempty"`
+	Scope                Scope               `json:"scope"`
+	Candidates           []uuid.UUID         `json:"candidates,omitempty"`
+	Reference            *uuid.UUID          `json:"reference,omitempty"`
+	ReferenceKind        string              `json:"reference_kind,omitempty"`
+	Preparing            bool                `json:"preparing,omitempty"`
+	FinanceAnswer        bool                `json:"finance_answer,omitempty"`
+	NeedsSubject         bool                `json:"needs_subject,omitempty"`
+	NeedsWindow          bool                `json:"needs_window,omitempty"`
+	AdviceDeclined       bool                `json:"advice_declined,omitempty"`
+	WebSources           []model.WebCitation `json:"web_sources,omitempty"`
+	SearchWithoutSources bool                `json:"search_without_sources,omitempty"`
 }
 
 type Accepted struct {
@@ -88,8 +100,8 @@ const visible = `c.deleted_at IS NULL AND c.expires_at>clock_timestamp()`
 func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.UUID, message Message) (Accepted, error) {
 	var out Accepted
 	message.Text = strings.TrimSpace(message.Text)
-	if message.ClientMessageID == uuid.Nil || utf8.RuneCountInString(message.Text) < 2 || utf8.RuneCountInString(message.Text) > 500 {
-		return out, errs.BadRequest("INVALID_MESSAGE", "请输入 2–500 字并提供消息编号")
+	if message.ClientMessageID == uuid.Nil || message.Text == "" || utf8.RuneCountInString(message.Text) > 500 {
+		return out, errs.BadRequest("INVALID_MESSAGE", "请输入 1–500 字并提供消息编号")
 	}
 	if sender.Channel != "web" || conversationID == nil && (message.ReplyTo != nil || message.ExpectedRevision != 0) || conversationID != nil && message.ExpectedRevision < 1 {
 		return out, errs.BadRequest("INVALID_MESSAGE", "消息渠道或会话版本无效")
@@ -97,7 +109,11 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 	if s.Engine.River == nil || len(s.Engine.ConversationTopics()) == 0 {
 		return out, errs.Unavailable("CONVERSATIONS_UNAVAILABLE", "对话研究服务未就绪")
 	}
-	payload, err := json.Marshal([]any{conversationID, message.Text, message.ReplyTo, sender.Channel})
+	request := []any{conversationID, message.Text, message.ReplyTo, sender.Channel}
+	if message.Automatic {
+		request = append(request, true)
+	}
+	payload, err := json.Marshal(request)
 	if err != nil {
 		return out, err
 	}
@@ -126,11 +142,7 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 			return err
 		}
 		if conversationID == nil {
-			title := []rune(message.Text)
-			if len(title) > 48 {
-				title = title[:48]
-			}
-			if err := tx.QueryRow(ctx, `INSERT INTO conversations(workspace_id,title) VALUES($1,$2) RETURNING id`, sender.Workspace, string(title)).Scan(&out.ConversationID); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO conversations(workspace_id,title) VALUES($1,$2) RETURNING id`, sender.Workspace, defaultConversationTitle).Scan(&out.ConversationID); err != nil {
 				return err
 			}
 		} else {
@@ -145,8 +157,8 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 		}
 		var active bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM conversation_turns t LEFT JOIN research_tasks r ON r.id=t.task_id AND r.workspace_id=t.workspace_id
-			LEFT JOIN research_plans p ON p.id=t.plan_id AND p.workspace_id=t.workspace_id WHERE t.conversation_id=$1 AND
-			(t.state='pending' OR t.state='confirm' AND p.executable AND p.expires_at>clock_timestamp() OR t.state='research' AND r.status<>ALL($2::text[])))`,
+			WHERE t.conversation_id=$1 AND
+			(t.state='pending' OR t.state='research' AND r.status<>ALL($2::text[])))`,
 			out.ConversationID, terminalStatuses).Scan(&active); err != nil {
 			return err
 		}
@@ -159,22 +171,21 @@ func (s Service) Send(ctx context.Context, sender Sender, conversationID *uuid.U
 				return notFound(err)
 			}
 		}
-		var recent int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM conversation_turns WHERE workspace_id=$1 AND created_at>now()-interval '1 minute'`, sender.Workspace).Scan(&recent); err != nil {
-			return err
-		}
-		if recent >= s.Engine.Policy.Quota.PlanParsePerUserPerMinute {
-			return errs.TooMany("CONVERSATION_RATE_LIMITED", "消息发送过快，请稍后再试")
-		}
-		if err := tx.QueryRow(ctx, `INSERT INTO conversation_turns(workspace_id,conversation_id,client_message_id,request_hash,ordinal,channel,body,reply_to_turn_id,state)
-			VALUES($1,$2,$3,$4,(SELECT coalesce(max(ordinal),0)+1 FROM conversation_turns WHERE conversation_id=$2),$5,$6,$7,'pending') RETURNING id`,
-			sender.Workspace, out.ConversationID, message.ClientMessageID, hash, sender.Channel, message.Text, message.ReplyTo).Scan(&out.TurnID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO conversation_turns(workspace_id,conversation_id,client_message_id,request_hash,ordinal,channel,body,reply_to_turn_id,state,automatic)
+			VALUES($1,$2,$3,$4,(SELECT coalesce(max(ordinal),0)+1 FROM conversation_turns WHERE conversation_id=$2),$5,$6,$7,'pending',$8) RETURNING id`,
+			sender.Workspace, out.ConversationID, message.ClientMessageID, hash, sender.Channel, message.Text, message.ReplyTo, message.Automatic).Scan(&out.TurnID); err != nil {
 			return err
 		}
 		if err := touch(ctx, tx, out.ConversationID); err != nil {
 			return err
 		}
-		return s.enqueue(ctx, tx, sender.Workspace, out.ConversationID, out.TurnID, 1)
+		if err := s.enqueue(ctx, tx, sender.Workspace, out.ConversationID, out.TurnID, 1); err != nil {
+			return err
+		}
+		if conversationID == nil {
+			return s.enqueueTitle(ctx, tx, titleArgs{Workspace: sender.Workspace, Conversation: out.ConversationID, FirstTurn: out.TurnID})
+		}
+		return nil
 	})
 	return out, err
 }
@@ -193,28 +204,34 @@ func touch(ctx context.Context, tx pgx.Tx, conv uuid.UUID) error {
 	return err
 }
 
+const defaultConversationTitle = "新会话"
+const titleDeadline = `c.created_at+interval '1 minute'>clock_timestamp()`
+
+const summaryColumns = `c.id,coalesce(nullif(c.title,''),'` + defaultConversationTitle + `'),c.revision,c.updated_at,
+	c.title IN ('','` + defaultConversationTitle + `') AND ` + titleDeadline
+
 func (s Service) List(ctx context.Context, ws uuid.UUID, n int, at *time.Time, id *uuid.UUID) ([]Summary, error) {
 	items := []Summary{}
 	err := db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT c.id,c.title,c.revision,c.updated_at FROM conversations c WHERE `+visible+`
+		rows, err := tx.Query(ctx, `SELECT `+summaryColumns+` FROM conversations c WHERE `+visible+`
 		AND ($1::timestamptz IS NULL OR (c.updated_at,c.id)<($1,$2)) ORDER BY c.updated_at DESC,c.id DESC LIMIT $3`, at, id, n)
 		if err != nil {
 			return err
 		}
-		items, err = pgx.CollectRows(rows, scanSummary)
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Summary, error) { return scanSummary(row) })
 		return err
 	})
 	return items, err
 }
 
-func scanSummary(row pgx.CollectableRow) (Summary, error) {
+func scanSummary(row pgx.Row) (Summary, error) {
 	var c Summary
-	err := row.Scan(&c.ID, &c.Title, &c.Revision, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.Title, &c.Revision, &c.UpdatedAt, &c.TitlePending)
 	return c, err
 }
 
 const turnColumns = `t.id,t.ordinal,t.body,t.revision,t.state,t.reply_to_turn_id,t.message,t.created_at,t.plan_id,t.task_id,
-	r.status,r.revision,r.reason_code,r.report_id,v.version,r.skill_version,coalesce(p.conversation_brief,false),coalesce(t.intent,'{}'::jsonb)`
+	r.status,r.revision,r.reason_code,r.report_id,v.version,r.skill_version,coalesce(p.conversation_brief,false),coalesce(t.intent,'{}'::jsonb),t.automatic`
 
 const turnJoins = ` FROM conversation_turns t JOIN conversations c ON c.id=t.conversation_id AND c.workspace_id=t.workspace_id
 	LEFT JOIN research_tasks r ON r.id=t.task_id AND r.workspace_id=t.workspace_id
@@ -224,7 +241,7 @@ const turnJoins = ` FROM conversation_turns t JOIN conversations c ON c.id=t.con
 func scanTurn(row pgx.Row) (Turn, error) {
 	var t Turn
 	err := row.Scan(&t.ID, &t.Ordinal, &t.Text, &t.Revision, &t.State, &t.ReplyTo, &t.Message, &t.CreatedAt, &t.PlanID, &t.TaskID,
-		&t.TaskStatus, &t.TaskRevision, &t.ReasonCode, &t.ReportID, &t.ReportVersion, &t.ResearchVersion, &t.Brief, &t.Intent)
+		&t.TaskStatus, &t.TaskRevision, &t.ReasonCode, &t.ReportID, &t.ReportVersion, &t.ResearchVersion, &t.Brief, &t.Intent, &t.Automatic)
 	return t, err
 }
 
@@ -233,7 +250,9 @@ func (s Service) History(ctx context.Context, ws, conv uuid.UUID, n int, before 
 	var turns []Turn
 	err := db.InWorkspace(ctx, s.Engine.Pool, ws, func(tx pgx.Tx) error {
 		// Keep the revision and turns consistent if a resolver commits during a read.
-		if err := tx.QueryRow(ctx, `SELECT id,title,revision,updated_at FROM conversations c WHERE id=$1 AND `+visible+` FOR SHARE`, conv).Scan(&c.ID, &c.Title, &c.Revision, &c.UpdatedAt); err != nil {
+		var err error
+		c, err = scanSummary(tx.QueryRow(ctx, `SELECT `+summaryColumns+` FROM conversations c WHERE c.id=$1 AND `+visible+` FOR SHARE`, conv))
+		if err != nil {
 			return notFound(err)
 		}
 		rows, err := tx.Query(ctx, `SELECT `+turnColumns+turnJoins+` WHERE t.conversation_id=$1 AND ($2::bigint=0 OR t.ordinal<$2) AND `+visible+`
@@ -304,9 +323,16 @@ func (w *worker) Work(ctx context.Context, job *river.Job[resolveArgs]) error {
 func Register(engine *harness.Engine) func(*river.Workers, *river.Config) {
 	return func(workers *river.Workers, cfg *river.Config) {
 		river.AddWorker(workers, &worker{service: Service{Engine: engine}})
+		river.AddWorker(workers, &titleWorker{service: Service{Engine: engine}})
 		if cfg.Queues != nil {
 			cfg.Queues["conversation"] = river.QueueConfig{MaxWorkers: 2}
+			cfg.Queues[titleQueue] = river.QueueConfig{MaxWorkers: 1}
+			registerTitleBackfill(workers, cfg, engine)
 			registerRetention(workers, cfg, engine)
 		}
 	}
 }
+
+func (t Turn) WebSources() []model.WebCitation { return t.Intent.WebSources }
+
+func (t Turn) SearchWithoutSources() bool { return t.Intent.SearchWithoutSources }

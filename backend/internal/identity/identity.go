@@ -146,6 +146,10 @@ func safeReturn(p string) string {
 	if p == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.Contains(p, `\`) {
 		return "/app"
 	}
+	// Browsers discard some ASCII controls when parsing navigation URLs.
+	if strings.IndexFunc(p, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return "/app"
+	}
 	return p
 }
 
@@ -240,7 +244,9 @@ func (s *Service) startSession(ctx context.Context, iss, sub, email, name string
 		var uid uuid.UUID
 		var disabled *time.Time
 		err := tx.QueryRow(ctx, `INSERT INTO users(issuer,subject,email,display_name) VALUES($1,$2,$3,$4)
-			ON CONFLICT (issuer,subject) DO UPDATE SET email=excluded.email, display_name=excluded.display_name
+			ON CONFLICT (issuer,subject) DO UPDATE SET
+				email=CASE WHEN users.issuer='local' THEN users.email ELSE excluded.email END,
+				display_name=CASE WHEN users.issuer='local' THEN users.display_name ELSE excluded.display_name END
 			RETURNING id, disabled_at`, iss, sub, email, name).Scan(&uid, &disabled)
 		if err != nil {
 			return err
@@ -494,10 +500,7 @@ func (s *Service) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 
 	s.setCookie(w, sid.token, SessionTTL)
 
-	returnTo := req.ReturnTo
-	if returnTo == "" || !strings.HasPrefix(returnTo, "/") {
-		returnTo = "/app"
-	}
+	returnTo := safeReturn(req.ReturnTo)
 	if sid.workspace == nil {
 		returnTo = "/onboarding"
 	}

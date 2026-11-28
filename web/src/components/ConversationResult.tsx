@@ -56,15 +56,20 @@ export function ConversationResult({
       1,
       element
     );
+  const comparison = result.series.some((item) => item.series_id === 'stock_comparison');
   const calculation = result.claims.find((claim) => claim.calculation_refs.length);
   const briefReference =
     turn.reference_kind === 'calculation' || turn.reference_kind === 'evidence';
   const claims =
-    turn.reference_kind === 'calculation' && calculation ? [calculation] : result.claims;
+    turn.reference_kind === 'calculation' && calculation && !comparison
+      ? [calculation]
+      : result.claims;
   const series = briefReference ? undefined : result.series[0];
   const table = briefReference ? undefined : result.tables[0];
   const tablePreview =
-    table && !expanded && table.rows.length > 8 ? { ...table, rows: table.rows.slice(-8) } : table;
+    table && !comparison && !expanded && table.rows.length > 8
+      ? { ...table, rows: table.rows.slice(-8) }
+      : table;
   return (
     <article className="chat-result">
       <header>
@@ -78,6 +83,7 @@ export function ConversationResult({
         <p className="chat-dateline">数据截止 · {result.data_as_of}</p>
       </header>
       {turn.reference_kind === 'calculation' &&
+        !comparison &&
         (calculation ? (
           <button
             type="button"
@@ -99,7 +105,9 @@ export function ConversationResult({
               <button
                 type="button"
                 className="chat-reference"
-                aria-label={`查看结论 ${index + 1} 的证据`}
+                aria-label={
+                  comparison ? `查看结论 ${index + 1} 的计算与证据` : `查看结论 ${index + 1} 的证据`
+                }
                 aria-expanded={evidence?.visible === true && evidence.claim.ref === claim.ref}
                 aria-controls={evidence?.claim.ref === claim.ref ? panel : undefined}
                 onClick={(e) => open(claim, index + 1, e.currentTarget)}
@@ -128,7 +136,7 @@ export function ConversationResult({
         <section className="chat-result-block">
           <ReportTable table={tablePreview} />
           <div className="chat-inline-actions">
-            {table.rows.length > 8 && (
+            {!comparison && table.rows.length > 8 && (
               <button
                 type="button"
                 className="chat-action"

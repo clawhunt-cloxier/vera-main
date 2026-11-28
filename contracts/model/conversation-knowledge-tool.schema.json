@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["topic", "focus", "message"],
+  "properties": {
+    "topic": {
+      "type": "string",
+      "description": "Exact public financial topic identifier from the system prompt."
+    },
+    "focus": {
+      "type": "string",
+      "description": "Exact public explanation focus identifier from the system prompt."
+    },
+    "message": {
+      "type": "string",
+      "description": "A concise education reply for use if no sources are returned. State uncertainty where the facts need checking."
+    }
+  }
+}

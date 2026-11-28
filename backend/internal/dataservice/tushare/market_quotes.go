@@ -24,97 +24,17 @@ func marketValuation(r Row) (dataservice.Record, bool, error) {
 }
 
 func (c *marketCollector) stockHistory() error {
-	w := c.window(c.code, c.from)
-	raw, err := c.rows("daily", w, "ts_code trade_date open high low close pre_close vol amount", 5000, false)
-	if err != nil {
-		return err
-	}
-	bars, err := marketUnique(raw, "trade_date")
+	bars, err := c.stockPrices()
 	if err != nil {
 		return err
 	}
 	if len(bars) == 0 {
 		return fmt.Errorf("TuShare daily: no closing bars for %s", c.code)
 	}
-	raw, err = c.rows("adj_factor", w, "ts_code trade_date adj_factor", 5000, false)
-	if err != nil {
-		return err
-	}
-	factors, err := marketUnique(raw, "trade_date")
-	if err != nil {
-		return err
-	}
-	raw, err = c.rows("daily_basic", w, marketValFields, 5000, false)
-	if err != nil {
-		return err
-	}
-	vals, err := marketUnique(raw, "trade_date")
-	if err != nil {
-		return err
-	}
-	for _, day := range slices.Sorted(maps.Keys(vals)) {
-		r := vals[day]
-		rec, ok, err := marketValuation(r)
-		if err != nil {
-			return err
-		}
-		if ok {
-			c.Records = append(c.Records, rec)
-			c.latestVal = r
-		}
-	}
-	joins := marketJoins{}
-	var joined []dataservice.Record
-	var keys []string
-	skipped := 0
-	for _, day := range slices.Sorted(maps.Keys(bars)) {
-		r := bars[day]
-		d, _ := marketDate(day)
-		p := map[string]any{"trade_date": d.Format(time.DateOnly), "suspended": false}
-		ok, err := marketNumbers(r, p, marketField{"open", "open", 0, true}, marketField{"high", "high", 0, true}, marketField{"low", "low", 0, true},
-			marketField{"close", "close", 0, true}, marketField{"pre_close", "pre_close", 0, true}, marketField{"vol", "volume", 2, true}, marketField{"amount", "amount", 3, true})
-		if err != nil {
-			return err
-		}
-		if !ok {
-			skipped++
-			continue
-		}
-		fr := factors[day]
-		ok, err = marketNumbers(fr, p, marketField{"adj_factor", "adj_factor", 0, true})
-		if err != nil {
-			return err
-		}
-		if !ok {
-			skipped++
-			continue
-		}
-		joins.add(day, "daily", r)
-		joins.add(day, "adj_factor", fr)
-		available := r.ReceivedAt
-		if fr.ReceivedAt.After(available) {
-			available = fr.ReceivedAt
-		}
-		if vr, ok := vals[day]; ok && vr.Values["turnover_rate"] != "" {
-			if _, err := marketNumbers(vr, p, marketField{"turnover_rate", "turnover_rate", -2, false}); err != nil {
-				return err
-			}
-			joins.add(day, "daily_basic", vr)
-			if vr.ReceivedAt.After(available) {
-				available = vr.ReceivedAt
-			}
-		}
-		rec := marketRecord(r, "mkt.daily_bar", c.code, c.code+"|"+day, "exchange", "L2", "TuShare 收盘日线（不复权）及同日复权因子", &d, p)
-		rec.AvailableAt = available
-		joined = append(joined, rec)
-		keys = append(keys, day)
-	}
-	if skipped != 0 {
-		c.Notes = append(c.Notes, fmt.Sprintf("有 %d 个行情日缺少完整价格、成交数据或复权因子", skipped))
-	}
-	if err := c.archiveJoins(joins, joined, keys); err != nil {
-		return err
-	}
+	return c.index("index_daily", marketBenchmark, 3)
+}
+
+func (c *marketCollector) checkSuspensions(w map[string]string, bars map[string]Row) error {
 	// A full-session suspension is an explicit event. An absent daily bar alone
 	// is not a suspension. Intraday halts can coexist with a valid closing bar.
 	stops, err := c.rows("suspend_d", w, "ts_code trade_date suspend_type suspend_timing", 4000, true)
@@ -140,7 +60,123 @@ func (c *marketCollector) stockHistory() error {
 		c.Notes = append(c.Notes, c.code+" "+d.Format(time.DateOnly)+" 全天停牌")
 		seen[day] = true
 	}
-	return c.index("index_daily", marketBenchmark, 3)
+	return nil
+}
+
+// stockPrices publishes the canonical daily bars, adjustment factors and
+// valuations shared by single-stock research and comparison.
+func (c *marketCollector) stockPrices() (map[string]Row, error) {
+	return c.closingPrices(true)
+}
+
+func (c *marketCollector) closingPrices(withValuations bool) (map[string]Row, error) {
+	c.latestVal = Row{}
+	w := c.window(c.code, c.from)
+	raw, err := c.rows("daily", w, "ts_code trade_date open high low close pre_close vol amount", 5000, false)
+	if err != nil {
+		return nil, err
+	}
+	bars, err := marketUnique(raw, "trade_date")
+	if err != nil {
+		return nil, err
+	}
+	if len(bars) == 0 {
+		return bars, nil
+	}
+	if err := c.checkSuspensions(w, bars); err != nil {
+		return nil, err
+	}
+	raw, err = c.rows("adj_factor", w, "ts_code trade_date adj_factor", 5000, false)
+	if err != nil {
+		return nil, err
+	}
+	factors, err := marketUnique(raw, "trade_date")
+	if err != nil {
+		return nil, err
+	}
+	var vals map[string]Row
+	if withValuations {
+		vals, err = c.stockValuations(w)
+		if err != nil {
+			return nil, err
+		}
+	}
+	joins := marketJoins{}
+	var joined []dataservice.Record
+	var keys []string
+	skipped := 0
+	for _, day := range slices.Sorted(maps.Keys(bars)) {
+		r := bars[day]
+		d, _ := marketDate(day)
+		p := map[string]any{"trade_date": d.Format(time.DateOnly), "suspended": false}
+		ok, err := marketNumbers(r, p, marketField{"open", "open", 0, true}, marketField{"high", "high", 0, true}, marketField{"low", "low", 0, true},
+			marketField{"close", "close", 0, true}, marketField{"pre_close", "pre_close", 0, true}, marketField{"vol", "volume", 2, true}, marketField{"amount", "amount", 3, true})
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			skipped++
+			continue
+		}
+		fr := factors[day]
+		ok, err = marketNumbers(fr, p, marketField{"adj_factor", "adj_factor", 0, true})
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			skipped++
+			continue
+		}
+		joins.add(day, "daily", r)
+		joins.add(day, "adj_factor", fr)
+		available := r.ReceivedAt
+		if fr.ReceivedAt.After(available) {
+			available = fr.ReceivedAt
+		}
+		if vr, ok := vals[day]; ok && vr.Values["turnover_rate"] != "" {
+			if _, err := marketNumbers(vr, p, marketField{"turnover_rate", "turnover_rate", -2, false}); err != nil {
+				return nil, err
+			}
+			joins.add(day, "daily_basic", vr)
+			if vr.ReceivedAt.After(available) {
+				available = vr.ReceivedAt
+			}
+		}
+		rec := marketRecord(r, "mkt.daily_bar", c.code, c.code+"|"+day, "exchange", "L2", "TuShare 收盘日线（不复权）及同日复权因子", &d, p)
+		rec.AvailableAt = available
+		joined = append(joined, rec)
+		keys = append(keys, day)
+	}
+	if skipped != 0 {
+		c.Notes = append(c.Notes, fmt.Sprintf("有 %d 个行情日缺少完整价格、成交数据或复权因子", skipped))
+	}
+	if err := c.archiveJoins(joins, joined, keys); err != nil {
+		return nil, err
+	}
+	return bars, nil
+}
+
+func (c *marketCollector) stockValuations(window map[string]string) (map[string]Row, error) {
+	raw, err := c.rows("daily_basic", window, marketValFields, 5000, false)
+	if err != nil {
+		return nil, err
+	}
+	values, err := marketUnique(raw, "trade_date")
+	if err != nil {
+		return nil, err
+	}
+	for _, day := range slices.Sorted(maps.Keys(values)) {
+		row := values[day]
+		record, ok, err := marketValuation(row)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			c.Records = append(c.Records, record)
+			c.latestVal = row
+		}
+	}
+	return values, nil
 }
 
 func (c *marketCollector) index(api, code string, amountShift int32) error {

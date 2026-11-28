@@ -12,7 +12,7 @@ const activePhases = ['QUEUED', 'COLLECTING', 'ANALYZING', 'ASSEMBLING', 'DELIVE
 const outcomes = {
   COMPLETED: '已完成',
   ABSTAINED: '未生成报告',
-  BUDGET_EXHAUSTED: '研究额度已用尽',
+  BUDGET_EXHAUSTED: '研究未能完成',
   CANCELLED: '已取消',
   BLOCKED: '暂时无法执行',
   FAILED: '研究失败',

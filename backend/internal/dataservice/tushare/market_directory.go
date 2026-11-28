@@ -183,24 +183,18 @@ func (c *marketCollector) directory() error {
 	}
 	seen := map[string]map[string]any{}
 	for _, r := range history {
-		v := r.Values
-		start, _ := marketDate(v["in_date"])
-		payload := map[string]any{"taxonomy": "SW2021", "level1_code": v["l1_code"], "level1_name": v["l1_name"], "level2_code": v["l2_code"], "level2_name": v["l2_name"], "valid_from": start.Format(time.DateOnly)}
-		if out := v["out_date"]; out != "" {
-			to, _ := marketDate(out)
-			// Loader.Members treats valid_to as inclusive, whereas the removal
-			// date is the first day outside the index.
-			payload["valid_to"] = to.AddDate(0, 0, -1).Format(time.DateOnly)
+		rec, err := marketMembership(r)
+		if err != nil {
+			return err
 		}
-		k := v["ts_code"] + "|" + v["in_date"] + "|" + v["l2_code"]
-		if prev, ok := seen[k]; ok {
-			if !maps.Equal(prev, payload) {
+		if prev, ok := seen[rec.LogicalKey]; ok {
+			if !maps.Equal(prev, rec.Payload) {
 				return marketBad("index_member_all", "ambiguous interval")
 			}
 			continue
 		}
-		seen[k] = payload
-		c.Records = append(c.Records, marketRecord(r, "ref.industry", v["ts_code"], k, "vendor_derived", "L2", "申万 2021 版分类", &start, payload))
+		seen[rec.LogicalKey] = rec.Payload
+		c.Records = append(c.Records, rec)
 	}
 	return c.index("sw_daily", ind, 4)
 }

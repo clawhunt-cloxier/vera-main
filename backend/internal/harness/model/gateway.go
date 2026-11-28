@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -21,20 +23,26 @@ import (
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/policy"
 )
 
-// Schemas holds the compiled model output schemas from contracts/model.
-type Schemas map[string]*jsonschema.Schema
+type registeredSchema struct {
+	compiled *jsonschema.Schema
+	params   json.RawMessage
+}
+
+// Schemas holds the model contracts, including source JSON for tool declarations.
+type Schemas map[string]registeredSchema
 
 func LoadSchemas(dir string) (Schemas, error) {
 	c := jsonschema.NewCompiler()
 	out := Schemas{}
-	for _, name := range []string{"section-output", "verify-output", "summary-output", "plan-parse-output"} {
+	for _, name := range []string{"section-output", "verify-output", "summary-output", "plan-parse-output",
+		"conversation-answer-output", "conversation-review-output", "conversation-title-output",
+		"conversation-window-tool", "conversation-depth-tool", "conversation-reference-tool", "conversation-knowledge-tool", "conversation-comparison-tool"} {
 		p, _ := filepath.Abs(filepath.Join(dir, name+".schema.json"))
-		f, err := os.Open(p)
+		raw, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
 		}
-		doc, err := jsonschema.UnmarshalJSON(f)
-		f.Close()
+		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
@@ -45,26 +53,35 @@ func LoadSchemas(dir string) (Schemas, error) {
 		if err != nil {
 			return nil, fmt.Errorf("compile %s: %w", name, err)
 		}
-		out[name] = s
+		out[name] = registeredSchema{compiled: s, params: raw}
 	}
 	return out, nil
+}
+
+type ToolSpec struct {
+	Name        string
+	Description string
+	Schema      string // key in Schemas
 }
 
 // Request is one logical model call from a harness step.
 type Request struct {
 	WithSend func(context.Context, func() (Raw, error)) (Raw, error) // holds source rights only during the actual adapter call
 	// WithReuse reads the cached result in the transaction holding the current source permissions.
-	WithReuse func(context.Context, func(pgx.Tx) error) error
-	Workspace uuid.UUID
-	Task      *uuid.UUID // nil for planning calls that have no research task
-	TaskEpoch int64      // required for task-bound calls
-	StepKey   string
-	Profile   string
-	Messages  []Message
-	MaxOutput int
-	Schema    string // key in Schemas
-	Simulate  func() (any, error)
-	Budget    policy.Budget
+	WithReuse       func(context.Context, func(pgx.Tx) error) error
+	Workspace       uuid.UUID
+	Task            *uuid.UUID // nil for planning calls that have no research task
+	TaskEpoch       int64      // required for task-bound calls
+	StepKey         string
+	Profile         string
+	Messages        []Message
+	MaxOutput       int
+	Schema          string // key in Schemas
+	Tools           []ToolSpec
+	EducationSearch bool
+	Simulate        func() (any, error)
+	Budget          policy.Budget
+	EraseContent    bool // keep accounting, omit model response and error text from the ledger
 }
 
 type Meta struct {
@@ -74,6 +91,8 @@ type Meta struct {
 	Usage         Usage
 	Cost          decimal.Decimal
 	Reused        bool
+	ToolCall      *ToolCall
+	WebCitations  []WebCitation
 }
 
 // Gateway owns all model traffic. It is the only code allowed to talk to model vendors.
@@ -151,7 +170,7 @@ func (e *FormatError) Error() string { return "model output invalid: " + e.Msg }
 // ErrStaleTask means the caller's task is gone, has ended, or has advanced to a different epoch.
 var ErrStaleTask = errors.New("model call task is no longer current")
 
-// Complete runs the call with reuse, budget reservation, retries and validation. It returns the validated JSON.
+// Complete returns either validated reply JSON or a validated function call in Meta.
 func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Meta, error) {
 	prof, ok := g.Profiles[r.Profile]
 	if !ok {
@@ -164,10 +183,36 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 	if !ok {
 		return nil, Meta{}, fmt.Errorf("adapter %q not configured", prof.Adapter)
 	}
-	schema := g.Schemas[r.Schema]
+	if r.EraseContent && prof.Adapter == "record" {
+		return nil, Meta{}, errors.New("private requests cannot use the record adapter")
+	}
+	if r.EducationSearch && (!prof.SupportsEducationSearch() || r.Profile != "router" || r.Task != nil ||
+		!r.EraseContent || r.StepKey != "conversation_education_search" || r.Schema != "conversation-answer-output" || len(r.Tools) != 0) {
+		return nil, Meta{}, errors.New("education search requires a private conversation lookup")
+	}
+	tools, toolSchemas, err := g.registerTools(r, prof)
+	if err != nil {
+		return nil, Meta{}, err
+	}
+	schema := g.Schemas[r.Schema].compiled
+	if len(tools) > 0 && schema == nil {
+		return nil, Meta{}, errors.New("tool requests require a reply schema")
+	}
+	toolTokens := 0
+	if len(tools) > 0 {
+		encoded, err := json.Marshal(tools)
+		if err != nil {
+			return nil, Meta{}, err
+		}
+		toolTokens = utf8.RuneCount(encoded)
+	}
 	msgs := r.Messages
 	r.MaxOutput = prof.EffectiveMaxOutput(r.MaxOutput)
-	hash := RequestHash(prof, msgs, r.MaxOutput, r.Schema)
+	schemaID := r.Schema
+	if r.EducationSearch {
+		schemaID += ":deepseek_web_search"
+	}
+	hash := RequestHash(prof, msgs, r.MaxOutput, schemaID, tools...)
 	var out json.RawMessage
 	var meta Meta
 	var reused bool
@@ -186,22 +231,31 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 		return out, meta, nil
 	}
 	transient, repairs := g.Policy.ModelCall.TransientRetries, g.Policy.ModelCall.FormatRepairs
+	if r.EducationSearch {
+		// Search responses are plain text and may contain vendor search tokens.
+		// The caller has a separate ordinary draft if this single attempt fails.
+		transient, repairs = 0, 0
+	}
 	var lastErr error
 	for attempt := 1; ; attempt++ {
-		hash := RequestHash(prof, msgs, r.MaxOutput, r.Schema)
-		callID, err := g.reserve(ctx, r, prof, ad.Name(), hash, attempt, msgs)
+		hash := RequestHash(prof, msgs, r.MaxOutput, schemaID, tools...)
+		inputTokens := EstimateTokens(msgs) + toolTokens
+		if r.EducationSearch {
+			inputTokens = max(inputTokens, 32768)
+		}
+		callID, err := g.reserve(ctx, r, prof, ad.Name(), hash, attempt, inputTokens)
 		if err != nil {
 			return nil, Meta{}, err
 		}
 		release, err := g.acquire(ctx, prof.Name)
 		if err != nil {
-			g.finish(ctx, callID, "FAILED", nil, Usage{}, decimal.Zero, "", "cancelled before send")
+			g.finish(ctx, callID, r.EraseContent, "FAILED", nil, Usage{}, decimal.Zero, "", "cancelled before send")
 			return nil, Meta{}, err
 		}
 
 		sentSuccessfully := false
 		send := func() (Raw, error) {
-			raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Simulate: r.Simulate, Hash: hash})
+			raw, err := ad.Do(ctx, Call{Profile: prof, Messages: msgs, MaxOutput: r.MaxOutput, Tools: tools, EducationSearch: r.EducationSearch, Simulate: r.Simulate, Hash: hash})
 			sentSuccessfully = err == nil
 			return raw, err
 		}
@@ -217,6 +271,16 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			err = &Error{Unknown: true, Msg: "source transaction failed after model response"}
 		}
 		release()
+		cost := decimal.Zero
+		if billable(ad.Name()) && !raw.Replayed && raw.Usage.PromptTokens > 0 {
+			price, priceErr := g.Prices.Cost(prof.ModelID, g.now(), raw.Usage)
+			if priceErr != nil {
+				slog.ErrorContext(ctx, "pricing failed; charging reservation", "err", priceErr)
+				cost = decimal.NewFromInt(-1)
+			} else {
+				cost = price
+			}
+		}
 		if err != nil {
 			var me *Error
 			errors.As(err, &me)
@@ -224,7 +288,7 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			if me != nil && me.Unknown {
 				status = "UNKNOWN" // keeps the reservation charged until reconciled
 			}
-			g.finish(ctx, callID, status, nil, Usage{}, decimal.Zero, "", err.Error())
+			g.finish(ctx, callID, r.EraseContent, status, nil, raw.Usage, cost, "", err.Error())
 			lastErr = err
 			if me != nil && me.Transient && transient > 0 && ctx.Err() == nil {
 				transient--
@@ -239,32 +303,97 @@ func (g *Gateway) Complete(ctx context.Context, r Request) (json.RawMessage, Met
 			}
 			return nil, Meta{}, lastErr
 		}
-		cost := decimal.Zero
-		if billable(ad.Name()) && !raw.Replayed {
-			if cost, err = g.Prices.Cost(prof.ModelID, g.now(), raw.Usage); err != nil {
-				slog.ErrorContext(ctx, "pricing failed; charging reservation", "err", err)
-				cost = decimal.NewFromInt(-1)
-			}
+		if r.EducationSearch && raw.FinishReason == "stop" && len(raw.ToolCalls) == 0 {
+			content, _ := json.Marshal(struct {
+				Kind    string `json:"kind"`
+				Message string `json:"message"`
+			}{"education", raw.Content})
+			raw.Content = string(content)
 		}
-		out, verr := validate(raw, schema)
+		out, tool, verr := validateCompletion(raw, schema, toolSchemas)
+		if r.EducationSearch && raw.FinishReason != "stop" {
+			verr = errors.New("incomplete education search")
+		}
 		if verr != nil {
-			g.finish(ctx, callID, "FAILED", &raw, raw.Usage, cost, raw.ObservedModel, verr.Error())
+			g.finish(ctx, callID, r.EraseContent, "FAILED", &raw, raw.Usage, cost, raw.ObservedModel, verr.Error())
 			if repairs > 0 {
 				repairs--
-				msgs = append(append([]Message{}, msgs...), Message{Role: "assistant", Content: truncate(raw.Content, 4000)},
-					Message{Role: "user", Content: "上一次输出不符合要求：" + truncate(verr.Error(), 300) + "。请只输出符合 JSON Schema 的 JSON 对象，不要输出其他内容。"})
+				if !r.EraseContent {
+					msgs = append(append([]Message{}, msgs...), Message{Role: "assistant", Content: truncate(raw.Content, 4000)},
+						Message{Role: "user", Content: "上一次输出不符合要求：" + truncate(verr.Error(), 300) + "。请只输出符合 JSON Schema 的 JSON 对象，不要输出其他内容。"})
+				} else {
+					hint := "上一次回复格式无效。请只返回符合回复格式的 JSON 对象，不要输出其他内容。"
+					if len(tools) != 0 {
+						hint = "上一次回复格式无效。只调用一个已声明的函数，参数须符合该函数的 JSON Schema，或只返回符合回复格式的 JSON 对象。"
+					}
+					if len(msgs) > 0 && msgs[0].Role == "system" {
+						// Some model templates allow only one system message.
+						msgs = append([]Message(nil), msgs...)
+						msgs[0].Content += "\n\n" + hint
+					} else {
+						msgs = append([]Message{{Role: "system", Content: hint}}, msgs...)
+					}
+				}
 				continue
 			}
 			return nil, Meta{}, &FormatError{verr.Error()}
 		}
-		g.finish(ctx, callID, "SUCCEEDED", &raw, raw.Usage, cost, raw.ObservedModel, "")
-		return out, Meta{CallID: callID, Adapter: ad.Name(), ObservedModel: raw.ObservedModel, Usage: raw.Usage, Cost: cost}, nil
+		g.finish(ctx, callID, r.EraseContent, "SUCCEEDED", &raw, raw.Usage, cost, raw.ObservedModel, "")
+		return out, Meta{CallID: callID, Adapter: ad.Name(), ObservedModel: raw.ObservedModel, Usage: raw.Usage, Cost: cost, ToolCall: tool, WebCitations: raw.WebCitations}, nil
 	}
+}
+
+func (g *Gateway) registerTools(r Request, p Profile) ([]Tool, map[string]*jsonschema.Schema, error) {
+	if len(r.Tools) == 0 {
+		return nil, nil, nil
+	}
+	// Private conversation calls must not write model requests or responses to cassettes.
+	if r.Profile != "router" || r.Task != nil || !r.EraseContent || p.Adapter == "record" {
+		return nil, nil, errors.New("tool requests require a private router call")
+	}
+	tools := make([]Tool, 0, len(r.Tools))
+	schemas := make(map[string]*jsonschema.Schema, len(r.Tools))
+	for _, spec := range r.Tools {
+		schema := g.Schemas[spec.Schema]
+		if spec.Name == "" || schema.compiled == nil || schemas[spec.Name] != nil {
+			return nil, nil, fmt.Errorf("invalid tool declaration %q", spec.Name)
+		}
+		tools = append(tools, Tool{Type: "function", Function: ToolFunction{Name: spec.Name, Description: spec.Description, Parameters: schema.params}})
+		schemas[spec.Name] = schema.compiled
+	}
+	return tools, schemas, nil
+}
+
+func validateCompletion(raw Raw, reply *jsonschema.Schema, tools map[string]*jsonschema.Schema) (json.RawMessage, *ToolCall, error) {
+	if len(raw.ToolCalls) == 0 && raw.FinishReason != "tool_calls" {
+		if len(tools) != 0 && raw.FinishReason != "stop" {
+			return nil, nil, errors.New("incomplete agent reply")
+		}
+		out, err := validate(raw, reply)
+		return out, nil, err
+	}
+	if raw.FinishReason != "tool_calls" || len(raw.ToolCalls) != 1 {
+		return nil, nil, errors.New("expected exactly one complete tool call")
+	}
+	call := raw.ToolCalls[0]
+	schema := tools[call.Function.Name]
+	if call.Type != "function" || call.ID == "" || schema == nil || len(call.Function.Arguments) > 4096 {
+		return nil, nil, errors.New("invalid tool call")
+	}
+	args, err := validate(Raw{Content: call.Function.Arguments}, schema)
+	if err != nil {
+		return nil, nil, errors.New("invalid tool arguments")
+	}
+	call.Function.Arguments = string(args)
+	return nil, &call, nil
 }
 
 func validate(raw Raw, schema *jsonschema.Schema) (json.RawMessage, error) {
 	if raw.FinishReason == "length" {
 		return nil, errors.New("output truncated (finish_reason=length)")
+	}
+	if raw.FinishReason == "tool_calls" || len(raw.ToolCalls) != 0 {
+		return nil, errors.New("unexpected tool call")
 	}
 	content := strings.TrimSpace(raw.Content)
 	if content == "" {
@@ -312,8 +441,7 @@ func (g *Gateway) reuse(ctx context.Context, q cachedQuery, r Request, hash stri
 
 // reserve checks task and platform budgets and inserts a SENT row holding the worst-case reservation.
 // All reservations are serialised by one advisory lock; MVP volume makes this cheap and keeps limits exact.
-func (g *Gateway) reserve(ctx context.Context, r Request, p Profile, adapter, hash string, attempt int, msgs []Message) (uuid.UUID, error) {
-	in := EstimateTokens(msgs)
+func (g *Gateway) reserve(ctx context.Context, r Request, p Profile, adapter, hash string, attempt, in int) (uuid.UUID, error) {
 	reserve := decimal.Zero
 	if billable(adapter) {
 		var err error
@@ -368,8 +496,10 @@ func (g *Gateway) reserve(ctx context.Context, r Request, p Profile, adapter, ha
 			}
 		}
 		return tx.QueryRow(ctx, `INSERT INTO model_calls(workspace_id,task_id,step_key,attempt,profile,adapter,model_id,request_hash,status,
-			reserved_usd,price_table,epoch) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'SENT',$9,$10,$11) RETURNING id`,
-			r.Workspace, r.Task, r.StepKey, attempt, p.Name, adapter, p.ModelID, hash, reserve, nullIf(g.priceVersion()), max(1, r.TaskEpoch)).Scan(&id)
+			reserved_usd,price_table,epoch,content_erased_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,'SENT',$9,$10,$11,CASE WHEN $12 THEN now() END) RETURNING id`,
+			r.Workspace, r.Task, r.StepKey, attempt, p.Name, adapter, p.ModelID, hash, reserve, nullIf(g.priceVersion()),
+			max(1, r.TaskEpoch), r.EraseContent).Scan(&id)
 	})
 	return id, err
 }
@@ -388,13 +518,16 @@ func nullIf(s string) *string {
 	return &s
 }
 
-func (g *Gateway) finish(ctx context.Context, id uuid.UUID, status string, raw *Raw, u Usage, cost decimal.Decimal, observed, errMsg string) {
+func (g *Gateway) finish(ctx context.Context, id uuid.UUID, eraseContent bool, status string, raw *Raw, u Usage, cost decimal.Decimal, observed, errMsg string) {
 	// The vendor may already have billed even if the task or worker stopped.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	var c *decimal.Decimal
 	if status != "UNKNOWN" {
 		c = &cost
+	}
+	if eraseContent {
+		raw, errMsg, observed = nil, "", ""
 	}
 	ub, _ := json.Marshal(u)
 	_, err := g.Pool.Exec(ctx, `UPDATE model_calls SET status=$2, usage=$4, cost_usd=$5, observed_model=NULLIF($6,''), finished_at=now(),
@@ -409,13 +542,13 @@ func (g *Gateway) finish(ctx context.Context, id uuid.UUID, status string, raw *
 // UnknownReleaseAfter is how long an UNKNOWN call keeps its reservation charged (HARNESS §9).
 const UnknownReleaseAfter = 24 * time.Hour
 
-// ReleaseUnknown stops charging reservations of UNKNOWN calls sent before cutoff: they become RECONCILED with
-// cost 0 and a note. A later vendor bill showing a charge must be recorded with `vera admin usage reconcile`.
+// ReleaseUnknown stops charging reservations of UNKNOWN calls and interrupted
+// conversation calls left in SENT before cutoff. Late vendor bills can still be reconciled.
 // It runs outside workspace scope (platform job) and returns the released call IDs.
 func (g *Gateway) ReleaseUnknown(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error) {
-	rows, err := g.Pool.Query(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=0, finished_at=coalesce(finished_at, now()),
+	rows, err := g.Pool.Query(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=0, auto_released_at=now(), finished_at=coalesce(finished_at, now()),
 		error=CASE WHEN content_erased_at IS NULL THEN left(coalesce(error,'') || ' [auto-released: no reconciliation within 24h]', 1000) END
-		WHERE status='UNKNOWN' AND sent_at < $1 RETURNING id`, cutoff)
+		WHERE (status='UNKNOWN' OR (status='SENT' AND step_key IN ('conversation_agent','conversation_education_search','conversation_title'))) AND sent_at < $1 RETURNING id`, cutoff)
 	if err != nil {
 		return nil, err
 	}

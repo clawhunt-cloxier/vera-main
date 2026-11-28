@@ -27,7 +27,11 @@ func (e *Engine) RealtimeEnabled() bool {
 // SkillVersion resolves persisted versions without changing the legacy
 // observation entry point or silently upgrading a confirmed task.
 func (e *Engine) SkillVersion(id, version string) *Skill {
-	if version == ConversationCloseVersion && e.hasCloseSkills() || version == ConversationFixtureVersion && e.Synthetic && e.Brief == nil && !e.hasCloseSkills() {
+	if id == "stock_analysis" && (IsCloseComparisonVersion(version) && e.hasCloseSkills() ||
+		isFixtureComparisonVersion(version) && e.Synthetic && e.Brief == nil && !e.hasCloseSkills()) {
+		return stockComparisonSkill(version)
+	}
+	if isCloseIndicatorVersion(version) && e.hasCloseSkills() || version == ConversationFixtureVersion && e.Synthetic && e.Brief == nil && !e.hasCloseSkills() {
 		return conversationSkill(id, version)
 	}
 	if id == "stock_analysis" && version == emquant.ConversationObservationVersion && e.Brief != nil {

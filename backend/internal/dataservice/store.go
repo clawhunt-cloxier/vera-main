@@ -60,14 +60,14 @@ func (s *Store) RegisteredResearchSubject(code string) bool {
 // Existing record keys are idempotent only when their content and provenance
 // agree; a conflicting key fails the entire sync without replacing either.
 func (s *Store) Sync(ctx context.Context, p Provider) (int, error) {
-	return s.sync(ctx, s.pool, p, false, "")
+	return s.sync(ctx, s.pool, p, false, "", false)
 }
 
 type txBeginner interface {
 	Begin(context.Context) (pgx.Tx, error)
 }
 
-func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bool, requestedCode string) (int, error) {
+func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bool, requestedCode string, researchUse bool) (int, error) {
 	if s.excludeSynthetic && p.Synthetic() {
 		return 0, fmt.Errorf("synthetic provider not permitted in vendor store")
 	}
@@ -97,10 +97,12 @@ func (s *Store) sync(ctx context.Context, db txBeginner, p Provider, observed bo
 	n := 0
 	err = pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		var directoryUpdates map[string]bool
-		if requestedCode != "" {
+		if researchUse {
 			if err := s.RequireResearchUseTx(ctx, tx); err != nil {
 				return err
 			}
+		}
+		if requestedCode != "" {
 			validTarget := slices.ContainsFunc(ents, func(e Entity) bool {
 				return e.Kind == "stock" && e.Code == requestedCode && e.Attrs["tushare_research_subject"] == true
 			})
@@ -240,11 +242,21 @@ func syncEntity(ctx context.Context, tx pgx.Tx, p Provider, e Entity, protectDir
 			return id, err
 		}
 	}
-	attrs, _ := json.Marshal(e.Attrs)
+	attrs := []byte("{}")
+	if e.Attrs != nil {
+		attrs, _ = json.Marshal(e.Attrs)
+	}
 	err := tx.QueryRow(ctx, `INSERT INTO entities(kind,code,name,exchange,status,is_financial,classification,synthetic,attrs)
 		VALUES($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
-		ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status, is_financial=excluded.is_financial, classification=excluded.classification,
-		attrs=CASE WHEN $10 AND EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
+		ON CONFLICT (code) DO UPDATE SET name=excluded.name, exchange=excluded.exchange, status=excluded.status,
+		is_financial=CASE WHEN $10 AND excluded.classification IS NULL THEN entities.is_financial ELSE excluded.is_financial END,
+		classification=CASE WHEN $10 AND excluded.classification IS NULL THEN entities.classification ELSE excluded.classification END,
+		attrs=CASE WHEN $10 AND excluded.classification IS NULL THEN
+			  (coalesce(nullif(entities.attrs,'null'::jsonb),'{}'::jsonb) || excluded.attrs) ||
+			  CASE WHEN entities.attrs @> '{"tushare_research_subject":true}'::jsonb
+					OR EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
+				THEN '{"tushare_research_subject":true}'::jsonb ELSE '{}'::jsonb END
+			WHEN $10 AND EXISTS (SELECT 1 FROM tushare_requested_subjects WHERE code=excluded.code)
 			THEN excluded.attrs || '{"tushare_research_subject":true}'::jsonb ELSE excluded.attrs END
 		WHERE entities.synthetic=excluded.synthetic AND entities.kind=excluded.kind
 		RETURNING id`, e.Kind, e.Code, e.Name, e.Exchange, e.Status, e.IsFinancial, e.Classification, p.Synthetic(), attrs, p.ID() == "tushare").Scan(&id)
@@ -292,6 +304,7 @@ type StoredRecord struct {
 type Query struct {
 	DatasetIDs []string
 	EntityIDs  []uuid.UUID // empty = no entity filter
+	IndexCodes []string    // optional filter for global index bars
 	From, To   *time.Time  // period range, inclusive
 	AsOf       time.Time
 	ModelUse   bool // records will reach a model: only providers licensed for model processing
@@ -340,13 +353,14 @@ func (s *Store) Query(ctx context.Context, q Query) ([]StoredRecord, error) {
 		FROM records r JOIN providers p ON p.id = r.provider_id AND p.enabled
 		WHERE r.dataset_id = ANY($1) AND ` + visibleAtCutoff + `
 		AND ($3::uuid[] IS NULL OR r.entity_id = ANY($3)) AND ($4::date IS NULL OR r.period >= $4) AND ($5::date IS NULL OR r.period <= $5)
-		AND (NOT $6::bool OR p.allow_model_processing) AND ($8='' OR p.id=$8)` + fmt.Sprintf(realSourceFilter, "$7") + `
+		AND (NOT $6::bool OR p.allow_model_processing) AND ($8='' OR p.id=$8)
+		AND ($9::text[] IS NULL OR (r.dataset_id='mkt.index_bar' AND r.entity_id IS NULL AND r.payload->>'index_code'=ANY($9)))` + fmt.Sprintf(realSourceFilter, "$7") + `
 		AND r.quality_state IN ('PASS','WARN') AND ` + latestRevisionAt("$2")
 	var ents []uuid.UUID
 	if len(q.EntityIDs) > 0 {
 		ents = q.EntityIDs
 	}
-	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse, s.excludeSynthetic, s.providerID)
+	rows, err := s.pool.Query(ctx, sql, q.DatasetIDs, q.AsOf, ents, q.From, q.To, q.ModelUse, s.excludeSynthetic, s.providerID, q.IndexCodes)
 	if err != nil {
 		return nil, err
 	}
@@ -622,26 +636,54 @@ func (s *Store) Search(ctx context.Context, q, kind string, limit int) ([]Entity
 	return pgx.CollectRows(rows, scanEntity)
 }
 
+// ResolveAlias resolves a single user-provided mention without fuzzy matching.
+func (s *Store) ResolveAlias(ctx context.Context, alias, kind string) ([]EntityRow, error) {
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e WHERE ($2='' OR kind=$2)
+		AND (NOT $3::bool OR NOT e.synthetic)
+		AND ($4::text[] IS NULL OR code=ANY($4) OR ($5 AND EXISTS (SELECT 1 FROM tushare_requested_subjects t WHERE t.code=e.code)))
+		AND EXISTS (SELECT 1 FROM entity_aliases a WHERE a.entity_id=e.id AND a.alias=$1) ORDER BY code LIMIT 10`,
+		alias, kind, s.excludeSynthetic, s.searchableCodes(), s.onDemandSubjects)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, scanEntity)
+}
+
+type ScopeReference struct {
+	ID      uuid.UUID
+	Mention string
+}
+
+// ExplicitScopeReferences returns possible verbatim references for a scope check.
+// The caller checks code and name boundaries before accepting a match.
+func (s *Store) ExplicitScopeReferences(ctx context.Context, text string, kinds []string) ([]ScopeReference, error) {
+	text = strings.ToLower(text)
+	rows, err := s.pool.Query(ctx, `SELECT e.id,ref.mention FROM entities e
+		CROSS JOIN LATERAL (
+			SELECT lower(e.code) AS mention
+			UNION SELECT lower(e.name) WHERE length(e.name)>=2
+			UNION SELECT lower(split_part(e.code,'.',1)) WHERE e.kind='stock'
+			UNION SELECT a.alias FROM entity_aliases a WHERE a.entity_id=e.id AND e.kind='stock'
+				AND length(a.alias)>=2 AND octet_length(a.alias)>length(a.alias)
+		) ref
+		WHERE ($2::text[] IS NULL OR kind=ANY($2)) AND (NOT $3::bool OR NOT e.synthetic)
+		AND ($4::text[] IS NULL OR code=ANY($4) OR ($5 AND EXISTS (SELECT 1 FROM tushare_requested_subjects t WHERE t.code=e.code)))
+		AND strpos($1,ref.mention)>0 ORDER BY e.code,ref.mention`, text, kinds, s.excludeSynthetic, s.searchableCodes(), s.onDemandSubjects)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowToStructByPos[ScopeReference])
+}
+
 // Mentioned returns entities whose alias occurs verbatim in free text (rule-based plan parsing). Longest alias first.
 func (s *Store) Mentioned(ctx context.Context, text string) ([]EntityRow, error) {
-	return s.mentioned(ctx, text, false)
-}
-
-// MentionedInQuestion requires a whole token for ASCII aliases such as stock codes.
-func (s *Store) MentionedInQuestion(ctx context.Context, text string) ([]EntityRow, error) {
-	return s.mentioned(ctx, text, true)
-}
-
-func (s *Store) mentioned(ctx context.Context, text string, exactASCII bool) ([]EntityRow, error) {
-	rows, err := s.pool.Query(ctx, `WITH input AS (SELECT lower($1) AS text,
-		CASE WHEN $5::bool THEN regexp_split_to_array(lower($1), '[^a-z0-9.]+|[.](?![a-z0-9])') END AS tokens)
-	SELECT `+entityCols+` FROM entities e CROSS JOIN input JOIN LATERAL (
+	rows, err := s.pool.Query(ctx, `SELECT `+entityCols+` FROM entities e JOIN LATERAL (
 		SELECT max(length(alias)) AS l FROM entity_aliases a WHERE a.entity_id = e.id AND length(a.alias) >= 2
-		AND CASE WHEN $5::bool AND a.alias ~ '^[a-z0-9.]+$' THEN a.alias = ANY(input.tokens)
-			ELSE strpos(input.text, a.alias) > 0 END) m ON m.l IS NOT NULL
+		AND strpos(lower($1),a.alias)>0) m ON m.l IS NOT NULL
         WHERE (NOT $2::bool OR NOT e.synthetic) AND
 		($3::text[] IS NULL OR code=ANY($3) OR ($4 AND EXISTS (SELECT 1 FROM tushare_requested_subjects t WHERE t.code=e.code)))
-		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic, s.searchableCodes(), s.onDemandSubjects, exactASCII)
+		ORDER BY m.l DESC, code LIMIT 10`, text, s.excludeSynthetic, s.searchableCodes(), s.onDemandSubjects)
 	if err != nil {
 		return nil, err
 	}

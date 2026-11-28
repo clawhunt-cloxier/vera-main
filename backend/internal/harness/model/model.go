@@ -29,29 +29,68 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// Tool is a function declared by trusted application code for one model request.
+type Tool struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+type ToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+type ToolCall struct {
+	ID       string        `json:"id"`
+	Type     string        `json:"type"`
+	Function ToolArguments `json:"function"`
+}
+
+type ToolArguments struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	CacheHitTokens   int `json:"prompt_cache_hit_tokens"`
-	CacheMissTokens  int `json:"prompt_cache_miss_tokens"`
-	ReasoningTokens  int `json:"reasoning_tokens"`
+	PromptTokens     int            `json:"prompt_tokens"`
+	CompletionTokens int            `json:"completion_tokens"`
+	CacheHitTokens   int            `json:"prompt_cache_hit_tokens"`
+	CacheMissTokens  int            `json:"prompt_cache_miss_tokens"`
+	ReasoningTokens  int            `json:"reasoning_tokens"`
+	ServerToolUse    *ServerToolUse `json:"server_tool_use,omitempty"`
+}
+
+type ServerToolUse struct {
+	Search int `json:"tool_search"`
+	Fetch  int `json:"tool_fetch"`
+	Images int `json:"tool_image_search"`
+}
+
+type WebCitation struct {
+	URL   string `json:"url"`
+	Title string `json:"title"`
 }
 
 // Raw is one adapter response before validation.
 type Raw struct {
-	Content       string `json:"content"`
-	FinishReason  string `json:"finish_reason"`
-	ObservedModel string `json:"model"`
-	Usage         Usage  `json:"usage"`
+	Content       string        `json:"content"`
+	ToolCalls     []ToolCall    `json:"tool_calls,omitempty"`
+	FinishReason  string        `json:"finish_reason"`
+	ObservedModel string        `json:"model"`
+	Usage         Usage         `json:"usage"`
+	WebCitations  []WebCitation `json:"-"`
 	// Replayed marks a response served from a cassette: no vendor was called, so nothing is charged.
 	Replayed bool `json:"-"`
 }
 
 // Call is what an adapter receives.
 type Call struct {
-	Profile   Profile
-	Messages  []Message
-	MaxOutput int
+	Profile         Profile
+	Messages        []Message
+	MaxOutput       int
+	Tools           []Tool
+	EducationSearch bool
 	// Simulate produces the structured output for the sim adapter. It must be deterministic in its inputs.
 	Simulate func() (any, error)
 	Hash     string
@@ -64,13 +103,14 @@ type Adapter interface {
 
 // Profile configures one purpose (writer / verifier / router).
 type Profile struct {
-	Name        string
-	Adapter     string // openai | record | replay | sim
-	BaseURL     string
-	ModelID     string
-	APIKey      string
-	PriceTable  string
-	Temperature float64
+	Name                 string
+	Adapter              string // openai | record | replay | sim
+	BaseURL              string
+	ModelID              string
+	APIKey               string
+	PriceTable           string
+	Temperature          float64
+	AllowEducationSearch bool
 	// Thinking is "", "enabled" or "disabled". "" sends nothing (vendor default); otherwise the request carries
 	// {"thinking":{"type":Thinking}}. An explicit "thinking" key in ExtraBody wins.
 	Thinking  string
@@ -82,6 +122,15 @@ type Profile struct {
 	Concurrency int
 }
 
+// SupportsEducationSearch restricts the provider tool to the official endpoint.
+func (p Profile) SupportsEducationSearch() bool {
+	if !p.AllowEducationSearch || p.Name != "router" || p.Adapter != "openai" || p.ModelID != "deepseek-flash" {
+		return false
+	}
+	base := strings.TrimRight(p.BaseURL, "/")
+	return base == "https://api.deepseek.com" || base == "https://api.deepseek.com/v1"
+}
+
 // EffectiveMaxOutput applies the profile cap to a call's requested output limit.
 func (p Profile) EffectiveMaxOutput(requested int) int {
 	if p.MaxOutput > 0 && (requested <= 0 || p.MaxOutput < requested) {
@@ -91,7 +140,7 @@ func (p Profile) EffectiveMaxOutput(requested int) int {
 }
 
 // body builds the chat/completions request body. Gateway-owned keys are set last so ExtraBody cannot override them.
-func (p Profile) body(msgs []Message, maxOut int) map[string]any {
+func (p Profile) body(msgs []Message, maxOut int, tools ...Tool) map[string]any {
 	body := map[string]any{}
 	if p.Thinking != "" {
 		body["thinking"] = map[string]string{"type": p.Thinking}
@@ -100,7 +149,12 @@ func (p Profile) body(msgs []Message, maxOut int) map[string]any {
 		body[k] = v
 	}
 	body["model"], body["messages"], body["stream"] = p.ModelID, msgs, false
-	body["response_format"] = map[string]string{"type": "json_object"}
+	if len(tools) == 0 {
+		body["response_format"] = map[string]string{"type": "json_object"}
+	} else {
+		delete(body, "response_format")
+		body["tools"], body["tool_choice"] = tools, "auto"
+	}
 	body["max_tokens"], body["temperature"] = maxOut, p.Temperature
 	return body
 }
@@ -126,7 +180,20 @@ func (a OpenAI) Do(ctx context.Context, c Call) (Raw, error) {
 	if err := modelguard.ValidateExtraBody(c.Profile.ExtraBody); err != nil {
 		return Raw{}, err
 	}
-	b, _ := json.Marshal(c.Profile.body(c.Messages, c.MaxOutput))
+	body := c.Profile.body(c.Messages, c.MaxOutput, c.Tools...)
+	if c.EducationSearch {
+		if !c.Profile.SupportsEducationSearch() || len(c.Tools) != 0 {
+			return Raw{}, errors.New("education search is not available for this profile")
+		}
+		delete(body, "response_format")
+		body["tools"] = []map[string]string{{"type": "deepseek_web_search"}}
+		body["tool_choice"] = "auto"
+		body["thinking"] = map[string]string{"type": "disabled"}
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return Raw{}, err
+	}
 	timeout := c.Profile.Timeout
 	if timeout == 0 {
 		timeout = 90 * time.Second
@@ -142,6 +209,11 @@ func (a OpenAI) Do(ctx context.Context, c Call) (Raw, error) {
 	hc := a.HTTP
 	if hc == nil {
 		hc = http.DefaultClient
+	}
+	if c.EducationSearch {
+		noRedirect := *hc
+		noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		hc = &noRedirect
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -160,31 +232,96 @@ func (a OpenAI) Do(ctx context.Context, c Call) (Raw, error) {
 		}
 		return Raw{}, e
 	}
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		return Raw{}, &Error{Status: resp.StatusCode, Msg: fmt.Sprintf("model http %d: %s", resp.StatusCode, truncate(string(rb), 300))}
 	}
 	var out struct {
-		Model   string `json:"model"`
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-		Usage struct {
-			Usage
-			Details struct {
-				Reasoning int `json:"reasoning_tokens"`
-			} `json:"completion_tokens_details"`
-		} `json:"usage"`
+		Model   string          `json:"model"`
+		Choices json.RawMessage `json:"choices"`
+		Usage   json.RawMessage `json:"usage"`
 	}
-	if err := json.Unmarshal(rb, &out); err != nil || len(out.Choices) == 0 {
-		// The vendor answered (and may bill usage) but the body is unusable; not retried as transient.
-		return Raw{}, &Error{Msg: "unparseable model response"}
+	if err := json.Unmarshal(rb, &out); err != nil {
+		return Raw{}, &Error{Unknown: true, Msg: "unparseable model response"}
 	}
-	u := out.Usage.Usage
-	u.ReasoningTokens = out.Usage.Details.Reasoning
-	return Raw{Content: out.Choices[0].Message.Content, FinishReason: out.Choices[0].FinishReason, ObservedModel: out.Model, Usage: u}, nil
+	var usage struct {
+		Usage
+		Completion *int `json:"completion_tokens"`
+		Details    struct {
+			Reasoning int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
+	}
+	if err := json.Unmarshal(out.Usage, &usage); err != nil || usage.PromptTokens <= 0 ||
+		usage.Completion == nil || *usage.Completion < 0 || usage.CacheHitTokens < 0 ||
+		usage.CacheMissTokens < 0 || usage.Details.Reasoning < 0 {
+		return Raw{}, &Error{Unknown: true, Msg: "model response missing valid usage"}
+	}
+	usage.CompletionTokens = *usage.Completion
+	usage.ReasoningTokens = usage.Details.Reasoning
+	raw := Raw{ObservedModel: out.Model, Usage: usage.Usage}
+	var choices []struct {
+		Message      json.RawMessage `json:"message"`
+		FinishReason string          `json:"finish_reason"`
+	}
+	if err := json.Unmarshal(out.Choices, &choices); err != nil || len(choices) == 0 {
+		return raw, &Error{Msg: "unparseable model choices"}
+	}
+	choice := choices[0]
+	var message struct {
+		Content   string     `json:"content"`
+		ToolCalls []ToolCall `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(choice.Message, &message); err != nil {
+		return raw, &Error{Msg: "unparseable model message"}
+	}
+	raw.Content, raw.ToolCalls, raw.FinishReason = message.Content, message.ToolCalls, choice.FinishReason
+	if c.EducationSearch && raw.Usage.ServerToolUse != nil && raw.Usage.ServerToolUse.Search > 0 {
+		var search searchResponse
+		if err := json.Unmarshal(choice.Message, &search); err == nil {
+			raw.WebCitations = search.citations()
+		}
+	}
+	return raw, nil
+}
+
+type searchResponse struct {
+	Annotations []struct {
+		Type     string      `json:"type"`
+		Citation WebCitation `json:"url_citation"`
+	} `json:"annotations"`
+	Steps []struct {
+		Calls []struct {
+			Type    string `json:"type"`
+			Kind    string `json:"kind"`
+			Status  string `json:"status"`
+			Sources []struct {
+				Type string `json:"type"`
+				URL  string `json:"url"`
+			} `json:"sources"`
+		} `json:"calls"`
+	} `json:"server_tool_calls"`
+}
+
+func (s searchResponse) citations() []WebCitation {
+	retrieved := make(map[string]bool)
+	for _, step := range s.Steps {
+		for _, call := range step.Calls {
+			if call.Type != "deepseek_web_search" || call.Kind != "search" || call.Status != "completed" {
+				continue
+			}
+			for _, source := range call.Sources {
+				if source.Type == "url" && source.URL != "" {
+					retrieved[source.URL] = true
+				}
+			}
+		}
+	}
+	var citations []WebCitation
+	for _, annotation := range s.Annotations {
+		if annotation.Type == "url_citation" && retrieved[annotation.Citation.URL] {
+			citations = append(citations, annotation.Citation)
+		}
+	}
+	return citations
 }
 
 func truncate(s string, n int) string {
@@ -213,8 +350,12 @@ func (Sim) Do(_ context.Context, c Call) (Raw, error) {
 	for _, m := range c.Messages {
 		in += utf8.RuneCountInString(m.Content)
 	}
-	return Raw{Content: string(b), FinishReason: "stop", ObservedModel: "vera-sim-1",
-		Usage: Usage{PromptTokens: in, CacheMissTokens: in, CompletionTokens: utf8.RuneCount(b)}}, nil
+	raw := Raw{Content: string(b), FinishReason: "stop", ObservedModel: "vera-sim-1",
+		Usage: Usage{PromptTokens: in, CacheMissTokens: in, CompletionTokens: utf8.RuneCount(b)}}
+	if tool, ok := v.(ToolCall); ok {
+		raw.Content, raw.FinishReason, raw.ToolCalls = "", "tool_calls", []ToolCall{tool}
+	}
+	return raw, nil
 }
 
 // ---- replay adapter: cassettes keyed by request hash ----
@@ -266,12 +407,16 @@ func (r Replay) Do(ctx context.Context, c Call) (Raw, error) {
 
 // RequestHash identifies a request independent of attempt; it keys replay cassettes and call reuse.
 // Everything sent to the vendor that can change the answer (thinking, temperature, extra body) is included.
-func RequestHash(p Profile, msgs []Message, maxOut int, schemaID string) string {
+func RequestHash(p Profile, msgs []Message, maxOut int, schemaID string, tools ...Tool) string {
 	h := sha256.New()
 	extra, _ := json.Marshal(p.ExtraBody) // map keys are sorted, so this is stable
 	fmt.Fprintf(h, "%s\x00%s\x00%d\x00%s\x00%s\x00%g\x00%s\x00", p.Name, p.ModelID, maxOut, schemaID, p.Thinking, p.Temperature, extra)
 	for _, m := range msgs {
 		fmt.Fprintf(h, "%s\x00%s\x00", m.Role, m.Content)
+	}
+	if len(tools) > 0 {
+		encoded, _ := json.Marshal(tools)
+		_, _ = h.Write(encoded)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

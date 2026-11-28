@@ -162,7 +162,7 @@ func (s *Server) responseGrant(r *http.Request) (responseGrant, error) {
 		if err != nil {
 			return nil, err
 		}
-		if (strings.HasPrefix(path, "/api/v1/reports/") || (version == harness.CloseUnifiedVersion || version == harness.ConversationCloseVersion) && strings.HasPrefix(path, "/api/v1/calculations/")) &&
+		if (strings.HasPrefix(path, "/api/v1/reports/") || (version == harness.CloseUnifiedVersion || harness.IsCloseConversationVersion(version)) && strings.HasPrefix(path, "/api/v1/calculations/")) &&
 			(r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			return s.snapshotGrant(r, task, version, grant), nil
 		}
@@ -182,22 +182,22 @@ func (s *Server) snapshotGrant(r *http.Request, task uuid.UUID, version string, 
 	_, ws := principal(r)
 	ctx := r.Context()
 	return func(fn func() error) error {
-		switch version {
-		case harness.ConversationCloseVersion:
+		switch {
+		case harness.IsCloseConversationVersion(version):
 			return checkSource(func(use func() error) error {
 				return s.Engine.WithConversationSnapshot(ctx, ws, task, func(pgx.Tx) error { return use() })
 			}, "研究所用的冻结数据当前不可读取")(fn)
-		case harness.CloseUnifiedVersion:
+		case version == harness.CloseUnifiedVersion:
 			return checkSource(func(use func() error) error {
 				return s.Engine.WithUnifiedSources(ctx, ws, task, dataservice.SourceDisplay, func(pgx.Tx, []harness.BoundResearchSupplement) error { return use() })
 			}, "研报的冻结数据当前不可读取")(fn)
-		case harness.MixedObservationVersion:
+		case version == harness.MixedObservationVersion:
 			return checkSource(func(use func() error) error {
 				return s.Engine.WithMixedDisplay(ctx, ws, task, func(emquant.BriefObservation, []dataservice.StoredRecord) error { return use() })
 			}, "双来源研报的冻结数据当前不可读取")(fn)
-		case emquant.ObservationBriefVersion, emquant.ConversationObservationVersion:
+		case version == emquant.ObservationBriefVersion || version == emquant.ConversationObservationVersion:
 			return s.withDaily(r, ws, task, version, func(emquant.BriefObservation) error { return fn() })
-		case harness.RealtimeBriefVersion:
+		case version == harness.RealtimeBriefVersion:
 			return s.withQuote(r, ws, task, func(emquant.QuoteView) error { return fn() })
 		default:
 			return meta(fn)

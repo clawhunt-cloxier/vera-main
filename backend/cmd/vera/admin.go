@@ -357,8 +357,8 @@ func runAdmin(ctx context.Context, a *app.App, args []string, out io.Writer, who
 			return res, errors.New("--cost 必须是按账单确认的非负金额")
 		}
 		// UNKNOWN calls, or calls auto-released after 24h (cost 0) whose bill arrived later.
-		tag, err := a.Pool.Exec(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=$2, finished_at=coalesce(finished_at, now())
-			WHERE id=$1 AND (status='UNKNOWN' OR (status='RECONCILED' AND error LIKE '%auto-released%'))`, id, c)
+		tag, err := a.Pool.Exec(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=$2, auto_released_at=NULL, finished_at=coalesce(finished_at, now())
+			WHERE id=$1 AND (status='UNKNOWN' OR (status='RECONCILED' AND auto_released_at IS NOT NULL))`, id, c)
 		if err == nil && tag.RowsAffected() == 0 {
 			err = errors.New("调用不存在，或不是 UNKNOWN / 自动释放的调用")
 		}

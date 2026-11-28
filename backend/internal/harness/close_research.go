@@ -22,7 +22,7 @@ const CloseDisclosureVersion = "1.0.3" // stock_analysis and capital_flow
 const CloseUnifiedVersion = "1.0.4"
 
 func IsCloseResearchVersion(version string) bool {
-	return version == CloseResearchVersion || version == CloseCompanyVersion || version == CloseDisclosureVersion || version == CloseUnifiedVersion || version == ConversationCloseVersion
+	return version == CloseResearchVersion || version == CloseCompanyVersion || version == CloseDisclosureVersion || version == CloseUnifiedVersion || IsCloseConversationVersion(version)
 }
 
 func (e *Engine) realResearchDisabled() bool {

@@ -45,10 +45,12 @@ type Engine struct {
 	// RealResearch is VERA_REAL_RESEARCH_ENABLED: required before plans and tasks run on real data or real models.
 	RealResearch bool
 	// WithCloseResearchUse holds current TuShare usage rights for the callback.
-	WithCloseResearchUse  func(context.Context, func() error) error
-	CloseResearchCutoff   func(context.Context) (time.Time, error)
-	PrepareTuShareSubject func(context.Context, string) error
-	ResearchSupplements   []dataservice.ResearchSupplementSource
+	WithCloseResearchUse     func(context.Context, func() error) error
+	CloseResearchCutoff      func(context.Context) (time.Time, error)
+	PrepareTuShareSubject    func(context.Context, string) error
+	PrepareTuShareIndicator  func(context.Context, dataservice.IndicatorPreparation) error
+	PrepareTuShareComparison func(context.Context, dataservice.ComparisonPreparation) (dataservice.ComparisonSample, error)
+	ResearchSupplements      []dataservice.ResearchSupplementSource
 }
 
 const PromptVersion = "1.1.0"
@@ -106,10 +108,10 @@ func planHash(skill, version string, subject uuid.UUID, p Params, asOf time.Time
 
 // BuildPlan computes availability and persists the plan for the workspace.
 func (e *Engine) BuildPlan(ctx context.Context, ws uuid.UUID, skillID string, subject dataservice.EntityRow, raw map[string]any) (*Plan, error) {
-	return e.buildPlan(ctx, ws, skillID, subject, raw, nil, nil)
+	return e.buildPlan(ctx, ws, skillID, subject, raw, nil)
 }
 
-func (e *Engine) buildPlan(ctx context.Context, ws uuid.UUID, skillID string, subject dataservice.EntityRow, raw map[string]any, turn *uuid.UUID, bind func(pgx.Tx, *Plan) error) (*Plan, error) {
+func (e *Engine) buildPlan(ctx context.Context, ws uuid.UUID, skillID string, subject dataservice.EntityRow, raw map[string]any, launch *ConversationLaunch) (*Plan, error) {
 	if e.realResearchDisabled() {
 		return nil, errs.Unavailable("REAL_RESEARCH_DISABLED", "真实研究尚未开启")
 	}
@@ -129,14 +131,14 @@ func (e *Engine) buildPlan(ctx context.Context, ws uuid.UUID, skillID string, su
 			return nil, errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "本技能仅支持已登记的 A 股个股")
 		}
 	}
-	return e.buildSkillPlanForTurn(ctx, ws, sk, subject, raw, turn, false, bind)
+	return e.buildSkillPlanForTurn(ctx, ws, sk, subject, raw, launch, false)
 }
 
 func (e *Engine) buildSkillPlan(ctx context.Context, ws uuid.UUID, sk *Skill, subject dataservice.EntityRow, raw map[string]any) (*Plan, error) {
-	return e.buildSkillPlanForTurn(ctx, ws, sk, subject, raw, nil, false, nil)
+	return e.buildSkillPlanForTurn(ctx, ws, sk, subject, raw, nil, false)
 }
 
-func (e *Engine) buildSkillPlanForTurn(ctx context.Context, ws uuid.UUID, sk *Skill, subject dataservice.EntityRow, raw map[string]any, turn *uuid.UUID, brief bool, bind func(pgx.Tx, *Plan) error) (*Plan, error) {
+func (e *Engine) buildSkillPlanForTurn(ctx context.Context, ws uuid.UUID, sk *Skill, subject dataservice.EntityRow, raw map[string]any, launch *ConversationLaunch, brief bool) (*Plan, error) {
 	if !slices.Contains(sk.Subjects, subject.Kind) {
 		return nil, errs.Unprocessable("SUBJECT_NOT_SUPPORTED", sk.Title+"不支持该研究对象类型")
 	}
@@ -167,7 +169,10 @@ func (e *Engine) buildSkillPlanForTurn(ctx context.Context, ws uuid.UUID, sk *Sk
 		return nil, err
 	}
 	plan := &Plan{ID: uuid.New(), SkillID: sk.ID, SkillVersion: sk.Version, Subject: subject, Params: p, AsOf: asOf,
-		Executable: true, Notes: notes, ExpiresAt: time.Now().Add(planTTL), ConversationTurn: turn, ConversationPlan: turn != nil}
+		Executable: true, Notes: notes, ExpiresAt: time.Now().Add(planTTL), ConversationPlan: launch != nil}
+	if launch != nil {
+		plan.ConversationTurn = &launch.TurnID
+	}
 	writers := 0
 	plan.Sections = append(plan.Sections, PlanSection{ID: "S1", Title: "核心要点", Required: true, Avail: "available"})
 	for _, s := range sk.Sections(p) {
@@ -199,15 +204,17 @@ func (e *Engine) buildSkillPlanForTurn(ctx context.Context, ws uuid.UUID, sk *Sk
 	}
 	params, _ := json.Marshal(p)
 	secs, _ := json.Marshal(plan.Sections)
-	err = db.InWorkspace(ctx, e.Pool, ws, func(tx pgx.Tx) error {
+	persist := func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO research_plans(id,workspace_id,skill_id,skill_version,subject_id,params,sections,as_of,plan_hash,executable,reason_code,expires_at,snapshot_mode,quote_requirement,conversation_turn_id,conversation_brief,conversation_plan)
 			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, plan.ID, ws, sk.ID, sk.Version, subject.ID, params, secs, asOf, plan.Hash,
-			plan.Executable, plan.ReasonCode, plan.ExpiresAt, plan.SnapshotMode, plan.QuoteRequirement, turn, brief, plan.ConversationPlan)
-		if err != nil || bind == nil {
-			return err
-		}
-		return bind(tx, plan)
-	})
+			plan.Executable, plan.ReasonCode, plan.ExpiresAt, plan.SnapshotMode, plan.QuoteRequirement, plan.ConversationTurn, brief, plan.ConversationPlan)
+		return err
+	}
+	if launch == nil {
+		err = db.InWorkspace(ctx, e.Pool, ws, persist)
+	} else if plan.Executable || !launch.AutoRun {
+		err = e.startConversationTask(ctx, ws, sk, plan, *launch, persist)
+	}
 	return plan, err
 }
 
@@ -301,11 +308,10 @@ func (e *Engine) quota(ctx context.Context, tx pgx.Tx) (Quota, error) {
 	}
 	var activeN, queued, daily, deep int
 	err := tx.QueryRow(ctx, `SELECT
-		count(*) FILTER (WHERE status = ANY($1)), count(*) FILTER (WHERE status='QUEUED'),
-		count(*) FILTER (WHERE created_at >= date_trunc('day', now())) +
-			(SELECT count(*) FROM conversation_quota_debits WHERE created_at >= date_trunc('day', now())),
-		count(*) FILTER (WHERE created_at >= date_trunc('day', now()) AND skill_id='deep_research')
-		FROM research_tasks`, active).Scan(&activeN, &queued, &daily, &deep)
+		count(*) FILTER (WHERE t.status = ANY($1)), count(*) FILTER (WHERE t.status='QUEUED'),
+		count(*) FILTER (WHERE NOT p.conversation_plan AND t.created_at >= date_trunc('day', now())),
+		count(*) FILTER (WHERE NOT p.conversation_plan AND t.created_at >= date_trunc('day', now()) AND t.skill_id='deep_research')
+		FROM research_tasks t JOIN research_plans p ON p.workspace_id=t.workspace_id AND p.id=t.plan_id`, active).Scan(&activeN, &queued, &daily, &deep)
 	return Quota{max(0, q.UserActiveTasks-activeN), max(0, q.UserQueuedTasks-queued), max(0, q.UserDailyTasks-daily),
 		max(0, q.UserDailyDeepResearch-deep)}, err
 }
@@ -329,7 +335,7 @@ func KillSwitch(ctx context.Context, q interface {
 	return on
 }
 
-// CreateTask confirms a plan: verifies hash/expiry, reserves quota and enqueues the run in one transaction.
+// CreateTask confirms a standalone plan and enqueues the run in one transaction.
 func (e *Engine) CreateTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID, hash string, disabled []string) (uuid.UUID, error) {
 	return e.createTask(ctx, ws, planID, hash, disabled, nil, 0)
 }
@@ -367,14 +373,9 @@ func (e *Engine) createTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 			return uuid.Nil, errs.Unprocessable("INVALID_DISABLED_SECTION", "只能取消可选章节："+d)
 		}
 	}
-	budget := e.researchBudget(sk.ID, sk.Version)
 	var taskID uuid.UUID
 	err = e.confirmTransaction(ctx, ws, plan, func(tx pgx.Tx) error {
-		if KillSwitch(ctx, tx) {
-			return errs.Unavailable("RESEARCH_PAUSED", "平台暂停接受新的研究任务")
-		}
-		// Serialise quota checks per workspace.
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 7224002))`, ws.String()); err != nil {
+		if err := lockResearchAdmission(ctx, tx, ws); err != nil {
 			return err
 		}
 		var conversation uuid.UUID
@@ -393,75 +394,90 @@ func (e *Engine) createTask(ctx context.Context, ws uuid.UUID, planID uuid.UUID,
 			taskID = *consumed // idempotent confirm
 			return nil
 		}
-		q, err := e.quota(ctx, tx)
-		if err != nil {
+		var err error
+		taskID, err = e.enqueueResearchTask(ctx, tx, ws, plan, sk, disabled)
+		if err != nil || turn == nil {
 			return err
 		}
-		var inflight int
-		if err := tx.QueryRow(ctx, `SELECT platform_inflight_tasks()`).Scan(&inflight); err != nil {
-			return err
-		}
-		switch {
-		case q.DailyRemaining <= 0:
-			return errs.TooMany("DAILY_QUOTA_EXCEEDED", "今日研究次数已用完")
-		case sk.ID == "deep_research" && q.DeepDailyRemaining <= 0:
-			return errs.TooMany("DEEP_RESEARCH_QUOTA_EXCEEDED", "今日深度研究次数已用完")
-		case q.QueuedRemaining <= 0:
-			return errs.TooMany("QUEUE_FULL", "排队中的任务过多，请稍后再试")
-		case inflight >= e.Policy.Quota.PlatformInFlightTasks:
-			return errs.TooMany("PLATFORM_BUSY", "平台繁忙，请稍后再试")
-		}
-		params, _ := json.Marshal(plan.Params)
-		secs := []PlanSection{}
-		for _, s := range plan.Sections {
-			if slices.Contains(disabled, s.ID) {
-				s.Avail = "unavailable"
-				r := "用户取消"
-				s.Reason = &r
-			}
-			secs = append(secs, s)
-		}
-		sb, _ := json.Marshal(secs)
-		bb, _ := json.Marshal(budget)
-		deadline := time.Now().Add(time.Duration(budget.DeadlineSeconds) * time.Second)
-		if err := tx.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget,snapshot_mode)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,'QUEUED',$9,$10,$11) RETURNING id`, ws, planID, sk.ID, sk.Version, plan.Subject.ID, params, sb, plan.AsOf,
-			deadline, bb, plan.SnapshotMode).Scan(&taskID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE research_plans SET consumed_task_id=$2 WHERE id=$1`, planID, taskID); err != nil {
-			return err
-		}
-		if turn != nil {
-			if err := attachConversationTask(ctx, tx, conversation, *turn, taskID); err != nil {
-				return err
-			}
-		}
-		if plan.SkillVersion == RealtimeBriefVersion {
-			// Trusted confirmation derives the immutable intent before the
-			// workspace role is restored for ordinary writes.
-			if _, err := tx.Exec(ctx, "RESET ROLE"); err != nil {
-				return err
-			}
-			if err := RegisterBriefIntent(ctx, tx, ws, taskID, 1, plan.Hash, *e.RealtimeSource); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, "SET LOCAL ROLE vera_app"); err != nil {
-				return err
-			}
-		}
-		if err := e.insertSteps(ctx, tx, ws, taskID, 1, sk, plan.Params, secs); err != nil {
-			return err
-		}
-		if err := event(ctx, tx, ws, taskID, 1, "CREATED", map[string]any{"plan_hash": plan.Hash}); err != nil {
-			return err
-		}
-		if _, err := e.River.InsertTx(ctx, tx, RunArgs{TaskID: taskID, Workspace: ws, Epoch: 1}, nil); err != nil {
-			return err
-		}
-		_, err = e.River.InsertTx(ctx, tx, DeadlineArgs{TaskID: taskID, Workspace: ws}, &river.InsertOpts{ScheduledAt: deadline.Add(30 * time.Second)})
-		return err
+		return attachConversationTask(ctx, tx, conversation, *turn, planID, taskID)
 	})
+	return taskID, err
+}
+
+func lockResearchAdmission(ctx context.Context, tx pgx.Tx, ws uuid.UUID) error {
+	if KillSwitch(ctx, tx) {
+		return errs.Unavailable("RESEARCH_PAUSED", "平台暂停接受新的研究任务")
+	}
+	// Serialize admission per workspace to enforce the queue capacity.
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 7224002))`, ws.String())
+	return err
+}
+
+func (e *Engine) enqueueResearchTask(ctx context.Context, tx pgx.Tx, ws uuid.UUID, plan *Plan, sk *Skill, disabled []string) (uuid.UUID, error) {
+	q, err := e.quota(ctx, tx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var inflight int
+	if err := tx.QueryRow(ctx, `SELECT platform_inflight_tasks()`).Scan(&inflight); err != nil {
+		return uuid.Nil, err
+	}
+	switch {
+	case !plan.ConversationPlan && q.DailyRemaining <= 0:
+		return uuid.Nil, errs.TooMany("DAILY_QUOTA_EXCEEDED", "今日研究次数已用完")
+	case !plan.ConversationPlan && sk.ID == "deep_research" && q.DeepDailyRemaining <= 0:
+		return uuid.Nil, errs.TooMany("DEEP_RESEARCH_QUOTA_EXCEEDED", "今日深度研究次数已用完")
+	case q.QueuedRemaining <= 0:
+		return uuid.Nil, errs.TooMany("QUEUE_FULL", "排队中的任务过多，请稍后再试")
+	case inflight >= e.Policy.Quota.PlatformInFlightTasks:
+		return uuid.Nil, errs.TooMany("PLATFORM_BUSY", "平台繁忙，请稍后再试")
+	}
+	budget := e.researchBudget(sk.ID, sk.Version)
+	var taskID uuid.UUID
+	params, _ := json.Marshal(plan.Params)
+	secs := []PlanSection{}
+	for _, s := range plan.Sections {
+		if slices.Contains(disabled, s.ID) {
+			s.Avail = "unavailable"
+			r := "用户取消"
+			s.Reason = &r
+		}
+		secs = append(secs, s)
+	}
+	sb, _ := json.Marshal(secs)
+	bb, _ := json.Marshal(budget)
+	deadline := time.Now().Add(time.Duration(budget.DeadlineSeconds) * time.Second)
+	if err := tx.QueryRow(ctx, `INSERT INTO research_tasks(workspace_id,plan_id,skill_id,skill_version,subject_id,params,sections,as_of,status,deadline,budget,snapshot_mode)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,'QUEUED',$9,$10,$11) RETURNING id`, ws, plan.ID, sk.ID, sk.Version, plan.Subject.ID, params, sb, plan.AsOf,
+		deadline, bb, plan.SnapshotMode).Scan(&taskID); err != nil {
+		return uuid.Nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE research_plans SET consumed_task_id=$2 WHERE id=$1`, plan.ID, taskID); err != nil {
+		return uuid.Nil, err
+	}
+	if plan.SkillVersion == RealtimeBriefVersion {
+		// Trusted confirmation derives the immutable intent before the
+		// workspace role is restored for ordinary writes.
+		if _, err := tx.Exec(ctx, "RESET ROLE"); err != nil {
+			return uuid.Nil, err
+		}
+		if err := RegisterBriefIntent(ctx, tx, ws, taskID, 1, plan.Hash, *e.RealtimeSource); err != nil {
+			return uuid.Nil, err
+		}
+		if _, err := tx.Exec(ctx, "SET LOCAL ROLE vera_app"); err != nil {
+			return uuid.Nil, err
+		}
+	}
+	if err := e.insertSteps(ctx, tx, ws, taskID, 1, sk, plan.Params, secs); err != nil {
+		return uuid.Nil, err
+	}
+	if err := event(ctx, tx, ws, taskID, 1, "CREATED", map[string]any{"plan_hash": plan.Hash}); err != nil {
+		return uuid.Nil, err
+	}
+	if _, err := e.River.InsertTx(ctx, tx, RunArgs{TaskID: taskID, Workspace: ws, Epoch: 1}, nil); err != nil {
+		return uuid.Nil, err
+	}
+	_, err = e.River.InsertTx(ctx, tx, DeadlineArgs{TaskID: taskID, Workspace: ws}, &river.InsertOpts{ScheduledAt: deadline.Add(30 * time.Second)})
 	return taskID, err
 }
 
@@ -759,12 +775,13 @@ func (e *Engine) Run(ctx context.Context, ws, id uuid.UUID, epoch int64) error {
 		err = e.realtimePipeline(runCtx, ctx, t, sk)
 	case emquant.ObservationBriefVersion, emquant.ConversationObservationVersion, MixedObservationVersion:
 		err = e.observationPipeline(runCtx, parent, t, sk)
-	case CloseResearchVersion, CloseCompanyVersion, CloseDisclosureVersion, CloseUnifiedVersion, ConversationCloseVersion:
-		if err = e.withCloseRights(runCtx, func() error { return nil }); err == nil {
+	default:
+		if IsCloseResearchVersion(t.Version) {
+			err = e.withCloseRights(runCtx, func() error { return nil })
+		}
+		if err == nil {
 			err = e.pipeline(runCtx, parent, t, sk)
 		}
-	default:
-		err = e.pipeline(runCtx, parent, t, sk)
 	}
 	var ab *abstainError
 	switch {

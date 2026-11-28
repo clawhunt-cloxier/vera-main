@@ -222,6 +222,17 @@ func TestAdminUsageReportAndReconcile(t *testing.T) {
 	if _, err := r.run("usage", "reconcile", "--release", unk.String(), "--cost", "0.5"); err == nil {
 		t.Fatal("manually reconciled call reconciled twice")
 	}
+	private := call(ws(alice), "UNKNOWN", "2026-11-07T10:00:00Z", "1", "")
+	if _, err := r.pool.Exec(ctx, `UPDATE model_calls SET status='RECONCILED', cost_usd=0,
+		content_erased_at=now(), auto_released_at=now() WHERE id=$1`, private); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.run("usage", "reconcile", "--release", private.String(), "--cost", "0.3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.run("usage", "reconcile", "--release", private.String(), "--cost", "0.4"); err == nil {
+		t.Fatal("released private call reconciled twice")
+	}
 	if _, err := r.run("task", "inspect", uuid.NewString()); err == nil {
 		t.Fatal("inspect of a missing task succeeded")
 	}

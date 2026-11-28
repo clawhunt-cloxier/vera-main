@@ -134,7 +134,7 @@ func (a *App) build(ctx context.Context) error {
 		}
 		mp := model.Profile{Name: name, Adapter: p.Adapter, BaseURL: p.BaseURL, ModelID: p.ModelID, APIKey: p.APIKey, PriceTable: p.PriceTable,
 			Temperature: p.Temperature, Thinking: p.Thinking, ExtraBody: p.ExtraBody, Timeout: timeout, MaxOutput: p.MaxOutput,
-			Concurrency: p.Concurrency}
+			Concurrency: p.Concurrency, AllowEducationSearch: name == "router" && c.ConversationWebSearch}
 		if mp.ModelID == "" {
 			mp.ModelID = "vera-" + p.Adapter
 		}
@@ -173,6 +173,10 @@ func (a *App) build(ctx context.Context) error {
 		a.Engine.Skills = harness.UnifiedCloseSkills()
 		a.Engine.WithCloseResearchUse = a.Store.WithResearchUse
 		a.Engine.CloseResearchCutoff = a.Store.PublicationCutoff
+		a.Engine.PrepareTuShareComparison = a.prepareTuShareComparison
+		a.Engine.PrepareTuShareIndicator = func(ctx context.Context, request dataservice.IndicatorPreparation) error {
+			return a.TuShare.PrepareIndicator(ctx, a.Store, request)
+		}
 		if a.Brief != nil {
 			a.Engine.ResearchSupplements = []dataservice.ResearchSupplementSource{a.Brief}
 			a.Engine.PrepareTuShareSubject = a.PrepareTuShareSubject
@@ -193,6 +197,10 @@ func (a *App) PrepareTuShareSubject(ctx context.Context, code string) error {
 		return batch, err
 	})
 	return err
+}
+
+func (a *App) prepareTuShareComparison(ctx context.Context, request dataservice.ComparisonPreparation) (dataservice.ComparisonSample, error) {
+	return a.TuShare.PrepareComparison(ctx, a.Store, request)
 }
 
 // Sync loads provider data into the store (idempotent).

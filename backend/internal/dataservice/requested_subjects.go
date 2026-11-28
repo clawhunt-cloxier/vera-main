@@ -17,6 +17,11 @@ func (s *Store) ResearchSubjectRegistered(ctx context.Context, code string) (boo
 	return s.researchSubjectRegistered(ctx, s.pool, code)
 }
 
+// AllowsIndicatorSubject applies the installation's subject policy to a short market study.
+func (s *Store) AllowsIndicatorSubject(code string) bool {
+	return s.providerID == "tushare" && (s.onDemandSubjects || s.RegisteredResearchSubject(code))
+}
+
 func (s *Store) researchSubjectRegistered(ctx context.Context, q subjectQuery, code string) (bool, error) {
 	if s.RegisteredResearchSubject(code) {
 		return true, nil

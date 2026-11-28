@@ -15,7 +15,20 @@ import (
 func (c *marketCollector) flows() error {
 	closeDate, _ := marketDate(c.day)
 	w := c.window(c.code, closeDate.AddDate(-1, 0, 0).Format(marketDay))
-	rows, err := c.rows("margin_detail", w, "ts_code trade_date rzye rzmre rzche rqyl rqye", 3000, true)
+	if err := c.margin(w); err != nil {
+		return err
+	}
+	if err := c.holderCounts(w); err != nil {
+		return err
+	}
+	if err := c.blocks(w); err != nil {
+		return err
+	}
+	return c.orderFlow(w)
+}
+
+func (c *marketCollector) margin(window map[string]string) error {
+	rows, err := c.rows("margin_detail", window, "ts_code trade_date rzye rzmre rzche rqyl rqye", 3000, true)
 	if err != nil {
 		return err
 	}
@@ -36,13 +49,7 @@ func (c *marketCollector) flows() error {
 			c.Records = append(c.Records, marketRecord(r, "flow.margin", c.code, c.code+"|"+day, "exchange", "L2", "TuShare 转提供交易所融资融券明细", &d, payload))
 		}
 	}
-	if err := c.holderCounts(w); err != nil {
-		return err
-	}
-	if err := c.blocks(w); err != nil {
-		return err
-	}
-	return c.orderFlow(w)
+	return nil
 }
 
 func (c *marketCollector) holderCounts(window map[string]string) error {

@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "reject"
+      ]
+    }
+  },
+  "required": [
+    "decision"
+  ]
+}

@@ -10,9 +10,11 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/conversation"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/dataservice/emquant"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/facts"
+	"github.com/clawhunt-cloxier/vera-main/backend/internal/harness/model"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/errs"
 	"github.com/clawhunt-cloxier/vera-main/backend/internal/platform/httpx"
 )
@@ -28,8 +30,11 @@ type conversationAction struct {
 
 type conversationTurn struct {
 	conversation.Turn
-	Scope         *conversation.Scope `json:"scope,omitempty"`
 	Plan          *ResearchPlan       `json:"plan,omitempty"`
+	NeedsSubject  bool                `json:"needs_subject,omitempty"`
+	Notice        string              `json:"notice,omitempty"`
+	WebSources    []model.WebCitation `json:"web_sources,omitempty"`
+	Scope         *conversation.Scope `json:"scope,omitempty"`
 	Candidates    []Entity            `json:"candidates,omitempty"`
 	ReferenceID   *uuid.UUID          `json:"reference_turn_id,omitempty"`
 	ReferenceKind string              `json:"reference_kind,omitempty"`
@@ -82,11 +87,12 @@ func (s *Server) sendConversation(w http.ResponseWriter, r *http.Request) error 
 		var first struct {
 			ClientMessageID uuid.UUID `json:"client_message_id"`
 			Text            string    `json:"text"`
+			Automatic       bool      `json:"automatic,omitempty"`
 		}
 		if err := httpx.Decode(r, &first); err != nil {
 			return err
 		}
-		in.ClientMessageID, in.Text = first.ClientMessageID, first.Text
+		in.ClientMessageID, in.Text, in.Automatic = first.ClientMessageID, first.Text, first.Automatic
 	}
 	_, ws := principal(r)
 	out, err := s.conversations().Send(r.Context(), conversation.Sender{Workspace: ws, Channel: "web"}, conv, in)
@@ -123,6 +129,9 @@ func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) error
 		items = items[:n]
 		next = encodeCursor(items[n-1].UpdatedAt, items[n-1].ID)
 	}
+	if slices.ContainsFunc(items, func(item conversation.Summary) bool { return item.TitlePending }) {
+		w.Header().Set("Retry-After", "2")
+	}
 	httpx.JSON(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": next})
 	return nil
 }
@@ -154,10 +163,11 @@ func (s *Server) getConversation(w http.ResponseWriter, r *http.Request) error {
 		older = &turns[n-1].Ordinal
 	}
 	items := make([]conversationTurn, 0, len(turns))
+	if header.TitlePending {
+		w.Header().Set("Retry-After", "2")
+	}
 	for _, t := range turns {
 		out := turnView(t)
-		// Only the newest turn can accept a pending action. Fetch its plan
-		// from the turn endpoint to avoid multiple licensed reads per page.
 		items = append(items, out)
 		if turnInProgress(t) {
 			w.Header().Set("Retry-After", "2")
@@ -173,7 +183,6 @@ func (s *Server) getConversationTurn(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return err
 	}
-	_, ws := principal(r)
 	out := turnView(t)
 	if turnInProgress(t) {
 		w.Header().Set("Retry-After", "2")
@@ -191,6 +200,7 @@ func (s *Server) getConversationTurn(w http.ResponseWriter, r *http.Request) err
 		}
 	}
 	if t.State == "confirm" && t.PlanID != nil {
+		_, ws := principal(r)
 		plan, err := s.Engine.LoadPlan(r.Context(), ws, *t.PlanID)
 		if err != nil {
 			return err
@@ -215,6 +225,13 @@ func (s *Server) getConversationTurn(w http.ResponseWriter, r *http.Request) err
 
 func turnView(t conversation.Turn) conversationTurn {
 	out := conversationTurn{Turn: t, ReferenceID: t.Reference(), ReferenceKind: t.ReferenceKind(), IsBrief: t.Brief, ResultReady: t.ReportID != nil && t.ReportVersion != nil || t.Reference() != nil}
+	out.NeedsSubject = t.NeedsSubject()
+	out.WebSources = t.WebSources()
+	if t.AdviceDeclined() {
+		out.Notice = "本轮仅交付可核验的历史研究。"
+	} else if t.SearchWithoutSources() {
+		out.Notice = "本轮没有可引用的网页来源。"
+	}
 	if scope := t.Scope(); scope.Skill != "" {
 		out.Scope = &scope
 	}
@@ -342,11 +359,15 @@ func (s *Server) conversationResult(w http.ResponseWriter, r *http.Request) erro
 			}
 		}
 	}
+	claimLimit := 3
+	if harness.IsComparisonVersion(doc.SkillVersion) {
+		claimLimit = dataservice.ComparisonLineLimit
+	}
 	for _, ref := range refs {
 		if c, ok := claimByRef[ref]; ok {
 			claims = append(claims, c)
 		}
-		if len(claims) == 3 {
+		if len(claims) == claimLimit {
 			break
 		}
 	}
