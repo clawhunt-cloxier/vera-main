@@ -65,7 +65,7 @@ func (roles stockSubjectRoles) normalizeMentions(question string, mentions []str
 			continue
 		}
 		normalized := strings.ToLower(mention)
-		if match := parentheticalStockCode.FindStringSubmatchIndex(normalized); match != nil && match[1] == len(normalized) {
+		if match := parentheticalStockCode.FindStringSubmatchIndex(normalized); len(match) >= 4 && match[1] == len(normalized) {
 			name := strings.TrimSpace(normalized[:match[0]])
 			code := normalized[match[2]:match[3]]
 			var group *stockIdentityGroup

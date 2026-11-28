@@ -224,7 +224,7 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 	if in.Scope.SubjectID != uuid.Nil && shortStockResearch {
 		// A code explicitly requested as the replacement must be accounted
 		// for even if the router omitted it and it is not in the catalog.
-		if match := stockSwitchCode.FindStringSubmatch(strings.TrimSpace(turn.Text)); match != nil &&
+		if match := stockSwitchCode.FindStringSubmatch(strings.TrimSpace(turn.Text)); len(match) >= 2 &&
 			containsSubject(turn.Text, match[1]) {
 			entities, err := s.Entities(ctx, []uuid.UUID{in.Scope.SubjectID})
 			if err != nil {
