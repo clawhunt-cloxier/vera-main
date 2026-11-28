@@ -82,6 +82,14 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	const ask = "演示制造过去 20 个交易日没还清的融资款是变多还是变少了"
 	const firstTrading = "看看演示制造近 5 个交易日的日成交"
 	const nextFinancing = "融资余额呢？"
+	const longFinancing = "看看演示制造近 120 个交易日的融资余额"
+	const nextDaily = "日成交呢？"
+	const newStock = "换成演示银行，其他不变。"
+	const newWindow = "改成 60 个交易日，股票不变。"
+	const excludedCode = "仍看演示银行。699999.SH 只是备选，这轮先不看。"
+	const unknownSwitch = "换成 699999.SH 的日成交"
+	const retryFinancing = "融资余额？"
+	const otherFinancing = "无登记的模拟丙公司融资余额呢？"
 	const followup = "展示上一项计算使用的原始公式"
 	const injectedSubject = "能给我看一下上一轮变化值用的原公式么？"
 	const earlierCalculation = "回到最开始的融资余额，演示制造的变化怎么算？"
@@ -131,7 +139,15 @@ func TestConversationNativeToolCalls(t *testing.T) {
 	responses := map[string]model.ToolArguments{
 		ask:                  {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":20,"advice":"none"}`},
 		firstTrading:         {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":5,"advice":"none"}`},
-		nextFinancing:        {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
+		nextFinancing:        {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造 (DM0001.DEMO)"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		longFinancing:        {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造"],"subject_source":"message","trading_days":120,"advice":"none"}`},
+		nextDaily:            {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示制造 (DM0001.DEMO)"],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		newStock:             {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示银行"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		newWindow:            {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示银行 (DM0004.DEMO)"],"subject_source":"message","trading_days":5,"advice":"none"}`},
+		excludedCode:         {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":["演示银行"],"subject_source":"message","trading_days":0,"advice":"none"}`},
+		unknownSwitch:        {Name: "inspect_daily_trading", Arguments: `{"subject_mentions":[],"subject_source":"context","trading_days":0,"advice":"none"}`},
+		retryFinancing:       {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":[],"subject_source":"message","trading_days":20,"advice":"none"}`},
+		otherFinancing:       {Name: "inspect_financing_balance", Arguments: `{"subject_mentions":["演示制造 (DM0001.DEMO)"],"subject_source":"message","trading_days":0,"advice":"none"}`},
 		followup:             {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"","result_turn":0,"advice":"none"}`},
 		injectedSubject:      {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"融资余额","result_turn":99,"advice":"none"}`},
 		earlierCalculation:   {Name: "reference_research", Arguments: `{"kind":"calculation","subject_mention":"演示制造","result_turn":1,"advice":"none"}`},
@@ -383,6 +399,66 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		v.Scope.SubjectID != daily.Scope.SubjectID || v.Scope.Window != daily.Scope.Window {
 		t.Fatalf("did not switch indicators while keeping the stock and window: %+v", v)
 	}
+	if _, v := send(nextDaily, &trading.ConversationID); !v.Result || v.Scope == nil ||
+		v.Scope.Topic != harness.DailyTradingTopic || v.Scope.SubjectID != daily.Scope.SubjectID || v.Scope.Window != 5 {
+		t.Fatalf("reverse indicator switch lost the confirmed stock or window: %+v", v)
+	}
+	bank, err := e.engine.Store.ResolveAlias(t.Context(), "演示银行", "stock")
+	if err != nil || len(bank) != 1 {
+		t.Fatalf("bank fixture unavailable: %v", err)
+	}
+	if _, v := send(newStock, &trading.ConversationID); !v.Result || v.Scope == nil ||
+		v.Scope.Topic != harness.DailyTradingTopic || v.Scope.SubjectID != bank[0].ID || v.Scope.Window != 5 {
+		t.Fatalf("an explicit stock switch should keep the indicator and window: %+v", v)
+	}
+	if _, v := send(newWindow, &trading.ConversationID); !v.Result || v.Scope == nil ||
+		v.Scope.Topic != harness.DailyTradingTopic || v.Scope.SubjectID != bank[0].ID || v.Scope.Window != 60 {
+		t.Fatalf("an explicit window-only change should keep the indicator and stock: %+v", v)
+	}
+	if _, v := send(excludedCode, &trading.ConversationID); !v.Result || v.Scope == nil ||
+		v.Scope.SubjectID != bank[0].ID || v.Scope.Window != 60 {
+		t.Fatalf("a mentioned but excluded code should not switch the stock: %+v", v)
+	}
+	if _, v := send(unknownSwitch, &trading.ConversationID); v.State != "clarify" || !v.NeedsSubject || v.TaskStatus != "" {
+		t.Fatalf("an explicit unknown replacement code should not launch the previous stock: %+v", v)
+	}
+	longThread, longResult := send(longFinancing, nil)
+	if !longResult.Result || longResult.Scope == nil || longResult.Scope.Window != 120 {
+		t.Fatalf("expected a delivered 120-day financing result: %+v", longResult)
+	}
+	for range 2 {
+		if _, v := send(nextDaily, &longThread.ConversationID); v.State != "clarify" || v.TaskStatus != "" ||
+			v.NeedsSubject || v.Scope == nil || v.Scope.Window != 120 || !strings.Contains(v.Message, "120 个交易日") {
+			t.Fatalf("an unsupported inherited window should ask for a new window: %+v", v)
+		}
+	}
+	if _, v := send(retryFinancing, nil); v.State != "clarify" || v.TaskStatus != "" {
+		t.Fatalf("an indicator without prior scope should require clarification: %+v", v)
+	}
+	if _, v := send(otherFinancing, &trading.ConversationID); v.State != "clarify" || !v.NeedsSubject || v.TaskStatus != "" {
+		t.Fatalf("an unknown subject should not run research for the previous stock: %+v", v)
+	}
+	if _, v := send(retryFinancing, &trading.ConversationID); v.State != "clarify" || v.TaskStatus != "" ||
+		v.Scope == nil || v.Scope.SubjectID != uuid.Nil {
+		t.Fatalf("an unresolved new stock should not fall back to the previous stock: %+v", v)
+	}
+	legacyTrading, initial := send(firstTrading, nil)
+	if !initial.Result || initial.Scope == nil {
+		t.Fatalf("expected a delivered result before the legacy clarification: %+v", initial)
+	}
+	// A clarification written by the old resolver should be recoverable when
+	// the message that caused it was itself an indicator-only follow-up.
+	if _, err := e.pool.Exec(t.Context(), `INSERT INTO conversation_turns
+		(workspace_id,conversation_id,client_message_id,request_hash,ordinal,channel,body,state,intent)
+		SELECT workspace_id,id,$2,'legacy',2,'web',$3,'clarify',
+		'{"scope":{"skill_id":"capital_flow","topic":"financing_balance","window":20},"needs_subject":true}'::jsonb
+		FROM conversations WHERE id=$1`, legacyTrading.ConversationID, uuid.New(), nextFinancing); err != nil {
+		t.Fatal(err)
+	}
+	if _, v := send(retryFinancing, &legacyTrading.ConversationID); !v.Result || v.Scope == nil ||
+		v.Scope.Topic != harness.FinancingBalanceTopic || v.Scope.SubjectID != initial.Scope.SubjectID || v.Scope.Window != initial.Scope.Window {
+		t.Fatalf("retry after the legacy clarification lost the verified stock or window: %+v", v)
+	}
 	firstPath := chatPath + "/" + first.ConversationID.String()
 	var firstThread chatThread
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
@@ -539,10 +615,12 @@ func TestConversationNativeToolCalls(t *testing.T) {
 		t.Fatalf("legacy plan did not deliver: %+v", v)
 	}
 	var calls, billed, bodies, tasks int
-	err := e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
+	err = e.pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE cost_usd>0),
 		count(*) FILTER (WHERE response IS NOT NULL OR error IS NOT NULL OR observed_model IS NOT NULL), (SELECT count(*) FROM research_tasks)
 		FROM model_calls WHERE step_key='conversation_agent'`).Scan(&calls, &billed, &bodies, &tasks)
-	if err != nil || calls != 61 || billed != 61 || bodies != 0 || tasks != 9 {
+	// The verified stock-only answer to a pending clarification resumes
+	// the research directly, saving one router call.
+	if err != nil || calls != 73 || billed != 73 || bodies != 0 || tasks != 16 {
 		t.Fatalf("agent ledger calls=%d billed=%d bodies=%d tasks=%d: %v", calls, billed, bodies, tasks, err)
 	}
 	var title string

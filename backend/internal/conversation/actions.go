@@ -76,7 +76,7 @@ func (s Service) Choose(ctx context.Context, ws, conv, turn, subject uuid.UUID, 
 			len(in.Candidates) > 0 && !slices.Contains(in.Candidates, subject) {
 			return errs.Unprocessable("SUBJECT_NOT_SUPPORTED", "请选择该研究范围内的对象")
 		}
-		if in.Scope.Window != 0 && !slices.Contains(spec.Windows, in.Scope.Window) {
+		if in.NeedsWindow || in.Scope.Window != 0 && !slices.Contains(spec.Windows, in.Scope.Window) {
 			return errs.Unprocessable("INVALID_PARAMS", "请先明确交易日窗口")
 		}
 		in.Scope.SubjectID = subject

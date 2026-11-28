@@ -126,6 +126,27 @@ func (s Service) runTool(ctx context.Context, args resolveArgs, turn Turn, state
 
 func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn, state agentContext, tool researchTool, request researchRequest) error {
 	previous := state.priorScope()
+	windowChange := 0
+	if isStockIndicator(tool.Topic) {
+		windowChange = windowOnlyTradingDays(turn.Text)
+	}
+	if windowChange > 0 || isIndicatorOnlyQuestion(turn.Text, tool.Topic) {
+		// A prior clarification can be retried only when it also left the
+		// stock unchanged. An unresolved new stock must stay unresolved.
+		if previous.SubjectID == uuid.Nil && state.Draft.NeedsSubject &&
+			previous.Topic == tool.Topic &&
+			(isIndicatorOnlyQuestion(state.DraftText, tool.Topic) || windowOnlyTradingDays(state.DraftText) > 0) {
+			previous = state.Previous
+		}
+		if previous.SubjectID != uuid.Nil && isStockIndicator(previous.Topic) {
+			if windowChange > 0 {
+				tool.Skill, tool.Topic = previous.Skill, previous.Topic
+			}
+			request.SubjectSource = "context"
+			request.SubjectMentions = nil
+			request.TradingDays = windowChange
+		}
+	}
 	scope := researchScope(tool, request, previous)
 	sameTopic := scope.Skill == previous.Skill && scope.Topic == previous.Topic
 	in := intent{Scope: scope, AdviceDeclined: request.Advice == "declined" || (sameTopic && state.Draft.AdviceDeclined)}
@@ -137,7 +158,27 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 		return s.update(ctx, args, "unavailable", "当前环境尚未开放这项研究。", in)
 	}
 
-	if len(request.SubjectMentions) > 4 || (request.SubjectSource == "context" && len(request.SubjectMentions) > 0) {
+	if len(request.SubjectMentions) > 4 {
+		in.Scope.SubjectID = uuid.Nil
+		return clarify("请明确这次要研究的证券、行业或市场。")
+	}
+	shortStockResearch := isStockIndicator(scope.Topic)
+	question := turn.Text
+	var roles stockSubjectRoles
+	if shortStockResearch {
+		var err error
+		question = strings.ToLower(question)
+		roles, err = s.stockResearchSubjectRoles(ctx, question, spec.Subjects)
+		if err != nil {
+			return err
+		}
+		if roles.conflicted {
+			request.SubjectMentions = nil
+		} else {
+			request.SubjectMentions = roles.normalizeMentions(question, request.SubjectMentions)
+		}
+	}
+	if request.SubjectSource == "context" && len(request.SubjectMentions) > 0 {
 		in.Scope.SubjectID = uuid.Nil
 		return clarify("请明确这次要研究的证券、行业或市场。")
 	}
@@ -148,6 +189,7 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 	if err != nil {
 		return err
 	}
+	unresolved = unresolved || roles.conflicted
 	if len(ids) == 1 && !unresolved {
 		in.Scope.SubjectID = ids[0]
 	}
@@ -155,14 +197,22 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 		in.Scope.SubjectID = uuid.Nil
 		in.Candidates = ids
 	}
+	if shortStockResearch && roles.excludes(in.Scope.SubjectID) {
+		in.Scope.SubjectID = uuid.Nil
+	}
 	if in.Scope.SubjectID != uuid.Nil {
-		kinds := spec.Subjects
-		if scope.Mode == "company_industry" {
-			kinds = []string{"stock"}
-		}
-		conflicts, err := s.subjectConflicts(ctx, turn.Text, kinds, in.Scope.SubjectID)
-		if err != nil {
-			return err
+		var conflicts []uuid.UUID
+		if shortStockResearch {
+			conflicts = conflictingSubjects(roles.possible, []uuid.UUID{in.Scope.SubjectID})
+		} else {
+			kinds := spec.Subjects
+			if scope.Mode == "company_industry" {
+				kinds = []string{"stock"}
+			}
+			conflicts, err = s.scopeConflicts(ctx, turn.Text, kinds, []uuid.UUID{in.Scope.SubjectID})
+			if err != nil {
+				return err
+			}
 		}
 		if len(conflicts) > 0 {
 			ids = append([]uuid.UUID{in.Scope.SubjectID}, conflicts...)
@@ -170,28 +220,69 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 			in.Scope.SubjectID = uuid.Nil
 		}
 	}
+	unverifiedReplacement := false
+	if in.Scope.SubjectID != uuid.Nil && shortStockResearch {
+		// A code explicitly requested as the replacement must be accounted
+		// for even if the router omitted it and it is not in the catalog.
+		if match := stockSwitchCode.FindStringSubmatch(strings.TrimSpace(turn.Text)); match != nil &&
+			containsSubject(turn.Text, match[1]) {
+			entities, err := s.Entities(ctx, []uuid.UUID{in.Scope.SubjectID})
+			if err != nil {
+				return err
+			}
+			if !strings.EqualFold(entities[in.Scope.SubjectID].Code, match[1]) {
+				in.Scope.SubjectID = uuid.Nil
+				unverifiedReplacement = true
+			}
+		}
+	}
 
-	sameStockBrief := request.SubjectSource == "context" && scope.Topic != "" && previous.Topic != ""
-	canInheritWindow := (sameTopic || sameStockBrief) && slices.Contains(spec.Windows, previous.Window)
+	sameStockBrief := scope.Topic != "" && previous.Topic != "" &&
+		in.Scope.SubjectID != uuid.Nil && in.Scope.SubjectID == previous.SubjectID
+	// A short stock query can change both the stock and the indicator while
+	// keeping the window. Check support after composing all three fields.
+	keepPriorWindow := shortStockResearch && isStockIndicator(previous.Topic) && previous.Window > 0
+	canInheritWindow := (sameTopic || sameStockBrief || keepPriorWindow) && slices.Contains(spec.Windows, previous.Window)
+	window, validWindow := parseTradingDayWindow(turn.Text)
+	requestedDays := request.TradingDays
+	needsWindow := false
+	if shortStockResearch && validWindow && window.days == 0 {
+		// A verified instruction to keep the window refers to the previous
+		// value, not to a number proposed independently by the router.
+		switch {
+		case window.rejectsPrior:
+			needsWindow = true
+		case window.keepsPrior && (canInheritWindow || keepPriorWindow):
+			scope.Window, requestedDays = previous.Window, 0
+		case window.keepsPrior || state.Draft.NeedsWindow:
+			needsWindow = true
+		}
+	}
 	if scope.Window == 0 {
 		scope.Window = spec.DefaultWindow
-		if canInheritWindow {
+		if canInheritWindow || keepPriorWindow {
 			scope.Window = previous.Window
 		}
 	}
 	in.Scope.Window = scope.Window
-	requestedDays := request.TradingDays
-	if canInheritWindow && requestedDays == previous.Window {
+	if (canInheritWindow || keepPriorWindow) && requestedDays == previous.Window {
 		// A model may echo a verified window when the user only supplies the stock.
 		// Explicit dates still have to match the text of this turn.
 		requestedDays = 0
 	}
-	if (scope.Window != 0 && !slices.Contains(spec.Windows, scope.Window)) ||
+	if needsWindow || (scope.Window != 0 && !slices.Contains(spec.Windows, scope.Window)) ||
 		!matchesTradingDays(turn.Text, requestedDays, scope.Window) {
 		// Keep the already verified window and subject for the clarification.
 		in.Scope.Window = spec.DefaultWindow
 		if slices.Contains(spec.Windows, previous.Window) && previous.Skill == scope.Skill && previous.Topic == scope.Topic {
 			in.Scope.Window = previous.Window
+		}
+		if shortStockResearch {
+			in.NeedsWindow = true
+			in.Scope.Window = 0
+			if !window.rejectsPrior && (canInheritWindow || keepPriorWindow) {
+				in.Scope.Window = previous.Window
+			}
 		}
 		if len(spec.Windows) == 0 {
 			return clarify("这项研究按各章节的已披露数据生成。请说明要继续深度研究，或改查具体交易指标。")
@@ -200,7 +291,12 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 		for _, days := range spec.Windows {
 			values = append(values, strconv.Itoa(days))
 		}
-		return clarify("请选择 " + strings.Join(values, "、") + " 个交易日。")
+		choices := "请选择 " + strings.Join(values, "、") + " 个交易日。"
+		if requestedDays == 0 && keepPriorWindow && !canInheritWindow {
+			in.Scope.Window = previous.Window
+			return clarify(fmt.Sprintf("这个指标不支持上一轮的 %d 个交易日。%s", previous.Window, choices))
+		}
+		return clarify(choices)
 	}
 	if scope.Mode != "" && !slices.Contains(spec.Modes, scope.Mode) {
 		in.Scope.Mode = ""
@@ -208,12 +304,34 @@ func (s Service) startResearch(ctx context.Context, args resolveArgs, turn Turn,
 	}
 	if in.Scope.SubjectID == uuid.Nil {
 		in.NeedsSubject = true
+		if unverifiedReplacement {
+			return clarify("无法确认新指定的股票。请核对证券代码或从目录中选择。")
+		}
+		if roles.conflicted {
+			return clarify("证券名称和代码无法确认属于同一只股票。请核对要查询的名称或代码。")
+		}
 		if len(ids) > 1 || (len(ids) > 0 && unresolved) {
 			return clarify("本轮研究需要一个明确的研究对象。请选择或补充对象。")
 		}
 		return clarify("请补充或搜索研究对象的名称或代码。")
 	}
 	return s.plan(ctx, args, in, turn)
+}
+
+func isIndicatorOnlyQuestion(text, topic string) bool {
+	text = strings.TrimSpace(strings.TrimRight(trimQuestion(text), "呢吗啊呀"))
+	switch topic {
+	case harness.FinancingBalanceTopic:
+		return text == "融资余额"
+	case harness.DailyTradingTopic:
+		return slices.Contains([]string{"日成交", "日成交额", "日成交量", "成交额", "成交量"}, text)
+	default:
+		return false
+	}
+}
+
+func isStockIndicator(topic string) bool {
+	return topic == harness.DailyTradingTopic || topic == harness.FinancingBalanceTopic
 }
 
 func researchScope(tool researchTool, request researchRequest, previous Scope) Scope {
@@ -312,15 +430,15 @@ func scopeSubjects(scope Scope) []uuid.UUID {
 
 // A model can select a tool, but must not silently ignore another explicit
 // name or code. These catalog matches can only send the turn to clarification.
-func (s Service) subjectConflicts(ctx context.Context, text string, kinds []string, selected uuid.UUID) ([]uuid.UUID, error) {
-	return s.scopeConflicts(ctx, text, kinds, []uuid.UUID{selected})
-}
-
 func (s Service) scopeConflicts(ctx context.Context, text string, kinds []string, selected []uuid.UUID) ([]uuid.UUID, error) {
 	spans, err := s.explicitSubjectSpans(ctx, text, kinds)
 	if err != nil {
 		return nil, err
 	}
+	return conflictingSubjects(spans, selected), nil
+}
+
+func conflictingSubjects(spans []subjectSpan, selected []uuid.UUID) []uuid.UUID {
 	var others []uuid.UUID
 	for _, span := range spans {
 		if !slices.Contains(selected, span.id) && !slices.Contains(others, span.id) {
@@ -330,7 +448,7 @@ func (s Service) scopeConflicts(ctx context.Context, text string, kinds []string
 			}
 		}
 	}
-	return others, nil
+	return others
 }
 
 type subjectSpan struct {

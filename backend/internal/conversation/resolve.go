@@ -49,17 +49,18 @@ func (s Service) Entities(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]d
 	return s.Engine.Store.Entities(ctx, ids)
 }
 
-func (s Service) lastClarification(ctx context.Context, args resolveArgs, ordinal int64) (intent, error) {
+func (s Service) lastClarification(ctx context.Context, args resolveArgs, ordinal int64) (intent, string, error) {
 	var draft intent
+	var text string
 	err := db.InWorkspace(ctx, s.Engine.Pool, args.Workspace, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT t.intent FROM conversation_turns t JOIN conversations c
+		return tx.QueryRow(ctx, `SELECT t.intent,t.body FROM conversation_turns t JOIN conversations c
 			ON c.workspace_id=t.workspace_id AND c.id=t.conversation_id WHERE t.conversation_id=$1
-			AND t.ordinal=$2 AND t.state='clarify' AND t.intent IS NOT NULL AND `+visible, args.Conversation, ordinal-1).Scan(&draft)
+			AND t.ordinal=$2 AND t.state='clarify' AND t.intent IS NOT NULL AND `+visible, args.Conversation, ordinal-1).Scan(&draft, &text)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return intent{}, nil
+		return intent{}, "", nil
 	}
-	return draft, err
+	return draft, text, err
 }
 
 // contextScope is the workspace scoped point for adding opted-in memory and display preferences.

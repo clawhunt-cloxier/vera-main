@@ -84,6 +84,7 @@ type intent struct {
 	Preparing            bool                `json:"preparing,omitempty"`
 	FinanceAnswer        bool                `json:"finance_answer,omitempty"`
 	NeedsSubject         bool                `json:"needs_subject,omitempty"`
+	NeedsWindow          bool                `json:"needs_window,omitempty"`
 	AdviceDeclined       bool                `json:"advice_declined,omitempty"`
 	WebSources           []model.WebCitation `json:"web_sources,omitempty"`
 	SearchWithoutSources bool                `json:"search_without_sources,omitempty"`

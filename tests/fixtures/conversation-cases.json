@@ -149,6 +149,10 @@
     {
       "input": "融资余额呢？",
       "context": "previous five-trading-day daily trading result for the same stock",
+      "model_attempts": {
+        "tool": "inspect_financing_balance",
+        "arguments": {"subject_mentions": ["演示制造 (DM0001.DEMO)"], "subject_source": "message", "trading_days": 0, "advice": "none"}
+      },
       "expect": {
         "tool": "inspect_financing_balance",
         "subject_source": "context",

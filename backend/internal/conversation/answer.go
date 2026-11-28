@@ -43,14 +43,15 @@ const answerPrompt = `你是 Vera，金融投研助手。根据最后一条用�
 - “如果公司亏损呢？”若紧接对市盈率的解释，应理解为亏损时如何解读市盈率的通用问题。按可用工具的说明查证和回答。
 
 4. 补全研究参数
-- subject_mentions 只抄写最后一条消息里的完整证券、行业或市场名称、代码，涉及多个对象时一并抄写。例：“演示制造近五个交易日的成交金额” → subject_source=message、subject_mentions=["演示制造"]、trading_days=5。禁止填历史消息里的名称。沿用会话标的时用 subject_source=context、subject_mentions=[]。需要标的但缺失时用 subject_source=message、subject_mentions=[]。
-- trading_days 用本轮消息明确写出的交易日数量。未写交易日数或要求沿用原窗口时传 0，由服务按会话范围选择。比如上一轮已问清研究指标和窗口，只欠标的，本轮收到单独的股票名或完整代码时，继续该指标，填 trading_days=0。证券代码是标的。日历日期或其它未支持期间传 -1，禁止自行换算。深度研究按已披露期间处理，明确指定不支持的期间时用 kind=unavailable。用户要求公司与所属行业联合报告或明确沿用这个范围时，用 coverage=company_industry，否则用 coverage=subject。
+- subject_mentions 只抄写最后一条消息里用户要求查询的完整证券、行业或市场名称、代码。涉及多个实际要查的对象时一并抄写。仅提及、明确排除或留作备选的对象不写入。例：“演示制造近五个交易日的成交金额” → subject_source=message、subject_mentions=["演示制造"]、trading_days=5。禁止填历史消息里的名称。沿用会话标的时用 subject_source=context、subject_mentions=[]。需要标的但缺失时用 subject_source=message、subject_mentions=[]。
+- trading_days 用本轮消息明确写出的交易日数量。未写交易日数或要求沿用原窗口时传 0，由服务从上下文补全。个股短研究即使同时改了股票和指标，仍只在本轮明确改天数时填新数字。比如上一轮已问清研究指标和窗口，只欠标的，本轮收到单独的股票名或完整代码时，继续该指标，填 trading_days=0。证券代码是标的。日历日期或其它未支持期间传 -1，禁止自行换算。深度研究按已披露期间处理，明确指定不支持的期间时用 kind=unavailable。用户要求公司与所属行业联合报告或明确沿用这个范围时，用 coverage=company_industry，否则用 coverage=subject。
 - 例：“给演示制造做完整个股报告” → analyze_stock({"subject_mentions":["演示制造"],"subject_source":"message","trading_days":0,"advice":"none"})。“做演示制造的综合资金报告”使用 analyze_capital_flow，窗口未指定同样传 0。
 - 参考函数的参数定义，传齐字段，只发送一个调用。`
 
 type agentContext struct {
 	Previous   Scope
 	Draft      intent
+	DraftText  string
 	References []Turn
 }
 
@@ -102,7 +103,7 @@ func (s Service) agentState(ctx context.Context, args resolveArgs, turn Turn) (a
 		return state, err
 	}
 	if turn.ReplyTo == nil {
-		state.Draft, err = s.lastClarification(ctx, args, turn.Ordinal)
+		state.Draft, state.DraftText, err = s.lastClarification(ctx, args, turn.Ordinal)
 		if err != nil {
 			return state, err
 		}
@@ -152,6 +153,12 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 	}
 	state, err := s.agentState(ctx, args, turn)
 	if err != nil {
+		return err
+	}
+	if handled, err := s.fillPendingStock(ctx, args, turn, state); handled || err != nil {
+		return err
+	}
+	if handled, err := s.clarifyMissingStock(ctx, args, turn, state, true); handled || err != nil {
 		return err
 	}
 	history, err := s.answerContext(ctx, args, turn.Ordinal)
@@ -240,6 +247,11 @@ func (s Service) runAgent(ctx context.Context, args resolveArgs, turn Turn) erro
 		}
 		if err != nil || answer == nil {
 			return s.fail(ctx, args, "这次未能生成可展示的回复，请稍后重试。")
+		}
+	}
+	if answer.Kind == "clarify" && evidence == nil {
+		if handled, err := s.clarifyMissingStock(ctx, args, turn, state, false); handled || err != nil {
+			return err
 		}
 	}
 	replyState := "answer"
